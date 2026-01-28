@@ -1,0 +1,12 @@
+cat > .gitignore <<'EOF'
+.env
+bot.log
+*.log
+__pycache__/
+*.pyc
+race_state.json
+bot_config.json
+reaction_roles.json
+venv/
+.venv/
+EOF

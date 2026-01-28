@@ -1,0 +1,26 @@
+{
+  "channel_id": 1368328224135974972,
+  "message_id": 1370906702932873218,
+  "emoji_to_role": {
+    "<:Piastri:1370873786932400178>": "Piastri",
+    "<:Norris:1370875219798917180>": "Norris",
+    "<:Russell:1370875216271642654>": "Russell",
+    "<:Antonelli:1370875212714999818>": "Antonelli",
+    "<:Verstappen:1370875867533938889>": "Verstappen",
+    "<:Tsunoda:1370875863201222697>": "Tsunoda",
+    "<:Leclerc:1370875866661261362>": "Leclerc",
+    "<:Hamilton:1370875865763807377>": "Hamilton",
+    "<:Albon:1370875209317486694>": "Albon",
+    "<:Sainz:1370875861502263457>": "Sainz",
+    "<:Ocon:1370875864413241364>": "Ocon",
+    "<:Bearman:1370875197527294024>": "Bearman",
+    "<:Stroll:1370875205844730047>": "Stroll",
+    "<:Alonso:1370875195648381078>": "Alonso",
+    "<:Hadjar:1370875196424192191>": "Hadjar",
+    "<:Lawson:1370875194553663518>": "Lawson",
+    "<:Gasly:1370875202409467975>": "Gasly",
+    "<:Colapinto:1370875191529574421>": "Colapinto",
+    "<:Hulkenberg:1370875198685052978>": "Hulkenberg",
+    "<:Bortoleto:1370875192439603221>": "Bortoleto"
+  }
+}
