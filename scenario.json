@@ -1,0 +1,130 @@
+{
+  "race_chaos": {
+    "meta": {
+      "title": "Bahrain GP - Race (TEST)",
+      "session": "RACE",
+      "timezone": "UTC"
+    },
+
+    "grid": [
+      { "id": "VER", "name": "Verstappen" },
+      { "id": "NOR", "name": "Norris" },
+      { "id": "PIA", "name": "Piastri" }
+    ],
+
+    "events": [
+      { "t": 0, "type": "SESSION_START", "session": "RACE", "detail": "Race start procedure" },
+      { "t": 5, "type": "GREEN", "detail": "Lights out" },
+      { "t": 60, "type": "SC", "detail": "Safety Car deployed" },
+      { "t": 120, "type": "GREEN", "detail": "Safety Car in" },
+
+      { "t": 600, "type": "CHECKERED_FLAG", "detail": "Leader has finished (chequered flag)" },
+      { "t": 620, "type": "CLASSIFICATION_READY", "detail": "All classified finishers are home" },
+      { "t": 630, "type": "SESSION_END", "detail": "Session ended" }
+    ],
+
+    "classification": {
+      "leader_finish_t": 600,
+      "final_ready_t": 620,
+
+      "results": [
+        { "pos": 1, "driver_id": "VER", "status": "FINISHED", "gap": "0.000" },
+        { "pos": 2, "driver_id": "NOR", "status": "FINISHED", "gap": "+3.421" },
+        { "pos": 3, "driver_id": "PIA", "status": "DNF", "gap": null, "reason": "Accident" }
+      ]
+    }
+  },
+
+  "quali_drama": {
+    "meta": {
+      "title": "Bahrain GP - Qualifying (TEST)",
+      "session": "QUALI",
+      "timezone": "UTC"
+    },
+
+    "grid": [
+      { "id": "VER", "name": "Verstappen" },
+      { "id": "NOR", "name": "Norris" },
+      { "id": "PIA", "name": "Piastri" },
+      { "id": "LEC", "name": "Leclerc" }
+    ],
+
+    "segments": [
+      { "name": "Q1", "start_t": 0, "end_t": 420, "cut": 15 },
+      { "name": "Q2", "start_t": 450, "end_t": 870, "cut": 10 },
+      { "name": "Q3", "start_t": 900, "end_t": 1140, "cut": null }
+    ],
+
+    "events": [
+      { "t": 0, "type": "SESSION_START", "session": "QUALI", "detail": "Qualifying begins" },
+
+      { "t": 0, "type": "SEGMENT_START", "segment": "Q1", "detail": "Q1 green" },
+
+      { "t": 95, "type": "PURPLE_SECTOR", "driver_id": "VER", "sector": 1, "segment": "Q1" },
+      { "t": 130, "type": "PURPLE_SECTOR", "driver_id": "NOR", "sector": 2, "segment": "Q1" },
+      { "t": 155, "type": "PURPLE_SECTOR", "driver_id": "VER", "sector": 3, "segment": "Q1", "lap": "1:30.112" },
+
+      { "t": 200, "type": "YELLOW", "segment": "Q1", "detail": "Yellow flag sector 2" },
+      { "t": 420, "type": "SEGMENT_END", "segment": "Q1", "detail": "Q1 complete" },
+
+      { "t": 450, "type": "SEGMENT_START", "segment": "Q2", "detail": "Q2 green" },
+
+      { "t": 520, "type": "PURPLE_SECTOR", "driver_id": "LEC", "sector": 1, "segment": "Q2" },
+      { "t": 555, "type": "PURPLE_SECTOR", "driver_id": "VER", "sector": 2, "segment": "Q2" },
+      { "t": 590, "type": "PURPLE_SECTOR", "driver_id": "VER", "sector": 3, "segment": "Q2", "lap": "1:29.998" },
+
+      { "t": 700, "type": "RED", "segment": "Q2", "detail": "Red flag - spin in sector 3" },
+      { "t": 870, "type": "SEGMENT_END", "segment": "Q2", "detail": "Q2 complete" },
+
+      { "t": 900, "type": "SEGMENT_START", "segment": "Q3", "detail": "Q3 green" },
+
+      { "t": 980, "type": "PURPLE_SECTOR", "driver_id": "NOR", "sector": 1, "segment": "Q3" },
+      { "t": 1010, "type": "PURPLE_SECTOR", "driver_id": "VER", "sector": 2, "segment": "Q3" },
+      { "t": 1045, "type": "PURPLE_SECTOR", "driver_id": "VER", "sector": 3, "segment": "Q3", "lap": "1:29.842" },
+
+      { "t": 1140, "type": "SEGMENT_END", "segment": "Q3", "detail": "Q3 complete" },
+
+      { "t": 1145, "type": "RESULTS_READY", "detail": "Provisional grid set" },
+      { "t": 1160, "type": "SESSION_END", "detail": "Qualifying ended" }
+    ],
+
+    "classification": {
+      "results_ready_t": 1145,
+
+      "results": [
+        {
+          "pos": 1,
+          "driver_id": "VER",
+          "best": "1:29.842",
+          "segment": "Q3",
+          "status": "POLE",
+          "gap": "0.000"
+        },
+        {
+          "pos": 2,
+          "driver_id": "NOR",
+          "best": "1:29.990",
+          "segment": "Q3",
+          "status": "QUALIFIED",
+          "gap": "+0.148"
+        },
+        {
+          "pos": 3,
+          "driver_id": "LEC",
+          "best": "1:30.102",
+          "segment": "Q3",
+          "status": "QUALIFIED",
+          "gap": "+0.260"
+        },
+        {
+          "pos": 16,
+          "driver_id": "PIA",
+          "best": "1:31.401",
+          "segment": "Q1",
+          "status": "OUT",
+          "note": "Track limits"
+        }
+      ]
+    }
+  }
+}
