@@ -579,6 +579,267 @@ async def periodic_reaction_role_check():
 
         await asyncio.sleep(interval_min * 60)
 
+# ============================================================
+# Race Test Harness (Fake Scenarios -> later wire to Race API)
+# ============================================================
+
+import json
+from typing import Dict, Any, Optional, List, Tuple
+
+# In-memory tasks so you can stop a running test
+RACE_TEST_TASKS: Dict[int, asyncio.Task] = {}  # key: guild_id
+
+# Built-in default scenarios (config-friendly shape)
+DEFAULT_RACE_SCENARIOS: Dict[str, Dict[str, Any]] = {
+    "practice_short": {
+        "title": "Bahrain GP - FP1 (TEST)",
+        "events": [
+            {"t": 0,  "type": "SESSION_START", "session": "FP1"},
+            {"t": 2,  "type": "GREEN",         "detail": "Session green"},
+            {"t": 10, "type": "VSC",           "detail": "Virtual Safety Car deployed"},
+            {"t": 20, "type": "GREEN",         "detail": "VSC ended, green"},
+            {"t": 30, "type": "RED",           "detail": "Red flag - debris on track"},
+            {"t": 45, "type": "GREEN",         "detail": "Session resumes"},
+            {"t": 60, "type": "SESSION_END",   "detail": "FP1 complete"},
+        ],
+    },
+    "race_chaos": {
+        "title": "Bahrain GP - RACE (TEST)",
+        "events": [
+            {"t": 0,   "type": "SESSION_START", "session": "RACE"},
+            {"t": 5,   "type": "GREEN",         "detail": "Lights out - race start"},
+            {"t": 60,  "type": "SC",            "detail": "Safety Car deployed"},
+            {"t": 120, "type": "GREEN",         "detail": "Safety Car in - green"},
+            {"t": 180, "type": "RED",           "detail": "Red flag - major incident"},
+            {"t": 240, "type": "GREEN",         "detail": "Restart underway"},
+            {"t": 420, "type": "SC",            "detail": "Late Safety Car"},
+            {"t": 480, "type": "GREEN",         "detail": "Final sprint - green"},
+            {"t": 600, "type": "SESSION_END",   "detail": "Chequered flag"},
+        ],
+    },
+}
+
+EVENT_STYLE = {
+    "SESSION_START": ("🟦", "**Session started**"),
+    "SESSION_END":   ("🏁", "**Session ended**"),
+    "GREEN":         ("🟢", "**GREEN**"),
+    "SC":            ("🟡", "**SAFETY CAR**"),
+    "VSC":           ("🟠", "**VSC**"),
+    "RED":           ("🔴", "**RED FLAG**"),
+    "INFO":          ("ℹ️", "**Info**"),
+}
+
+def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
+    """
+    Loads scenarios from JSON if configured, otherwise uses defaults.
+    JSON format:
+    {
+      "practice_short": {
+        "title": "...",
+        "events": [{"t": 0, "type": "GREEN", "detail": "..."}, ...]
+      }
+    }
+    """
+    path = (os.getenv("RACE_SCENARIOS_FILE") or "").strip()
+    if not path:
+        return DEFAULT_RACE_SCENARIOS
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # Merge defaults as fallback
+        merged = dict(DEFAULT_RACE_SCENARIOS)
+        merged.update(data or {})
+        return merged
+    except Exception as e:
+        logging.error(f"[RaceTest] Failed to load scenarios from {path}: {e}")
+        return DEFAULT_RACE_SCENARIOS
+
+async def _get_forum_channel(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
+    forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
+    if not forum_id:
+        return None
+    try:
+        ch = guild.get_channel(int(forum_id))
+        if ch is None:
+            ch = await guild.fetch_channel(int(forum_id))
+        return ch
+    except Exception as e:
+        logging.error(f"[RaceTest] Could not fetch forum channel {forum_id}: {e}")
+        return None
+
+async def _ensure_test_thread(
+    guild: discord.Guild,
+    title: str,
+) -> Optional[discord.Thread]:
+    """
+    Creates a new forum post (thread) for the test run.
+    Falls back to returning None if it can't create.
+    """
+    ch = await _get_forum_channel(guild)
+    if ch is None:
+        return None
+
+    # Most common case: discord.ForumChannel
+    try:
+        if isinstance(ch, discord.ForumChannel):
+            created = await ch.create_thread(
+                name=title,
+                content=f"🧪 Race test thread created by {bot.user.mention}",
+                auto_archive_duration=1440,
+            )
+            # discord.py returns ThreadWithMessage in some versions: (thread, message)
+            if isinstance(created, tuple) and len(created) >= 1:
+                return created[0]
+            return created
+    except Exception as e:
+        logging.error(f"[RaceTest] Forum create_thread failed: {e}")
+
+    # Fallback: if it's a TextChannel, create a thread from a starter message
+    try:
+        if isinstance(ch, discord.TextChannel):
+            msg = await ch.send(f"🧪 Race test thread: **{title}**")
+            th = await msg.create_thread(name=title, auto_archive_duration=1440)
+            return th
+    except Exception as e:
+        logging.error(f"[RaceTest] Text thread creation failed: {e}")
+
+    return None
+
+async def _emit_race_event(thread: discord.Thread, event: Dict[str, Any]) -> None:
+    etype = (event.get("type") or "INFO").upper().strip()
+    emoji, label = EVENT_STYLE.get(etype, ("ℹ️", "**Info**"))
+    detail = (event.get("detail") or "").strip()
+
+    session = (event.get("session") or "").strip()
+    suffix = f" ({session})" if session and etype == "SESSION_START" else ""
+    text = f"{emoji} {label}{suffix}"
+    if detail:
+        text += f"\n{detail}"
+
+    await thread.send(text)
+
+async def _run_race_test_scenario(
+    guild: discord.Guild,
+    scenario_name: str,
+    speed: float = 1.0,
+) -> None:
+    scenarios = _load_race_scenarios()
+    scenario = scenarios.get(scenario_name)
+
+    if not scenario:
+        # Try case-insensitive match
+        for k, v in scenarios.items():
+            if k.lower() == scenario_name.lower():
+                scenario_name = k
+                scenario = v
+                break
+
+    if not scenario:
+        raise RuntimeError(f"Scenario '{scenario_name}' not found.")
+
+    title = scenario.get("title") or f"Race Test - {scenario_name}"
+    events = scenario.get("events") or []
+    if not isinstance(events, list) or not events:
+        raise RuntimeError(f"Scenario '{scenario_name}' has no events.")
+
+    # Create a new thread for each run
+    thread = await _ensure_test_thread(guild, title)
+    if thread is None:
+        raise RuntimeError("Could not create or access the race forum/thread. Check RACE_FORUM_CHANNEL_ID and bot perms.")
+
+    # Sort by t and play back
+    events_sorted = sorted(events, key=lambda e: float(e.get("t", 0)))
+    await thread.send(f"🧪 Starting scenario: **{scenario_name}**\nSpeed: **x{speed}**")
+
+    t0 = float(events_sorted[0].get("t", 0))
+    last_t = t0
+
+    for ev in events_sorted:
+        # Cooperative cancel
+        await asyncio.sleep(0)
+
+        cur_t = float(ev.get("t", last_t))
+        dt = max(0.0, cur_t - last_t)
+        last_t = cur_t
+
+        # Apply speed: smaller sleep if speed > 1
+        sleep_for = dt / max(0.01, float(speed))
+        if sleep_for > 0:
+            await asyncio.sleep(sleep_for)
+
+        await _emit_race_event(thread, ev)
+
+    await thread.send("✅ Scenario complete.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_list(ctx):
+    """List available race test scenarios."""
+    scenarios = _load_race_scenarios()
+    names = sorted(scenarios.keys())
+    await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_start(ctx, scenario: str = None, speed: float = None):
+    """
+    Start a race test scenario in the configured forum channel.
+    Usage:
+      !race_test_start practice_short
+      !race_test_start race_chaos 5
+    """
+    guild = ctx.guild
+    if not guild:
+        await ctx.send("❌ Must be run in a server.")
+        return
+
+    scenario = (scenario or os.getenv("RACE_TEST_DEFAULT_SCENARIO") or "practice_short").strip()
+    try:
+        if speed is None:
+            speed = float(os.getenv("RACE_TEST_SPEED", "1.0"))
+        speed = float(speed)
+        speed = max(0.1, min(50.0, speed))
+    except Exception:
+        speed = 1.0
+
+    # Stop any running test for this guild
+    existing = RACE_TEST_TASKS.get(guild.id)
+    if existing and not existing.done():
+        existing.cancel()
+
+    async def runner():
+        try:
+            await _run_race_test_scenario(guild, scenario, speed=speed)
+        except asyncio.CancelledError:
+            logging.info(f"[RaceTest] Cancelled scenario '{scenario}'")
+        except Exception as e:
+            logging.error(f"[RaceTest] Scenario '{scenario}' failed: {e}")
+            try:
+                await ctx.send(f"❌ Race test failed: {e}")
+            except Exception:
+                pass
+
+    task = bot.loop.create_task(runner())
+    RACE_TEST_TASKS[guild.id] = task
+
+    await ctx.send(f"🧪 Starting race test: `{scenario}` (speed x{speed})")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_stop(ctx):
+    """Stop a running race test scenario."""
+    guild = ctx.guild
+    if not guild:
+        return
+    t = RACE_TEST_TASKS.get(guild.id)
+    if t and not t.done():
+        t.cancel()
+        await ctx.send("🛑 Race test stopped.")
+    else:
+        await ctx.send("ℹ️ No race test running.")
+
+
 # ----------------------------
 # Start dashboard + run bot
 # ----------------------------
