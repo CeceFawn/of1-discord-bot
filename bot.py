@@ -625,8 +625,99 @@ EVENT_STYLE = {
     "SC":            ("🟡", "**SAFETY CAR**"),
     "VSC":           ("🟠", "**VSC**"),
     "RED":           ("🔴", "**RED FLAG**"),
+    # Quali / extended race test events
+    "YELLOW":         ("🟡", "**YELLOW**"),
+    "SEGMENT_START":  ("🟦", "**Segment started**"),
+    "SEGMENT_END":    ("⬛", "**Segment ended**"),
+    "PURPLE_SECTOR":  ("🟣", "**Purple sector**"),
+    "CHECKERED_FLAG": ("🏁", "**CHEQUERED FLAG**"),
+    "CLASSIFICATION_READY": ("📊", "**Classification ready**"),
+    "RESULTS_READY":  ("📊", "**Results ready**"),
     "INFO":          ("ℹ️", "**Info**"),
 }
+
+def _scenario_meta(scenario: Dict[str, Any]) -> Dict[str, Any]:
+    return dict(scenario.get("meta") or {})
+
+def _scenario_title(scenario: Dict[str, Any], fallback: str) -> str:
+    meta = _scenario_meta(scenario)
+    return (meta.get("title") or scenario.get("title") or fallback).strip()
+
+def _scenario_session(scenario: Dict[str, Any]) -> str:
+    meta = _scenario_meta(scenario)
+    return str(meta.get("session") or "").upper().strip()
+
+def _scenario_grid_map(scenario: Dict[str, Any]) -> Dict[str, str]:
+    """driver_id -> display name"""
+    out: Dict[str, str] = {}
+    for d in (scenario.get("grid") or []):
+        if not isinstance(d, dict):
+            continue
+        did = str(d.get("id") or "").strip()
+        name = str(d.get("name") or "").strip()
+        if did:
+            out[did] = name or did
+    return out
+
+def _format_race_classification(scenario: Dict[str, Any]) -> str:
+    cls = scenario.get("classification") or {}
+    results = cls.get("results") or []
+    grid = _scenario_grid_map(scenario)
+    lines: List[str] = []
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        pos = r.get("pos")
+        did = str(r.get("driver_id") or "").strip()
+        name = grid.get(did, did or "Unknown")
+        status = str(r.get("status") or "").upper().strip()
+        gap = r.get("gap")
+        reason = str(r.get("reason") or "").strip()
+
+        if status == "DNF":
+            tail = f"DNF" + (f" — {reason}" if reason else "")
+        else:
+            tail = str(gap) if gap is not None else (status or "")
+
+        lines.append(f"{int(pos):>2}. {name} — {tail}" if pos is not None else f"- {name} — {tail}")
+
+    if not lines:
+        return "No classification data."
+    return "\n".join(lines)
+
+def _format_quali_classification(scenario: Dict[str, Any]) -> str:
+    cls = scenario.get("classification") or {}
+    results = cls.get("results") or []
+    grid = _scenario_grid_map(scenario)
+    lines: List[str] = []
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        pos = r.get("pos")
+        did = str(r.get("driver_id") or "").strip()
+        name = grid.get(did, did or "Unknown")
+        best = str(r.get("best") or "").strip()
+        gap = str(r.get("gap") or "").strip()
+        status = str(r.get("status") or "").upper().strip()
+
+        tail = best if best else "—"
+        if gap and gap != "0.000":
+            tail += f" ({gap})"
+        if status in ("POLE", "OUT"):
+            tail += f" — {status}"
+        note = str(r.get("note") or "").strip()
+        if note:
+            tail += f" — {note}"
+
+        lines.append(f"{int(pos):>2}. {name} — {tail}" if pos is not None else f"- {name} — {tail}")
+
+    if not lines:
+        return "No qualifying results data."
+    return "\n".join(lines)
+
+def _wrap_spoiler(text: str) -> str:
+    # Discord spoilers can wrap multi-line text; keep it plain text for compatibility.
+    return f"||{text}||"
 
 def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
     """
@@ -705,18 +796,63 @@ async def _ensure_test_thread(
 
     return None
 
-async def _emit_race_event(thread: discord.Thread, event: Dict[str, Any]) -> None:
+async def _emit_race_event(
+    thread: discord.Thread,
+    scenario: Dict[str, Any],
+    event: Dict[str, Any],
+    grid_map: Dict[str, str],
+) -> None:
+    """Emit a single event message to the test thread, with richer formatting for new event types."""
     etype = (event.get("type") or "INFO").upper().strip()
     emoji, label = EVENT_STYLE.get(etype, ("ℹ️", "**Info**"))
+
+    scenario_session = _scenario_session(scenario)
+    ev_session = str(event.get("session") or "").strip()
+    segment = str(event.get("segment") or "").strip().upper()
+
+    # Special formatting: purple sectors
+    if etype == "PURPLE_SECTOR":
+        did = str(event.get("driver_id") or "").strip()
+        name = grid_map.get(did, did or "Unknown")
+        sector = event.get("sector")
+        lap = str(event.get("lap") or "").strip()
+        seg_txt = f" ({segment})" if segment else ""
+        sec_txt = f"S{sector}" if sector is not None else "sector"
+        text = f"{emoji} {name} sets purple {sec_txt}{seg_txt}"
+        if lap:
+            text += f" — {lap}"
+        await thread.send(text)
+        return
+
+    # Segment start/end (quali)
+    if etype in ("SEGMENT_START", "SEGMENT_END") and segment:
+        # Prefer segment name in the header
+        label = f"**{segment} {'started' if etype == 'SEGMENT_START' else 'ended'}**"
+
     detail = (event.get("detail") or "").strip()
 
-    session = (event.get("session") or "").strip()
-    suffix = f" ({session})" if session and etype == "SESSION_START" else ""
+    # SESSION_START suffix: prefer explicit event session, fallback to scenario session
+    if etype == "SESSION_START":
+        use_session = ev_session or scenario_session
+        suffix = f" ({use_session})" if use_session else ""
+    else:
+        suffix = ""
+
     text = f"{emoji} {label}{suffix}"
     if detail:
         text += f"\n{detail}"
 
     await thread.send(text)
+
+    # Auto-emit the big spoiler result dumps when the timeline hits the right moment.
+    if etype in ("CLASSIFICATION_READY", "RESULTS_READY"):
+        session_type = scenario_session
+        if session_type == "RACE" and etype == "CLASSIFICATION_READY":
+            body = _format_race_classification(scenario)
+            await thread.send(_wrap_spoiler("📊 Race Classification\n" + body))
+        elif session_type in ("QUALI", "QUALIFYING") and etype == "RESULTS_READY":
+            body = _format_quali_classification(scenario)
+            await thread.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
 
 async def _run_race_test_scenario(
     guild: discord.Guild,
@@ -737,10 +873,12 @@ async def _run_race_test_scenario(
     if not scenario:
         raise RuntimeError(f"Scenario '{scenario_name}' not found.")
 
-    title = scenario.get("title") or f"Race Test - {scenario_name}"
+    title = _scenario_title(scenario, fallback=f"Race Test - {scenario_name}")
     events = scenario.get("events") or []
     if not isinstance(events, list) or not events:
         raise RuntimeError(f"Scenario '{scenario_name}' has no events.")
+
+    grid_map = _scenario_grid_map(scenario)
 
     # Create a new thread for each run
     thread = await _ensure_test_thread(guild, title)
@@ -767,7 +905,7 @@ async def _run_race_test_scenario(
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)
 
-        await _emit_race_event(thread, ev)
+        await _emit_race_event(thread, scenario, ev, grid_map)
 
     await thread.send("✅ Scenario complete.")
 
@@ -778,6 +916,69 @@ async def race_test_list(ctx):
     scenarios = _load_race_scenarios()
     names = sorted(scenarios.keys())
     await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
+
+def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
+    scenarios = _load_race_scenarios()
+    name = (scenario_name or "").strip()
+    if not name:
+        raise RuntimeError("Scenario name is required.")
+    scenario = scenarios.get(name)
+    if scenario:
+        return name, scenario
+    # Case-insensitive match
+    for k, v in scenarios.items():
+        if k.lower() == name.lower():
+            return k, v
+    raise RuntimeError(f"Scenario '{name}' not found.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_info(ctx, scenario: str):
+    """Show details about a scenario (session type, event counts, etc.)."""
+    try:
+        name, sc = _resolve_scenario(scenario)
+    except Exception as e:
+        await ctx.send(f"❌ {e}")
+        return
+
+    meta = _scenario_meta(sc)
+    title = _scenario_title(sc, fallback=name)
+    session_type = _scenario_session(sc) or "(none)"
+    events = sc.get("events") or []
+    grid = sc.get("grid") or []
+    segments = sc.get("segments") or []
+    has_cls = bool((sc.get("classification") or {}).get("results"))
+
+    await ctx.send(
+        "🧪 **Scenario info**\n"
+        f"- **Key:** `{name}`\n"
+        f"- **Title:** {title}\n"
+        f"- **Session:** `{session_type}`\n"
+        f"- **Events:** {len(events) if isinstance(events, list) else 0}\n"
+        f"- **Grid drivers:** {len(grid) if isinstance(grid, list) else 0}\n"
+        f"- **Segments:** {len(segments) if isinstance(segments, list) else 0}\n"
+        f"- **Has classification:** {'yes' if has_cls else 'no'}"
+    )
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_results(ctx, scenario: str):
+    """Preview the spoiler results message for a scenario (does not start a thread)."""
+    try:
+        name, sc = _resolve_scenario(scenario)
+    except Exception as e:
+        await ctx.send(f"❌ {e}")
+        return
+
+    session_type = _scenario_session(sc)
+    if session_type == "RACE":
+        body = _format_race_classification(sc)
+        await ctx.send(_wrap_spoiler("📊 Race Classification\n" + body))
+    elif session_type in ("QUALI", "QUALIFYING"):
+        body = _format_quali_classification(sc)
+        await ctx.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
+    else:
+        await ctx.send(f"ℹ️ Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
