@@ -1,0 +1,12 @@
+{
+  "standings": {
+    "channel_id": null,
+    "driver_message_id": null,
+    "constructor_message_id": null
+  },
+  "driver_roles": {
+    "channel_id": null,
+    "message_id": null,
+    "emoji_to_role": {}
+  }
+}

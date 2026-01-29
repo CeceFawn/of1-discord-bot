@@ -1,47 +1,46 @@
+# dashboard.py
+from __future__ import annotations
 from flask import Flask, render_template_string, request, redirect
 import threading
 import os
-import json
 import psutil
 from datetime import datetime
+from settings import LOG_PATH
+from storage import load_config, save_config, load_state, save_state
 
 app = Flask(__name__)
 
-LOG_FILTERS = [
-    "favicon.ico", "Bad request syntax", "Invalid HTTP version",
-    "code 400", "code 404", "code 505", "successfully RESUMED",
-    "GET /logs", "GET /status"
-]
+# Optional bot reference (future: user viewer / commands)
+bot_reference = None
 
-CONFIG_PATH = "bot_config.json"
-REACTIONS_PATH = "reaction_roles.json"
-
-def load_json(path, fallback):
-    if not os.path.exists(path):
-        return fallback
-    with open(path, "r") as f:
-        return json.load(f)
-
-def save_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+def set_bot_reference(bot):
+    global bot_reference
+    bot_reference = bot
 
 NAVBAR = """
-<div style='margin-bottom: 1em; font-family: sans-serif;'>
+<div style="margin-bottom: 14px; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;">
   <a href="/logs">Logs</a> |
-  <a href="/status_page">Status</a> |
-  <a href="/settings">Settings</a> |
-  <a href="/reaction_roles">Reaction Roles</a> |
-  <a href="/roles">Role Assigner</a> |
-  <a href="/users">User Viewer</a>
+  <a href="/status">Status</a> |
+  <a href="/config">Config</a> |
+  <a href="/state">State</a>
+  <form action="/restart" method="post" style="display:inline; margin-left:12px;">
+    <button style="color:#b00;">Restart</button>
+  </form>
 </div>
 """
 
-# Optional bot reference for user/role tools
-bot_reference = None
-def set_bot_reference(bot):  # if needed for future user viewing
-    global bot_reference
-    bot_reference = bot
+PAGE_WRAPPER = """
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>OF1 Bot Dashboard</title>
+  </head>
+  <body style="background:#111;color:#eee;padding:16px;">
+    {navbar}
+    {body}
+  </body>
+</html>
+"""
 
 @app.route("/")
 def index():
@@ -49,116 +48,93 @@ def index():
 
 @app.route("/logs")
 def logs():
+    cfg = load_config()
+    filters = cfg.get("log_filters", [])
     try:
-        with open("bot.log", "r") as f:
-            lines = f.readlines()[-200:]
+        with open(LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-400:]
     except FileNotFoundError:
-        lines = ["Log file not found."]
-    filtered = [line for line in lines if not any(x in line for x in LOG_FILTERS)]
-    safe = ''.join(filtered).replace("<", "&lt;").replace(">", "&gt;")
-    return render_template_string("""
-    <html><body style='background:#111;color:#0f0;font-family:monospace;padding:1em'>
-        {{ navbar | safe }}
-        <pre>{{ logs | safe }}</pre>
-    </body></html>
-    """, navbar=NAVBAR, logs=safe)
+        lines = ["Log file not found.\n"]
 
-@app.route("/status_page")
-def status_page():
+    filtered = [line for line in lines if not any(x in line for x in filters)]
+    safe = "".join(filtered).replace("<", "&lt;").replace(">", "&gt;")
+    body = f"<pre style='white-space:pre-wrap;background:#000;padding:12px;border-radius:8px;'>{safe}</pre>"
+    return PAGE_WRAPPER.format(navbar=NAVBAR, body=body)
+
+@app.route("/status")
+def status():
     uptime = datetime.now() - datetime.fromtimestamp(psutil.boot_time())
     cpu = psutil.cpu_percent()
     ram = psutil.virtual_memory().percent
+    body = f"""
+      <h2>Status</h2>
+      <ul>
+        <li><b>CPU:</b> {cpu}%</li>
+        <li><b>RAM:</b> {ram}%</li>
+        <li><b>System uptime:</b> {uptime}</li>
+      </ul>
+    """
+    return PAGE_WRAPPER.format(navbar=NAVBAR, body=body)
 
+@app.route("/config", methods=["GET", "POST"])
+def config():
+    cfg = load_config()
+    if request.method == "POST":
+        # Very simple editor: paste full JSON
+        raw = request.form.get("json", "")
+        try:
+            import json
+            parsed = json.loads(raw)
+            save_config(parsed)
+            return redirect("/config")
+        except Exception as e:
+            err = f"<div style='color:#f66;'>Invalid JSON: {e}</div>"
+            body = err + _json_editor("config.json", cfg)
+            return PAGE_WRAPPER.format(navbar=NAVBAR, body=body)
+
+    body = _json_editor("config.json", cfg)
+    return PAGE_WRAPPER.format(navbar=NAVBAR, body=body)
+
+@app.route("/state", methods=["GET", "POST"])
+def state():
+    st = load_state()
+    if request.method == "POST":
+        raw = request.form.get("json", "")
+        try:
+            import json
+            parsed = json.loads(raw)
+            save_state(parsed)
+            return redirect("/state")
+        except Exception as e:
+            err = f"<div style='color:#f66;'>Invalid JSON: {e}</div>"
+            body = err + _json_editor("state.json", st)
+            return PAGE_WRAPPER.format(navbar=NAVBAR, body=body)
+
+    body = _json_editor("state.json", st)
+    return PAGE_WRAPPER.format(navbar=NAVBAR, body=body)
+
+def _json_editor(title: str, obj) -> str:
+    import json
+    pretty = json.dumps(obj, indent=2, ensure_ascii=False)
     return render_template_string("""
-    <html><body style='background:#111;color:#eee;font-family:sans-serif;padding:1em'>
-        {{ navbar | safe }}
-        <h2>Bot Status</h2>
-        <ul>
-            <li><b>Uptime:</b> {{ uptime }}</li>
-            <li><b>CPU Usage:</b> {{ cpu }}%</li>
-            <li><b>RAM Usage:</b> {{ ram }}%</li>
-        </ul>
-    </body></html>
-    """, navbar=NAVBAR, uptime=uptime, cpu=cpu, ram=ram)
+      <h2>{{ title }}</h2>
+      <form method="post">
+        <textarea name="json" rows="28" cols="110"
+          style="width:100%;max-width:1100px;background:#000;color:#0f0;padding:12px;border-radius:8px;"
+        >{{ pretty }}</textarea>
+        <div style="margin-top:10px;">
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    """, title=title, pretty=pretty)
 
 @app.route("/restart", methods=["POST"])
 def restart():
     os._exit(1)
 
-@app.route("/settings", methods=["GET", "POST"])
-def settings():
-    config = load_json(CONFIG_PATH, {"prefix": "!", "embed_style": "default"})
-    if request.method == "POST":
-        config["prefix"] = request.form["prefix"]
-        config["embed_style"] = request.form["embed_style"]
-        save_json(CONFIG_PATH, config)
-        return redirect("/settings")
-    return render_template_string("""
-    <html><body style='background:#111;color:#eee;font-family:sans-serif;padding:1em'>
-        {{ navbar | safe }}
-        <h2>Bot Settings</h2>
-        <form method="post">
-            Prefix: <input name="prefix" value="{{ cfg.prefix }}"><br>
-            Embed Style: <input name="embed_style" value="{{ cfg.embed_style }}"><br>
-            <button type="submit">Save</button>
-        </form>
-        <form action="/restart" method="post">
-            <button style="margin-top:20px;color:red">Restart Bot</button>
-        </form>
-    </body></html>
-    """, cfg=config, navbar=NAVBAR)
-
-@app.route("/reaction_roles", methods=["GET", "POST"])
-def reaction_roles():
-    roles = load_json(REACTIONS_PATH, {})
-    if request.method == "POST":
-        new_roles = {}
-        for k, v in request.form.items():
-            if k.startswith("emoji_"):
-                emoji = request.form[k]
-                role = request.form.get(f"role_{k[6:]}")
-                if emoji and role:
-                    new_roles[emoji] = role
-        save_json(REACTIONS_PATH, new_roles)
-        return redirect("/reaction_roles")
-    return render_template_string("""
-    <html><body style='background:#111;color:#eee;font-family:sans-serif;padding:1em'>
-        {{ navbar | safe }}
-        <h2>Reaction Roles</h2>
-        <form method="post">
-            {% for emoji, role in roles.items() %}
-                <input name="emoji_{{ loop.index }}" value="{{ emoji }}" size="5">
-                → <input name="role_{{ loop.index }}" value="{{ role }}" size="15"><br>
-            {% endfor %}
-            <input name="emoji_new" placeholder="Emoji" size="5">
-            → <input name="role_new" placeholder="Role" size="15"><br>
-            <button type="submit">Save</button>
-        </form>
-    </body></html>
-    """, roles=roles, navbar=NAVBAR)
-
-@app.route("/roles")
-def roles():
-    return render_template_string("""
-    <html><body style='background:#111;color:#eee;font-family:sans-serif;padding:1em'>
-        {{ navbar | safe }}
-        <h2>👤 Role Assigner UI (coming soon)</h2>
-    </body></html>
-    """, navbar=NAVBAR)
-
-@app.route("/users")
-def users():
-    return render_template_string("""
-    <html><body style='background:#111;color:#eee;font-family:sans-serif;padding:1em'>
-        {{ navbar | safe }}
-        <h2>📋 User Viewer (coming soon)</h2>
-    </body></html>
-    """, navbar=NAVBAR)
-
 def run_dashboard():
     app.run(host="0.0.0.0", port=int(os.getenv("DASHBOARD_PORT", 5000)))
 
 def start_dashboard_thread():
-    thread = threading.Thread(target=run_dashboard)
-    thread.daemon = True
+    thread = threading.Thread(target=run_dashboard, daemon=True)
     thread.start()

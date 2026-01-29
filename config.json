@@ -1,0 +1,55 @@
+{
+  "prefix": "!",
+  "reaction_roles": {
+    "🏎": "F1Breaking",
+    "🎥": "Watch Party",
+    "📸": "OF1 Instagram"
+  },
+  "color_roles": {
+    "🔴": "Ferrari Red",
+    "🔵": "Alpine Blue",
+    "🟢": "Kick/Sauber Green",
+    "🟣": "Purple",
+    "🟠": "Papaya Orange",
+    "🟡": "Renault Yellow",
+    "⚪": "White",
+    "🩶": "Mercedes Silver",
+    "💗": "Pink",
+    "🩵": "Cyan",
+    "🟤": "Brown"
+  },
+  "driver_emoji_names": {
+    "Piastri": "Piastri",
+    "Norris": "Norris",
+    "Russell": "Russell",
+    "Antonelli": "Antonelli",
+    "Verstappen": "Verstappen",
+    "Tsunoda": "Tsunoda",
+    "Leclerc": "Leclerc",
+    "Hamilton": "Hamilton",
+    "Albon": "Albon",
+    "Sainz": "Sainz",
+    "Ocon": "Ocon",
+    "Bearman": "Bearman",
+    "Stroll": "Stroll",
+    "Alonso": "Alonso",
+    "Hadjar": "Hadjar",
+    "Lawson": "Lawson",
+    "Gasly": "Gasly",
+    "Colapinto": "Colapinto",
+    "Hulkenberg": "Hulkenberg",
+    "Bortoleto": "Bortoleto"
+  },
+  "log_filters": [
+    "favicon.ico",
+    "Bad request syntax",
+    "Invalid HTTP version",
+    "code 400",
+    "code 404",
+    "code 505",
+    "GET /logs",
+    "GET /status"
+  ],
+  "periodic_role_recovery_minutes": 60,
+  "periodic_history_scan_limit": 100
+}
