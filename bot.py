@@ -47,178 +47,6 @@ def set_env_value(key: str, value: str, env_path: str = ".env") -> None:
 
     os.environ[key] = str(value)
 
-# ----------------------------
-# Race thread + event simulator (TEST)
-# ----------------------------
-RACE_EVENTS = {
-    "green": ("🟢 GREEN FLAG", "Session running normally."),
-    "vsc":   ("🟣 VIRTUAL SAFETY CAR", "Slow zone / VSC in effect."),
-    "sc":    ("🟡 SAFETY CAR", "Safety Car deployed."),
-    "red":   ("🔴 RED FLAG", "Session stopped (red flag)."),
-    "yellow":("🟠 YELLOW FLAG", "Local yellow / incident in a sector."),
-    "end":   ("🏁 SESSION ENDED", "Session concluded."),
-}
-
-# In-memory: active simulated threads (so you can send events to “the last one”)
-ACTIVE_RACE_TESTS = {}  # guild_id -> thread_id
-
-
-async def _get_forum_channel(ctx):
-    forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
-    if not forum_id:
-        await ctx.send("❌ RACE_FORUM_CHANNEL_ID is not set in .env")
-        return None
-
-    try:
-        ch = bot.get_channel(int(forum_id)) or await bot.fetch_channel(int(forum_id))
-    except Exception as e:
-        await ctx.send(f"❌ Could not fetch forum channel {forum_id}: {e}")
-        return None
-
-    # This is the key: must be a ForumChannel
-    if not isinstance(ch, discord.ForumChannel):
-        await ctx.send(f"❌ Channel {forum_id} is not a Forum channel. (It is: {type(ch).__name__})")
-        return None
-
-    return ch
-
-
-def _maybe_ping_text():
-    rid = os.getenv("RACE_ALERT_ROLE_ID", "0").strip()
-    if rid and rid != "0":
-        return f"<@&{rid}> "
-    return ""
-
-
-async def _post_race_event(thread: discord.Thread, event_key: str, extra: str = ""):
-    event_key = event_key.lower().strip()
-    if event_key not in RACE_EVENTS:
-        valid = ", ".join(RACE_EVENTS.keys())
-        await thread.send(f"❌ Unknown event `{event_key}`. Valid: {valid}")
-        return
-
-    title, desc = RACE_EVENTS[event_key]
-    ping = _maybe_ping_text()
-
-    msg = f"{ping}**{title}** — {desc}"
-    if extra:
-        msg += f"\n> {extra}"
-
-    await thread.send(msg)
-
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def race_test_create(ctx, *, name: str):
-    """
-    Creates a TEST forum post thread in the Race Threads forum.
-    Usage: !race_test_create Bahrain GP - Quali
-    """
-    forum = await _get_forum_channel(ctx)
-    if forum is None:
-        return
-
-    # Create the forum "post" (thread)
-    # discord.py v2: ForumChannel.create_thread(name=..., content=...)
-    try:
-        thread = await forum.create_thread(
-            name=f"TEST — {name}",
-            content=f"🧪 Test thread created by {ctx.author.mention} for: **{name}**"
-        )
-    except Exception as e:
-        await ctx.send(f"❌ Failed to create forum post: {e}")
-        return
-
-    # thread is a ThreadWithMessage in some versions; normalize:
-    created_thread = getattr(thread, "thread", thread)
-
-    ACTIVE_RACE_TESTS[ctx.guild.id] = created_thread.id
-    await ctx.send(f"✅ Created test race thread: {created_thread.mention}")
-
-    # Immediately post a green flag message so you can see it works
-    await _post_race_event(created_thread, "green", "Auto test: initial green flag message.")
-
-    # Optional auto-delete timer
-    try:
-        mins = int(os.getenv("RACE_TEST_AUTODELETE_MINUTES", "0") or "0")
-    except ValueError:
-        mins = 0
-
-    if mins > 0:
-        async def _autodelete():
-            await asyncio.sleep(mins * 60)
-            try:
-                await created_thread.delete()
-            except:
-                pass
-        bot.loop.create_task(_autodelete())
-
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def race_test_event(ctx, event: str, *, note: str = ""):
-    """
-    Sends a test event into the latest created test thread.
-    Usage: !race_test_event red Big crash at T1
-           !race_test_event sc Debris on track
-    """
-    thread_id = ACTIVE_RACE_TESTS.get(ctx.guild.id)
-    if not thread_id:
-        await ctx.send("❌ No active test thread. Run `!race_test_create <name>` first.")
-        return
-
-    try:
-        thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
-    except Exception as e:
-        await ctx.send(f"❌ Could not fetch thread {thread_id}: {e}")
-        return
-
-    await _post_race_event(thread, event, note)
-    await ctx.send(f"✅ Sent `{event}` event to {thread.mention}")
-
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def race_test_demo(ctx, *, name: str):
-    """
-    Creates a test thread then runs a full demo sequence automatically.
-    Usage: !race_test_demo Bahrain GP - Race
-    """
-    forum = await _get_forum_channel(ctx)
-    if forum is None:
-        return
-
-    try:
-        thread = await forum.create_thread(
-            name=f"TEST DEMO — {name}",
-            content=f"🧪 Demo thread created by {ctx.author.mention} for: **{name}**"
-        )
-    except Exception as e:
-        await ctx.send(f"❌ Failed to create forum post: {e}")
-        return
-
-    t = getattr(thread, "thread", thread)
-    ACTIVE_RACE_TESTS[ctx.guild.id] = t.id
-    await ctx.send(f"✅ Created demo thread: {t.mention}")
-
-    # Demo sequence (you can tweak timing)
-    sequence = [
-        ("green", "Session start"),
-        ("yellow", "Local yellow sector 2"),
-        ("vsc", "VSC deployed"),
-        ("green", "VSC ending, back to green"),
-        ("sc", "Safety Car deployed"),
-        ("red", "Barrier repair needed"),
-        ("green", "Restart underway"),
-        ("end", "Session over"),
-    ]
-
-    for key, note in sequence:
-        await _post_race_event(t, key, note)
-        await asyncio.sleep(3)  # spacing so you can watch it
-
-    await ctx.send("✅ Demo sequence completed.")
-
 
 # ----------------------------
 # Instagram scrape
@@ -478,6 +306,179 @@ async def remindme(ctx, time: str, *, reminder: str):
         await ctx.send(f"✅ Reminder set for {run_time}.")
     except Exception:
         await ctx.send("❌ Invalid time format. Use YYYY-MM-DDTHH:MM. Example: 2025-05-05T14:00")
+
+# ----------------------------
+# Race thread + event simulator (TEST)
+# ----------------------------
+RACE_EVENTS = {
+    "green": ("🟢 GREEN FLAG", "Session running normally."),
+    "vsc":   ("🟣 VIRTUAL SAFETY CAR", "Slow zone / VSC in effect."),
+    "sc":    ("🟡 SAFETY CAR", "Safety Car deployed."),
+    "red":   ("🔴 RED FLAG", "Session stopped (red flag)."),
+    "yellow":("🟠 YELLOW FLAG", "Local yellow / incident in a sector."),
+    "end":   ("🏁 SESSION ENDED", "Session concluded."),
+}
+
+# In-memory: active simulated threads (so you can send events to “the last one”)
+ACTIVE_RACE_TESTS = {}  # guild_id -> thread_id
+
+
+async def _get_forum_channel(ctx):
+    forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
+    if not forum_id:
+        await ctx.send("❌ RACE_FORUM_CHANNEL_ID is not set in .env")
+        return None
+
+    try:
+        ch = bot.get_channel(int(forum_id)) or await bot.fetch_channel(int(forum_id))
+    except Exception as e:
+        await ctx.send(f"❌ Could not fetch forum channel {forum_id}: {e}")
+        return None
+
+    # This is the key: must be a ForumChannel
+    if not isinstance(ch, discord.ForumChannel):
+        await ctx.send(f"❌ Channel {forum_id} is not a Forum channel. (It is: {type(ch).__name__})")
+        return None
+
+    return ch
+
+
+def _maybe_ping_text():
+    rid = os.getenv("RACE_ALERT_ROLE_ID", "0").strip()
+    if rid and rid != "0":
+        return f"<@&{rid}> "
+    return ""
+
+
+async def _post_race_event(thread: discord.Thread, event_key: str, extra: str = ""):
+    event_key = event_key.lower().strip()
+    if event_key not in RACE_EVENTS:
+        valid = ", ".join(RACE_EVENTS.keys())
+        await thread.send(f"❌ Unknown event `{event_key}`. Valid: {valid}")
+        return
+
+    title, desc = RACE_EVENTS[event_key]
+    ping = _maybe_ping_text()
+
+    msg = f"{ping}**{title}** — {desc}"
+    if extra:
+        msg += f"\n> {extra}"
+
+    await thread.send(msg)
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_create(ctx, *, name: str):
+    """
+    Creates a TEST forum post thread in the Race Threads forum.
+    Usage: !race_test_create Bahrain GP - Quali
+    """
+    forum = await _get_forum_channel(ctx)
+    if forum is None:
+        return
+
+    # Create the forum "post" (thread)
+    # discord.py v2: ForumChannel.create_thread(name=..., content=...)
+    try:
+        thread = await forum.create_thread(
+            name=f"TEST — {name}",
+            content=f"🧪 Test thread created by {ctx.author.mention} for: **{name}**"
+        )
+    except Exception as e:
+        await ctx.send(f"❌ Failed to create forum post: {e}")
+        return
+
+    # thread is a ThreadWithMessage in some versions; normalize:
+    created_thread = getattr(thread, "thread", thread)
+
+    ACTIVE_RACE_TESTS[ctx.guild.id] = created_thread.id
+    await ctx.send(f"✅ Created test race thread: {created_thread.mention}")
+
+    # Immediately post a green flag message so you can see it works
+    await _post_race_event(created_thread, "green", "Auto test: initial green flag message.")
+
+    # Optional auto-delete timer
+    try:
+        mins = int(os.getenv("RACE_TEST_AUTODELETE_MINUTES", "0") or "0")
+    except ValueError:
+        mins = 0
+
+    if mins > 0:
+        async def _autodelete():
+            await asyncio.sleep(mins * 60)
+            try:
+                await created_thread.delete()
+            except:
+                pass
+        bot.loop.create_task(_autodelete())
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_event(ctx, event: str, *, note: str = ""):
+    """
+    Sends a test event into the latest created test thread.
+    Usage: !race_test_event red Big crash at T1
+           !race_test_event sc Debris on track
+    """
+    thread_id = ACTIVE_RACE_TESTS.get(ctx.guild.id)
+    if not thread_id:
+        await ctx.send("❌ No active test thread. Run `!race_test_create <name>` first.")
+        return
+
+    try:
+        thread = bot.get_channel(thread_id) or await bot.fetch_channel(thread_id)
+    except Exception as e:
+        await ctx.send(f"❌ Could not fetch thread {thread_id}: {e}")
+        return
+
+    await _post_race_event(thread, event, note)
+    await ctx.send(f"✅ Sent `{event}` event to {thread.mention}")
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def race_test_demo(ctx, *, name: str):
+    """
+    Creates a test thread then runs a full demo sequence automatically.
+    Usage: !race_test_demo Bahrain GP - Race
+    """
+    forum = await _get_forum_channel(ctx)
+    if forum is None:
+        return
+
+    try:
+        thread = await forum.create_thread(
+            name=f"TEST DEMO — {name}",
+            content=f"🧪 Demo thread created by {ctx.author.mention} for: **{name}**"
+        )
+    except Exception as e:
+        await ctx.send(f"❌ Failed to create forum post: {e}")
+        return
+
+    t = getattr(thread, "thread", thread)
+    ACTIVE_RACE_TESTS[ctx.guild.id] = t.id
+    await ctx.send(f"✅ Created demo thread: {t.mention}")
+
+    # Demo sequence (you can tweak timing)
+    sequence = [
+        ("green", "Session start"),
+        ("yellow", "Local yellow sector 2"),
+        ("vsc", "VSC deployed"),
+        ("green", "VSC ending, back to green"),
+        ("sc", "Safety Car deployed"),
+        ("red", "Barrier repair needed"),
+        ("green", "Restart underway"),
+        ("end", "Session over"),
+    ]
+
+    for key, note in sequence:
+        await _post_race_event(t, key, note)
+        await asyncio.sleep(3)  # spacing so you can watch it
+
+    await ctx.send("✅ Demo sequence completed.")
+
 
 @bot.command()
 async def ping(ctx):
