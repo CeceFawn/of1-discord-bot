@@ -125,7 +125,7 @@ intents.reactions = True
 intents.guilds = True
 intents.members = True
 
-def get_prefix() -> str:
+def get_prefix(bot, message) -> str:
     return (CFG.get("prefix") or "!").strip() or "!"
 
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
