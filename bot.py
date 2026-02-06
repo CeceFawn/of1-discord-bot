@@ -747,6 +747,41 @@ def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
         )
         return DEFAULT_RACE_SCENARIOS
 
+def _format_quali_knockouts(scenario: Dict[str, Any], knocked_in: str) -> str:
+    """
+    knocked_in: "Q1" or "Q2"
+    Returns plain text lines (not spoiler-wrapped).
+    """
+    cls = scenario.get("classification") or {}
+    results = cls.get("results") or []
+    grid = _scenario_grid_map(scenario)
+
+    knocked_in = (knocked_in or "").upper().strip()
+    knocked: List[Tuple[int, str, str]] = []  # (pos, name, note)
+
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        status = str(r.get("status") or "").upper().strip()
+        seg = str(r.get("segment") or "").upper().strip()
+        if status != "OUT" or seg != knocked_in:
+            continue
+
+        pos = r.get("pos")
+        did = str(r.get("driver_id") or "").strip()
+        name = grid.get(did, did or "Unknown")
+        note = str(r.get("note") or "").strip()
+        knocked.append((int(pos) if pos is not None else 999, name, note))
+
+    if not knocked:
+        return "No knockouts listed."
+
+    knocked.sort(key=lambda x: x[0])
+    lines = []
+    for pos, name, note in knocked:
+        tail = f" — {note}" if note else ""
+        lines.append(f"P{pos} {name}{tail}")
+    return "\n".join(lines)
 
 
 async def _get_forum_channel(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
@@ -857,6 +892,11 @@ async def _emit_race_event(
         elif session_type in ("QUALI", "QUALIFYING") and etype == "RESULTS_READY":
             body = _format_quali_classification(scenario)
             await thread.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
+    
+    # Post knockouts at end of Q1/Q2 (QUALI only)
+    if etype == "SEGMENT_END" and scenario_session in ("QUALI", "QUALIFYING") and segment in ("Q1", "Q2"):
+        body = _format_quali_knockouts(scenario, segment)
+        await thread.send(_wrap_spoiler(f"🚫 {segment} Knockouts\n{body}"))
 
 async def _run_race_test_scenario(
     guild: discord.Guild,
