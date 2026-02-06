@@ -1,4 +1,3 @@
-# dashboard.py
 from __future__ import annotations
 from flask import Flask, render_template_string, request, redirect
 import threading

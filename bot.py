@@ -4,18 +4,34 @@ import os
 import re
 import logging
 import asyncio
-from datetime import datetime
-from typing import Dict, Optional, Any
+import random
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional, Any, List, Tuple
+from collections import deque
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
+import aiohttp
 
 from dashboard import start_dashboard_thread, set_bot_reference
 from storage import load_config, save_config, load_state, save_state, set_env_value
 from settings import LOG_PATH
+
+# ✅ XP storage module (make sure xp_storage.py is next to bot.py)
+from xp_storage import (
+    get_xp_state_path,
+    load_xp_state,
+    save_xp_state,
+    get_user_record,
+    add_user_xp,
+    set_user_xp_level,
+    update_user_message_meta,
+    is_on_cooldown,
+    get_top_users_by_xp,
+)
 
 # ----------------------------
 # Logging
@@ -44,6 +60,33 @@ def reload_config_state() -> None:
 
 # Load once at import time
 reload_config_state()
+
+# ----------------------------
+# XP State (global in-memory)
+# ----------------------------
+XP_STATE: Dict[str, Any] = load_xp_state()
+XP_DIRTY: bool = False
+XP_SAVE_LOCK = asyncio.Lock()
+
+def _xp_mark_dirty() -> None:
+    global XP_DIRTY
+    XP_DIRTY = True
+
+async def xp_flush_loop():
+    """Periodic XP flush so we don't write on every message."""
+    global XP_DIRTY
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await asyncio.sleep(int(os.getenv("XP_FLUSH_SECONDS", "30")))
+            if not XP_DIRTY:
+                continue
+            async with XP_SAVE_LOCK:
+                if XP_DIRTY:
+                    save_xp_state(XP_STATE)
+                    XP_DIRTY = False
+        except Exception as e:
+            logging.error(f"[XP] Flush loop error: {e}")
 
 # ----------------------------
 # Instagram scrape
@@ -170,12 +213,224 @@ def resolve_role_name_from_emoji(emoji_str: str) -> Optional[str]:
         or state_driver_map().get(emoji_str)
     )
 
+# ============================================================
+# XP SYSTEM (Mee6-style basic)
+#   - awards XP per message with cooldown
+#   - per-guild levels
+#   - rank + leaderboard commands
+#   - optional channel gate by minimum level (auto-delete)
+#
+# Config.json optional keys:
+#   "xp_enabled": true
+#   "xp_cooldown_seconds": 60
+#   "xp_min_gain": 15
+#   "xp_max_gain": 25
+#   "xp_min_level_channels": { "123456789012345678": 5 }
+#
+# Level formula (simple + stable):
+#   total_xp_needed_for_level(L) = 100 * L^2 + 50 * L
+# ============================================================
+
+def xp_enabled_for_guild(guild_id: Optional[int]) -> bool:
+    if guild_id is None:
+        return False
+    return bool((CFG.get("xp_enabled", True)))
+
+def xp_cooldown_seconds() -> int:
+    try:
+        v = int(CFG.get("xp_cooldown_seconds", os.getenv("XP_COOLDOWN_SECONDS", "60")))
+    except Exception:
+        v = 60
+    return max(5, min(600, v))
+
+def xp_gain_range() -> Tuple[int, int]:
+    try:
+        mn = int(CFG.get("xp_min_gain", os.getenv("XP_MIN_GAIN", "15")))
+    except Exception:
+        mn = 15
+    try:
+        mx = int(CFG.get("xp_max_gain", os.getenv("XP_MAX_GAIN", "25")))
+    except Exception:
+        mx = 25
+    mn = max(1, min(1000, mn))
+    mx = max(mn, min(2000, mx))
+    return mn, mx
+
+def xp_total_for_level(level: int) -> int:
+    # 100*L^2 + 50*L
+    L = max(0, int(level))
+    return (100 * L * L) + (50 * L)
+
+def xp_level_from_total(total_xp: int) -> int:
+    # Find the highest L where xp_total_for_level(L) <= total_xp
+    xp = max(0, int(total_xp))
+    lo, hi = 0, 500  # sane cap
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if xp_total_for_level(mid) <= xp:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+def xp_progress_to_next(total_xp: int) -> Tuple[int, int, int]:
+    lvl = xp_level_from_total(total_xp)
+    cur_req = xp_total_for_level(lvl)
+    next_req = xp_total_for_level(lvl + 1)
+    return lvl, max(0, total_xp - cur_req), max(1, next_req - cur_req)
+
+def cfg_xp_min_level_channels() -> Dict[str, int]:
+    raw = CFG.get("xp_min_level_channels") or {}
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, int] = {}
+    for k, v in raw.items():
+        try:
+            out[str(k)] = int(v)
+        except Exception:
+            continue
+    return out
+
+async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
+    """
+    Returns True if message was blocked (deleted).
+    Only applies if xp_min_level_channels configured.
+    """
+    if message.guild is None:
+        return False
+    if message.author.bot:
+        return False
+
+    mapping = cfg_xp_min_level_channels()
+    need = mapping.get(str(message.channel.id))
+    if need is None:
+        return False
+
+    if user_level >= int(need):
+        return False
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    try:
+        await message.author.send(
+            f"🚫 You need **level {need}** to talk in **#{message.channel.name}**.\n"
+            f"You're currently **level {user_level}**."
+        )
+    except Exception:
+        pass
+
+    return True
+
+# ----------------------------
+# Commands: XP
+# ----------------------------
+@bot.command(name="xprank")
+async def xprank(ctx, member: Optional[discord.Member] = None):
+    """Show your (or someone’s) XP + level."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+
+    member = member or ctx.author
+    rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
+    xp = int(rec.get("xp", 0) or 0)
+    lvl, into, span = xp_progress_to_next(xp)
+
+    msg = (
+        f"🏅 **Rank for {member.display_name}**\n"
+        f"- **Level:** {lvl}\n"
+        f"- **XP:** {xp}\n"
+        f"- **Progress:** {into}/{span} to next level"
+    )
+    await ctx.send(msg)
+
+@bot.command(name="xpleaderboard", aliases=["xptop"])
+async def xpleaderboard(ctx, limit: int = 10):
+    """Top XP users in this server."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    limit = max(3, min(20, int(limit)))
+
+    rows = get_top_users_by_xp(XP_STATE, ctx.guild.id, limit=limit)
+    if not rows:
+        return await ctx.send("No XP data yet.")
+
+    lines: List[str] = []
+    for i, (uid, xp, lvl) in enumerate(rows, start=1):
+        member = ctx.guild.get_member(int(uid))
+        name = member.display_name if member else f"<@{uid}>"
+        # Recompute level in case someone edited XP manually
+        real_lvl = xp_level_from_total(xp)
+        lines.append(f"{i:>2}. {name} — **L{real_lvl}** ({xp} XP)")
+
+    await ctx.send("🏆 **XP Leaderboard**\n" + "\n".join(lines))
+
+@bot.command(name="xpset")
+@commands.has_permissions(administrator=True)
+async def xpset(ctx, member: discord.Member, xp: int):
+    """Admin: set a user's XP."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    xp = max(0, int(xp))
+    lvl = xp_level_from_total(xp)
+    set_user_xp_level(XP_STATE, ctx.guild.id, member.id, xp=xp, level=lvl)
+    _xp_mark_dirty()
+    await ctx.send(f"✅ Set {member.display_name} to {xp} XP (L{lvl}).")
+
+@bot.command(name="xpreset")
+@commands.has_permissions(administrator=True)
+async def xpreset(ctx, member: discord.Member):
+    """Admin: reset a user's XP."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
+    rec["xp"] = 0
+    rec["level"] = 0
+    rec["last_msg_ts"] = 0
+    rec["messages"] = 0
+    _xp_mark_dirty()
+    await ctx.send(f"✅ Reset XP for {member.display_name}.")
+
+@bot.command(name="xpgate")
+@commands.has_permissions(administrator=True)
+async def xpgate(ctx, channel: discord.TextChannel, level: int):
+    """Admin: require a minimum level to talk in a channel (auto-delete)."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    level = max(0, min(500, int(level)))
+
+    reload_config_state()
+    mapping = cfg_xp_min_level_channels()
+    mapping[str(channel.id)] = level
+    CFG["xp_min_level_channels"] = mapping
+    save_config(CFG)
+
+    await ctx.send(f"✅ Set **#{channel.name}** minimum level to **{level}**.")
+
+@bot.command(name="xpgateclear")
+@commands.has_permissions(administrator=True)
+async def xpgateclear(ctx, channel: discord.TextChannel):
+    """Admin: remove channel min-level gate."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+
+    reload_config_state()
+    mapping = cfg_xp_min_level_channels()
+    if str(channel.id) in mapping:
+        del mapping[str(channel.id)]
+    CFG["xp_min_level_channels"] = mapping
+    save_config(CFG)
+
+    await ctx.send(f"✅ Cleared min-level gate for **#{channel.name}**.")
+
 # ----------------------------
 # Commands: config tools
 # ----------------------------
-@bot.command()
+@bot.command(name="configreload", aliases=["config_reload"])
 @commands.has_permissions(administrator=True)
-async def config_reload(ctx):
+async def configreload(ctx):
     """Reload config.json + state.json without restarting the bot."""
     reload_config_state()
     await ctx.send("✅ Reloaded config.json and state.json.")
@@ -183,9 +438,9 @@ async def config_reload(ctx):
 # ----------------------------
 # Commands: reaction role setup
 # ----------------------------
-@bot.command()
+@bot.command(name="setupnotifications", aliases=["setup_notifications"])
 @commands.has_permissions(administrator=True)
-async def setup_notifications(ctx):
+async def setupnotifications(ctx):
     roles = cfg_reaction_roles()
     if not roles:
         await ctx.send("❌ No reaction_roles configured in config.json.")
@@ -202,9 +457,9 @@ async def setup_notifications(ctx):
     logging.info(f"[Notification Roles] Setup complete (Message ID: {msg.id})")
     await ctx.send(f"✅ Notifications setup message created: `{msg.id}`")
 
-@bot.command()
+@bot.command(name="setupcolors", aliases=["setup_colors"])
 @commands.has_permissions(administrator=True)
-async def setup_colors(ctx):
+async def setupcolors(ctx):
     roles = cfg_color_roles()
     if not roles:
         await ctx.send("❌ No color_roles configured in config.json.")
@@ -221,9 +476,9 @@ async def setup_colors(ctx):
     logging.info(f"[Color Roles] Setup complete (Message ID: {msg.id})")
     await ctx.send(f"✅ Colors setup message created: `{msg.id}`")
 
-@bot.command()
+@bot.command(name="setupdrivers", aliases=["setup_drivers"])
 @commands.has_permissions(administrator=True)
-async def setup_drivers(ctx):
+async def setupdrivers(ctx):
     """
     Creates the driver-role reaction message and saves the mapping into state.json
     so it persists across restarts.
@@ -266,9 +521,9 @@ async def setup_drivers(ctx):
 # ----------------------------
 # Commands: instagram quick check
 # ----------------------------
-@bot.command()
+@bot.command(name="instacheck", aliases=["insta_check"])
 @commands.has_permissions(administrator=True)
-async def insta_check(ctx, username: str = "of1.official"):
+async def instacheck(ctx, username: str = "of1.official"):
     post_url = fetch_latest_instagram_post(username)
     if post_url:
         await ctx.send(f"📸 Latest Instagram post from `{username}`:\n{post_url}")
@@ -278,7 +533,7 @@ async def insta_check(ctx, username: str = "of1.official"):
 # ----------------------------
 # Utility commands
 # ----------------------------
-@bot.command()
+@bot.command(name="editmsg")
 @commands.has_permissions(administrator=True)
 async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
     channel = bot.get_channel(channel_id)
@@ -295,19 +550,19 @@ async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
     except Exception as e:
         await ctx.send(f"❌ Failed to edit message: {e}")
 
-@bot.command()
+@bot.command(name="botinfo")
 @commands.has_permissions(administrator=True)
 async def botinfo(ctx):
     uptime = datetime.now() - bot.launch_time
     await ctx.send(f"🛠 **Bot Uptime:** {uptime}")
 
-@bot.command()
+@bot.command(name="serverlist")
 @commands.has_permissions(administrator=True)
 async def serverlist(ctx):
     guild_names = ", ".join(g.name for g in bot.guilds)
     await ctx.send(f"🤖 Connected to: {guild_names}")
 
-@bot.command()
+@bot.command(name="logrecent")
 @commands.has_permissions(administrator=True)
 async def logrecent(ctx, lines: int = 10):
     try:
@@ -317,11 +572,11 @@ async def logrecent(ctx, lines: int = 10):
     except Exception as e:
         await ctx.send(f"❌ Could not read log: {e}")
 
-@bot.command()
+@bot.command(name="ping")
 async def ping(ctx):
     await ctx.send("Pong!")
 
-@bot.command()
+@bot.command(name="help")
 async def help(ctx):
     visible = []
     for cmd in bot.commands:
@@ -341,7 +596,6 @@ async def help(ctx):
 STANDINGS_TASK: Optional[asyncio.Task] = None
 
 def _refresh_seconds() -> int:
-    # env is the source of truth for these (and can be set by command)
     try:
         minutes = int(os.getenv("STANDINGS_REFRESH_MINUTES", "5"))
     except ValueError:
@@ -390,16 +644,9 @@ def ensure_standings_task_running():
         STANDINGS_TASK = bot.loop.create_task(standings_loop())
         logging.info("[Standings] Loop started.")
 
-@bot.command()
+@bot.command(name="standingssetup", aliases=["standings_setup"])
 @commands.has_permissions(administrator=True)
-async def standings_setup(ctx, which: str = "both", refresh_minutes: int = 5):
-    """
-    Create standings message(s), store IDs in .env (and mirror into state.json), then auto-update them.
-    Usage:
-      !standings_setup drivers 5
-      !standings_setup constructors 10
-      !standings_setup both 5
-    """
+async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     which = which.lower().strip()
     if which not in ("drivers", "constructors", "both"):
         await ctx.send("❌ Use: `drivers`, `constructors`, or `both`.")
@@ -421,7 +668,6 @@ async def standings_setup(ctx, which: str = "both", refresh_minutes: int = 5):
         set_env_value("CONSTRUCTOR_STANDINGS_MESSAGE_ID", str(msg.id))
         created.append(f"✅ Constructors message: `{msg.id}`")
 
-    # Mirror into state.json (optional but handy)
     reload_config_state()
     if "standings" not in STATE:
         STATE["standings"] = {}
@@ -448,11 +694,16 @@ async def on_ready():
     logging.info(f"Bot is online as {bot.user}")
     bot.launch_time = datetime.now()
 
-    # Reload state/config in case dashboard edited files while bot was down
     reload_config_state()
 
     ensure_standings_task_running()
     bot.loop.create_task(periodic_reaction_role_check())
+
+    # XP flushing loop
+    bot.loop.create_task(xp_flush_loop())
+
+    # Race supervisor loop (your existing module)
+    bot.loop.create_task(race_supervisor_loop())
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -478,7 +729,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         logging.warning(f"[Roles] Could not fetch member {payload.user_id}: {e}")
         return
 
-    # Enforce single-color role
     if role_name in color_role_names():
         roles_to_remove = [
             discord.utils.get(guild.roles, name=rname)
@@ -514,10 +764,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     logging.info(f"[Roles] Removed '{role_name}' from {member.name}")
 
 async def periodic_reaction_role_check():
-    """
-    Re-applies roles based on reactions to the bot's messages.
-    Uses config.json + state.json mappings.
-    """
     await bot.wait_until_ready()
 
     interval_min = int(CFG.get("periodic_role_recovery_minutes", 60))
@@ -578,12 +824,355 @@ async def periodic_reaction_role_check():
 
         await asyncio.sleep(interval_min * 60)
 
+# ----------------------------
+# XP awarding: on_message
+# ----------------------------
+@bot.event
+async def on_message(message: discord.Message):
+    # Always allow commands + ignore bots
+    if message.author.bot:
+        return
+
+    # Award XP only in guild text channels
+    if message.guild is not None and xp_enabled_for_guild(message.guild.id):
+        try:
+            gid = message.guild.id
+            uid = message.author.id
+
+            rec = get_user_record(XP_STATE, gid, uid)
+            current_xp = int(rec.get("xp", 0) or 0)
+            current_level = xp_level_from_total(current_xp)
+
+            # Optional channel gate by min level
+            blocked = await maybe_gate_channel(message, current_level)
+            if blocked:
+                # still process commands? (deleted message can't be a command anyway)
+                return
+
+            cd = xp_cooldown_seconds()
+            if not is_on_cooldown(XP_STATE, gid, uid, cd):
+                mn, mx = xp_gain_range()
+                gain = random.randint(mn, mx)
+
+                new_xp = add_user_xp(XP_STATE, gid, uid, gain)
+                new_level = xp_level_from_total(new_xp)
+
+                # store message meta + level
+                update_user_message_meta(XP_STATE, gid, uid)
+                set_user_xp_level(XP_STATE, gid, uid, xp=new_xp, level=new_level)
+                _xp_mark_dirty()
+
+                if new_level > current_level:
+                    # lightweight level-up ping
+                    try:
+                        await message.channel.send(f"✨ {message.author.mention} leveled up to **Level {new_level}**!")
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            logging.error(f"[XP] on_message error: {e}")
+
+    await bot.process_commands(message)
+
 # ============================================================
-# Race Test Harness (Fake Scenarios -> later wire to Race API)
+# Race Live (OpenF1) + Kill Switch + Debug Tail (NO underscores)
 # ============================================================
 
-import json
-from typing import Dict, Any, Optional, List, Tuple
+RACE_LIVE_TASKS: Dict[int, asyncio.Task] = {}
+RACE_LIVE_ENABLED: Dict[int, bool] = {}
+RACE_LIVE_DEBUG: Dict[int, deque] = {}
+RACE_LIVE_POSTED_SIGS: Dict[int, set] = {}
+
+OPENF1_BASE = "https://api.openf1.org/v1"
+
+def _racelog(gid: int, msg: str) -> None:
+    buf = RACE_LIVE_DEBUG.setdefault(gid, deque(maxlen=200))
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"{ts} {msg}"
+    buf.append(line)
+    logging.info(f"[RaceLive][{gid}] {msg}")
+
+def _racetail(gid: int, n: int = 20) -> str:
+    buf = RACE_LIVE_DEBUG.get(gid) or deque()
+    tail = list(buf)[-n:]
+    return "\n".join(tail) if tail else "(no debug lines captured)"
+
+async def _openf1_get(http: aiohttp.ClientSession, endpoint: str, params: Dict[str, Any]) -> Any:
+    url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
+    async with http.get(url, params=params, timeout=aiohttp.ClientTimeout(total=20)) as r:
+        if r.status in (401, 403):
+            text = await r.text()
+            raise RuntimeError(f"OpenF1 auth error {r.status}: {text[:200]}")
+        r.raise_for_status()
+        return await r.json()
+
+def _session_type_upper(s: Dict[str, Any]) -> str:
+    return str(s.get("session_type") or s.get("session_name") or "").upper().strip()
+
+FOLLOW_SESSION_TYPES = {
+    "RACE",
+    "QUALIFYING",
+    "QUALI",
+    "SPRINT",
+    "SPRINT QUALIFYING",
+    "SPRINT SHOOTOUT",
+}
+
+def _parse_iso(dt_str: str) -> datetime:
+    return datetime.fromisoformat(dt_str)
+
+async def _get_forum_channel_live(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
+    forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
+    if not forum_id:
+        return None
+    try:
+        ch = guild.get_channel(int(forum_id))
+        if ch is None:
+            ch = await guild.fetch_channel(int(forum_id))
+        return ch
+    except Exception as e:
+        logging.error(f"[RaceLive] Could not fetch forum channel {forum_id}: {e}")
+        return None
+
+async def _ensure_live_thread(guild: discord.Guild, title: str) -> discord.Thread:
+    ch = await _get_forum_channel_live(guild)
+    if ch is None:
+        raise RuntimeError("RACE_FORUM_CHANNEL_ID not set or not accessible.")
+
+    if isinstance(ch, discord.ForumChannel):
+        created = await ch.create_thread(
+            name=title,
+            content=f"📡 Live thread created by {bot.user.mention}",
+            auto_archive_duration=1440,
+        )
+        if isinstance(created, tuple) and len(created) >= 1:
+            return created[0]
+        return created
+
+    if isinstance(ch, discord.TextChannel):
+        msg = await ch.send(f"📡 **{title}**")
+        return await msg.create_thread(name=title, auto_archive_duration=1440)
+
+    raise RuntimeError("RACE_FORUM_CHANNEL_ID must point to a ForumChannel or TextChannel.")
+
+async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optional[tuple[datetime, datetime, Dict[str, Any], list]]:
+    latest = await _openf1_get(http, "sessions", {"session_key": "latest"})
+    if not latest:
+        return None
+
+    meeting_key = latest[0].get("meeting_key")
+    if not meeting_key:
+        return None
+
+    all_sessions = await _openf1_get(http, "sessions", {"meeting_key": meeting_key})
+    if not all_sessions:
+        return None
+
+    relevant = [s for s in all_sessions if _session_type_upper(s) in FOLLOW_SESSION_TYPES]
+    if not relevant:
+        return None
+
+    starts = [_parse_iso(s["date_start"]) for s in relevant if s.get("date_start")]
+    ends = [_parse_iso(s["date_end"]) for s in relevant if s.get("date_end")]
+    if not starts or not ends:
+        return None
+
+    pad_hours = int(os.getenv("RACE_WINDOW_PADDING_HOURS", "24"))
+    pad = timedelta(hours=max(0, min(72, pad_hours)))
+
+    window_start = min(starts) - pad
+    window_end = max(ends) + pad
+
+    meta = relevant[0]
+    return window_start, window_end, meta, relevant
+
+async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_key: int):
+    gid = guild.id
+    RACE_LIVE_ENABLED[gid] = True
+    RACE_LIVE_POSTED_SIGS.setdefault(gid, set())
+
+    poll_s = float(os.getenv("OPENF1_ACTIVE_POLL_SECONDS", "3"))
+    poll_s = max(1.0, min(15.0, poll_s))
+
+    _racelog(gid, f"race_live_loop started (session_key={session_key}, poll={poll_s}s)")
+    await thread.send(f"📡 Live follower attached. `session_key={session_key}`")
+
+    async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
+        while RACE_LIVE_ENABLED.get(gid, False):
+            try:
+                _racelog(gid, "poll race_control")
+                rc = await _openf1_get(http, "race_control", {"session_key": session_key})
+                _racelog(gid, f"race_control items={len(rc)}")
+
+                sigs = RACE_LIVE_POSTED_SIGS[gid]
+                for item in rc[-30:]:
+                    msg = str(item.get("message") or "").strip()
+                    if not msg:
+                        continue
+                    dt = str(item.get("date") or "")
+                    sig = f"{dt}|{msg}"
+                    if sig in sigs:
+                        continue
+                    sigs.add(sig)
+                    await thread.send(f"🏁 {msg}")
+
+                await asyncio.sleep(poll_s)
+
+            except asyncio.CancelledError:
+                _racelog(gid, "race_live_loop cancelled")
+                raise
+            except Exception as e:
+                _racelog(gid, f"ERROR {type(e).__name__}: {e}")
+                await asyncio.sleep(5)
+
+    _racelog(gid, "race_live_loop exited")
+
+async def race_supervisor_loop():
+    await bot.wait_until_ready()
+    logging.info("[RaceLive] Supervisor started")
+
+    idle_s = int(os.getenv("OPENF1_IDLE_CHECK_SECONDS", str(60 * 30)))
+    idle_s = max(60, min(60 * 180, idle_s))
+
+    async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
+        while not bot.is_closed():
+            try:
+                info = await _pick_current_meeting_and_window(http)
+                if not info:
+                    await asyncio.sleep(idle_s)
+                    continue
+
+                window_start, window_end, meta, relevant = info
+                now = datetime.now(timezone.utc)
+                in_window = window_start <= now <= window_end
+
+                def _key(s):
+                    ds = s.get("date_start")
+                    return _parse_iso(ds) if ds else datetime.min.replace(tzinfo=timezone.utc)
+
+                latest_relevant = sorted(relevant, key=_key)[-1]
+                session_key = int(latest_relevant.get("session_key"))
+
+                for guild in bot.guilds:
+                    gid = guild.id
+                    task = RACE_LIVE_TASKS.get(gid)
+                    running = task is not None and not task.done()
+
+                    if in_window and not running:
+                        location = str(meta.get("location") or meta.get("meeting_name") or "F1").strip()
+                        title = f"{location} — Live Weekend"
+                        thread = await _ensure_live_thread(guild, title)
+
+                        _racelog(gid, f"Supervisor starting live loop (session_key={session_key})")
+                        RACE_LIVE_ENABLED[gid] = True
+
+                        async def runner(g=guild, th=thread, sk=session_key):
+                            try:
+                                await race_live_loop(g, th, sk)
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception as e:
+                                _racelog(g.id, f"FATAL {type(e).__name__}: {e}")
+
+                        RACE_LIVE_TASKS[gid] = bot.loop.create_task(runner())
+
+                    if (not in_window) and running:
+                        _racelog(gid, "Supervisor stopping live loop (out of window)")
+                        RACE_LIVE_ENABLED[gid] = False
+                        task.cancel()
+
+                await asyncio.sleep(60 if in_window else idle_s)
+
+            except Exception as e:
+                logging.error(f"[RaceLive] Supervisor error: {e}")
+                await asyncio.sleep(60)
+
+@bot.command(name="racelivekill", aliases=["race_live_kill"])
+@commands.has_permissions(administrator=True)
+async def racelivekill(ctx):
+    """Emergency kill switch: stop race-live module only + show tail."""
+    guild = ctx.guild
+    if not guild:
+        return
+    gid = guild.id
+
+    RACE_LIVE_ENABLED[gid] = False
+    t = RACE_LIVE_TASKS.get(gid)
+    if t and not t.done():
+        t.cancel()
+
+    tail = _racetail(gid, 20)
+    logging.warning(f"[RaceLive][{gid}] KILL SWITCH. Tail:\n{tail}")
+    await ctx.send("🛑 **Race live killed.**\n```text\n" + tail[:1800] + "\n```")
+
+@bot.command(name="racelivetail", aliases=["race_live_tail"])
+@commands.has_permissions(administrator=True)
+async def racelivetail(ctx, lines: int = 20):
+    """Show last N debug lines for race-live module."""
+    guild = ctx.guild
+    if not guild:
+        return
+    lines = max(1, min(50, int(lines)))
+    tail = _racetail(guild.id, lines)
+    await ctx.send("```text\n" + tail[:1900] + "\n```")
+
+@bot.command(name="racelivestart", aliases=["race_live_start"])
+@commands.has_permissions(administrator=True)
+async def racelivestart(ctx):
+    """Manually start race-live right now (ignores weekend window)."""
+    guild = ctx.guild
+    if not guild:
+        return
+    gid = guild.id
+
+    t = RACE_LIVE_TASKS.get(gid)
+    if t and not t.done():
+        RACE_LIVE_ENABLED[gid] = False
+        t.cancel()
+
+    async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
+        latest = await _openf1_get(http, "sessions", {"session_key": "latest"})
+        if not latest:
+            return await ctx.send("❌ No OpenF1 sessions available right now.")
+        session_key = int(latest[0].get("session_key"))
+
+    title = "F1 — Live (Manual)"
+    thread = await _ensure_live_thread(guild, title)
+
+    RACE_LIVE_ENABLED[gid] = True
+
+    async def runner():
+        try:
+            await race_live_loop(guild, thread, session_key)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            _racelog(gid, f"FATAL {type(e).__name__}: {e}")
+
+    RACE_LIVE_TASKS[gid] = bot.loop.create_task(runner())
+    await ctx.send(f"✅ Started race live manually (session_key={session_key}).")
+
+@bot.command(name="racelivestop", aliases=["race_live_stop"])
+@commands.has_permissions(administrator=True)
+async def racelivestop(ctx):
+    """Gracefully stop race-live for this guild."""
+    guild = ctx.guild
+    if not guild:
+        return
+    gid = guild.id
+
+    RACE_LIVE_ENABLED[gid] = False
+    t = RACE_LIVE_TASKS.get(gid)
+    if t and not t.done():
+        t.cancel()
+
+    await ctx.send("🛑 Race live stopped.")
+
+# ============================================================
+# Race Test Harness (Fake Scenarios)
+#   - kept for testing
+#   - commands renamed to NO underscores
+# ============================================================
 
 # In-memory tasks so you can stop a running test
 RACE_TEST_TASKS: Dict[int, asyncio.Task] = {}  # key: guild_id
@@ -625,7 +1214,6 @@ EVENT_STYLE = {
     "SC":            ("🟡", "**SAFETY CAR**"),
     "VSC":           ("🟠", "**VSC**"),
     "RED":           ("🔴", "**RED FLAG**"),
-    # Quali / extended race test events
     "YELLOW":         ("🟡", "**YELLOW**"),
     "SEGMENT_START":  ("🟦", "**Segment started**"),
     "SEGMENT_END":    ("⬛", "**Segment ended**"),
@@ -648,7 +1236,6 @@ def _scenario_session(scenario: Dict[str, Any]) -> str:
     return str(meta.get("session") or "").upper().strip()
 
 def _scenario_grid_map(scenario: Dict[str, Any]) -> Dict[str, str]:
-    """driver_id -> display name"""
     out: Dict[str, str] = {}
     for d in (scenario.get("grid") or []):
         if not isinstance(d, dict):
@@ -716,48 +1303,37 @@ def _format_quali_classification(scenario: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 def _wrap_spoiler(text: str) -> str:
-    # Discord spoilers can wrap multi-line text; keep it plain text for compatibility.
     return "\n".join(f"||{line}||" for line in text.splitlines())
 
 def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
-    # 1) Try env var first
     path = (os.getenv("RACE_SCENARIOS_FILE") or "").strip()
-
-    # 2) Fallback to scenario.json in the same directory as bot.py
     if not path:
         path = os.path.join(os.path.dirname(__file__), "scenario.json")
 
     logging.info(f"[RaceTest] Loading scenarios from: {path}")
 
     try:
+        import json
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         merged = dict(DEFAULT_RACE_SCENARIOS)
         merged.update(data or {})
 
-        logging.info(
-            f"[RaceTest] Loaded scenarios OK: {list(data.keys())}"
-        )
+        logging.info(f"[RaceTest] Loaded scenarios OK: {list(data.keys())}")
         return merged
 
     except Exception as e:
-        logging.error(
-            f"[RaceTest] Failed to load scenario.json, using defaults: {e}"
-        )
+        logging.error(f"[RaceTest] Failed to load scenario.json, using defaults: {e}")
         return DEFAULT_RACE_SCENARIOS
 
 def _format_quali_knockouts(scenario: Dict[str, Any], knocked_in: str) -> str:
-    """
-    knocked_in: "Q1" or "Q2"
-    Returns plain text lines (not spoiler-wrapped).
-    """
     cls = scenario.get("classification") or {}
     results = cls.get("results") or []
     grid = _scenario_grid_map(scenario)
 
     knocked_in = (knocked_in or "").upper().strip()
-    knocked: List[Tuple[int, str, str]] = []  # (pos, name, note)
+    knocked: List[Tuple[int, str, str]] = []
 
     for r in results:
         if not isinstance(r, dict):
@@ -783,7 +1359,6 @@ def _format_quali_knockouts(scenario: Dict[str, Any], knocked_in: str) -> str:
         lines.append(f"P{pos} {name}{tail}")
     return "\n".join(lines)
 
-
 async def _get_forum_channel(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
     forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
     if not forum_id:
@@ -797,19 +1372,11 @@ async def _get_forum_channel(guild: discord.Guild) -> Optional[discord.abc.Guild
         logging.error(f"[RaceTest] Could not fetch forum channel {forum_id}: {e}")
         return None
 
-async def _ensure_test_thread(
-    guild: discord.Guild,
-    title: str,
-) -> Optional[discord.Thread]:
-    """
-    Creates a new forum post (thread) for the test run.
-    Falls back to returning None if it can't create.
-    """
+async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[discord.Thread]:
     ch = await _get_forum_channel(guild)
     if ch is None:
         return None
 
-    # Most common case: discord.ForumChannel
     try:
         if isinstance(ch, discord.ForumChannel):
             created = await ch.create_thread(
@@ -817,14 +1384,12 @@ async def _ensure_test_thread(
                 content=f"🧪 Race test thread created by {bot.user.mention}",
                 auto_archive_duration=1440,
             )
-            # discord.py returns ThreadWithMessage in some versions: (thread, message)
             if isinstance(created, tuple) and len(created) >= 1:
                 return created[0]
             return created
     except Exception as e:
         logging.error(f"[RaceTest] Forum create_thread failed: {e}")
 
-    # Fallback: if it's a TextChannel, create a thread from a starter message
     try:
         if isinstance(ch, discord.TextChannel):
             msg = await ch.send(f"🧪 Race test thread: **{title}**")
@@ -835,13 +1400,7 @@ async def _ensure_test_thread(
 
     return None
 
-async def _emit_race_event(
-    thread: discord.Thread,
-    scenario: Dict[str, Any],
-    event: Dict[str, Any],
-    grid_map: Dict[str, str],
-) -> None:
-    """Emit a single event message to the test thread, with richer formatting for new event types."""
+async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], event: Dict[str, Any], grid_map: Dict[str, str]) -> None:
     etype = (event.get("type") or "INFO").upper().strip()
     emoji, label = EVENT_STYLE.get(etype, ("ℹ️", "**Info**"))
 
@@ -849,7 +1408,6 @@ async def _emit_race_event(
     ev_session = str(event.get("session") or "").strip()
     segment = str(event.get("segment") or "").strip().upper()
 
-    # Special formatting: purple sectors
     if etype == "PURPLE_SECTOR":
         did = str(event.get("driver_id") or "").strip()
         name = grid_map.get(did, did or "Unknown")
@@ -863,14 +1421,11 @@ async def _emit_race_event(
         await thread.send(text)
         return
 
-    # Segment start/end (quali)
     if etype in ("SEGMENT_START", "SEGMENT_END") and segment:
-        # Prefer segment name in the header
         label = f"**{segment} {'started' if etype == 'SEGMENT_START' else 'ended'}**"
 
     detail = (event.get("detail") or "").strip()
 
-    # SESSION_START suffix: prefer explicit event session, fallback to scenario session
     if etype == "SESSION_START":
         use_session = ev_session or scenario_session
         suffix = f" ({use_session})" if use_session else ""
@@ -883,7 +1438,6 @@ async def _emit_race_event(
 
     await thread.send(text)
 
-    # Auto-emit the big spoiler result dumps when the timeline hits the right moment.
     if etype in ("CLASSIFICATION_READY", "RESULTS_READY"):
         session_type = scenario_session
         if session_type == "RACE" and etype == "CLASSIFICATION_READY":
@@ -892,22 +1446,16 @@ async def _emit_race_event(
         elif session_type in ("QUALI", "QUALIFYING") and etype == "RESULTS_READY":
             body = _format_quali_classification(scenario)
             await thread.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
-    
-    # Post knockouts at end of Q1/Q2 (QUALI only)
+
     if etype == "SEGMENT_END" and scenario_session in ("QUALI", "QUALIFYING") and segment in ("Q1", "Q2"):
         body = _format_quali_knockouts(scenario, segment)
         await thread.send(_wrap_spoiler(f"🚫 {segment} Knockouts\n{body}"))
 
-async def _run_race_test_scenario(
-    guild: discord.Guild,
-    scenario_name: str,
-    speed: float = 1.0,
-) -> None:
+async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, speed: float = 1.0) -> None:
     scenarios = _load_race_scenarios()
     scenario = scenarios.get(scenario_name)
 
     if not scenario:
-        # Try case-insensitive match
         for k, v in scenarios.items():
             if k.lower() == scenario_name.lower():
                 scenario_name = k
@@ -923,43 +1471,25 @@ async def _run_race_test_scenario(
         raise RuntimeError(f"Scenario '{scenario_name}' has no events.")
 
     grid_map = _scenario_grid_map(scenario)
-
-    # Create a new thread for each run
     thread = await _ensure_test_thread(guild, title)
     if thread is None:
         raise RuntimeError("Could not create or access the race forum/thread. Check RACE_FORUM_CHANNEL_ID and bot perms.")
 
-    # Sort by t and play back
     events_sorted = sorted(events, key=lambda e: float(e.get("t", 0)))
     await thread.send(f"🧪 Starting scenario: **{scenario_name}**\nSpeed: **x{speed}**")
 
-    t0 = float(events_sorted[0].get("t", 0))
-    last_t = t0
-
+    last_t = float(events_sorted[0].get("t", 0))
     for ev in events_sorted:
-        # Cooperative cancel
         await asyncio.sleep(0)
-
         cur_t = float(ev.get("t", last_t))
         dt = max(0.0, cur_t - last_t)
         last_t = cur_t
-
-        # Apply speed: smaller sleep if speed > 1
         sleep_for = dt / max(0.01, float(speed))
         if sleep_for > 0:
             await asyncio.sleep(sleep_for)
-
         await _emit_race_event(thread, scenario, ev, grid_map)
 
     await thread.send("✅ Scenario complete.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def race_test_list(ctx):
-    """List available race test scenarios."""
-    scenarios = _load_race_scenarios()
-    names = sorted(scenarios.keys())
-    await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
 
 def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
     scenarios = _load_race_scenarios()
@@ -969,23 +1499,27 @@ def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
     scenario = scenarios.get(name)
     if scenario:
         return name, scenario
-    # Case-insensitive match
     for k, v in scenarios.items():
         if k.lower() == name.lower():
             return k, v
     raise RuntimeError(f"Scenario '{name}' not found.")
 
-@bot.command()
+@bot.command(name="racetestlist", aliases=["race_test_list"])
 @commands.has_permissions(administrator=True)
-async def race_test_info(ctx, scenario: str):
-    """Show details about a scenario (session type, event counts, etc.)."""
+async def racetestlist(ctx):
+    scenarios = _load_race_scenarios()
+    names = sorted(scenarios.keys())
+    await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
+
+@bot.command(name="racetestinfo", aliases=["race_test_info"])
+@commands.has_permissions(administrator=True)
+async def racetestinfo(ctx, scenario: str):
     try:
         name, sc = _resolve_scenario(scenario)
     except Exception as e:
         await ctx.send(f"❌ {e}")
         return
 
-    meta = _scenario_meta(sc)
     title = _scenario_title(sc, fallback=name)
     session_type = _scenario_session(sc) or "(none)"
     events = sc.get("events") or []
@@ -1004,10 +1538,9 @@ async def race_test_info(ctx, scenario: str):
         f"- **Has classification:** {'yes' if has_cls else 'no'}"
     )
 
-@bot.command()
+@bot.command(name="racetestresults", aliases=["race_test_results"])
 @commands.has_permissions(administrator=True)
-async def race_test_results(ctx, scenario: str):
-    """Preview the spoiler results message for a scenario (does not start a thread)."""
+async def racetestresults(ctx, scenario: str):
     try:
         name, sc = _resolve_scenario(scenario)
     except Exception as e:
@@ -1024,15 +1557,9 @@ async def race_test_results(ctx, scenario: str):
     else:
         await ctx.send(f"ℹ️ Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
 
-@bot.command()
+@bot.command(name="raceteststart", aliases=["race_test_start"])
 @commands.has_permissions(administrator=True)
-async def race_test_start(ctx, scenario: str = None, speed: float = None):
-    """
-    Start a race test scenario in the configured forum channel.
-    Usage:
-      !race_test_start practice_short
-      !race_test_start race_chaos 5
-    """
+async def raceteststart(ctx, scenario: str = None, speed: float = None):
     guild = ctx.guild
     if not guild:
         await ctx.send("❌ Must be run in a server.")
@@ -1047,7 +1574,6 @@ async def race_test_start(ctx, scenario: str = None, speed: float = None):
     except Exception:
         speed = 1.0
 
-    # Stop any running test for this guild
     existing = RACE_TEST_TASKS.get(guild.id)
     if existing and not existing.done():
         existing.cancel()
@@ -1069,10 +1595,9 @@ async def race_test_start(ctx, scenario: str = None, speed: float = None):
 
     await ctx.send(f"🧪 Starting race test: `{scenario}` (speed x{speed})")
 
-@bot.command()
+@bot.command(name="raceteststop", aliases=["race_test_stop"])
 @commands.has_permissions(administrator=True)
-async def race_test_stop(ctx):
-    """Stop a running race test scenario."""
+async def raceteststop(ctx):
     guild = ctx.guild
     if not guild:
         return
@@ -1082,7 +1607,6 @@ async def race_test_stop(ctx):
         await ctx.send("🛑 Race test stopped.")
     else:
         await ctx.send("ℹ️ No race test running.")
-
 
 # ----------------------------
 # Start dashboard + run bot

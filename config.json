@@ -51,5 +51,12 @@
     "GET /status"
   ],
   "periodic_role_recovery_minutes": 60,
-  "periodic_history_scan_limit": 100
+  "periodic_history_scan_limit": 100,
+
+  "xp_enabled": true,
+  "xp_cooldown_seconds": 60,
+  "xp_min_gain": 15,
+  "xp_max_gain": 25,
+  "xp_min_level_channels": {}
 }
+
