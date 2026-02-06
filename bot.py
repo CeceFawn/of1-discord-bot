@@ -720,10 +720,11 @@ def _wrap_spoiler(text: str) -> str:
     return "\n".join(f"||{line}||" for line in text.splitlines())
 
 def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
+    # 1) Try env var first
     path = (os.getenv("RACE_SCENARIOS_FILE") or "").strip()
 
+    # 2) Fallback to scenario.json in the same directory as bot.py
     if not path:
-        # fallback: same directory as bot.py
         path = os.path.join(os.path.dirname(__file__), "scenario.json")
 
     logging.info(f"[RaceTest] Loading scenarios from: {path}")
@@ -731,12 +732,21 @@ def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
         merged = dict(DEFAULT_RACE_SCENARIOS)
         merged.update(data or {})
+
+        logging.info(
+            f"[RaceTest] Loaded scenarios OK: {list(data.keys())}"
+        )
         return merged
+
     except Exception as e:
-        logging.error(f"[RaceTest] Failed to load scenarios from {path}: {e}")
+        logging.error(
+            f"[RaceTest] Failed to load scenario.json, using defaults: {e}"
+        )
         return DEFAULT_RACE_SCENARIOS
+
 
 
 async def _get_forum_channel(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
