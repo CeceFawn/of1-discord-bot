@@ -717,7 +717,7 @@ def _format_quali_classification(scenario: Dict[str, Any]) -> str:
 
 def _wrap_spoiler(text: str) -> str:
     # Discord spoilers can wrap multi-line text; keep it plain text for compatibility.
-    return f"||{text}||"
+    return "\n".join(f"||{line}||" for line in text.splitlines())
 
 def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
     """
