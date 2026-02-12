@@ -20,6 +20,110 @@ from dashboard import start_dashboard_thread, set_bot_reference
 from storage import load_config, save_config, load_state, save_state, set_env_value
 from settings import LOG_PATH
 
+import io
+from PIL import Image, ImageDraw, ImageFont
+
+# ----------------------------
+# Rank card builder
+# ----------------------------
+async def fetch_avatar_image(member: discord.Member, size: int = 256) -> Image.Image:
+    """
+    Returns a Pillow Image of the member's avatar.
+    """
+    asset = member.display_avatar.replace(size=size, static_format="png")
+    data = await asset.read()
+    im = Image.open(io.BytesIO(data)).convert("RGBA")
+    return im
+
+def circle_crop(im: Image.Image, out_size: int) -> Image.Image:
+    """
+    Resizes and circle-crops an RGBA image to out_size x out_size.
+    """
+    im = im.resize((out_size, out_size), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (out_size, out_size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, out_size - 1, out_size - 1), fill=255)
+
+    out = Image.new("RGBA", (out_size, out_size), (0, 0, 0, 0))
+    out.paste(im, (0, 0), mask)
+    return out
+
+def draw_progress_bar(draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, pct: float):
+    """
+    Draws a rounded-ish bar (simple rectangle + fill).
+    pct: 0..1
+    """
+    pct = max(0.0, min(1.0, pct))
+    # background
+    draw.rounded_rectangle((x, y, x+w, y+h), radius=h//2, fill=(60, 60, 70, 255))
+    # fill
+    fill_w = int(w * pct)
+    if fill_w > 0:
+        draw.rounded_rectangle((x, y, x+fill_w, y+h), radius=h//2, fill=(120, 200, 255, 255))
+
+async def build_rank_card_png(
+    member: discord.Member,
+    level: int,
+    xp: int,
+    xp_next: int,
+    title: str = "Rookie",
+    template_path: str | None = None,
+) -> bytes:
+    """
+    Returns PNG bytes for a rank card with the user's avatar embedded.
+    """
+    W, H = 900, 260
+
+    # 1) Background (template image OR solid color)
+    if template_path:
+        base = Image.open(template_path).convert("RGBA").resize((W, H), Image.LANCZOS)
+    else:
+        base = Image.new("RGBA", (W, H), (24, 26, 32, 255))
+
+    draw = ImageDraw.Draw(base)
+
+    # 2) Avatar
+    avatar = await fetch_avatar_image(member, size=256)
+    avatar = circle_crop(avatar, 170)
+    base.paste(avatar, (35, 45), avatar)
+
+    # Optional: avatar ring
+    ring = Image.new("RGBA", (170, 170), (0, 0, 0, 0))
+    rd = ImageDraw.Draw(ring)
+    rd.ellipse((0, 0, 169, 169), outline=(120, 200, 255, 255), width=6)
+    base.paste(ring, (35, 45), ring)
+
+    # 3) Fonts
+    # Put a .ttf in your project folder (recommended) like fonts/Inter-SemiBold.ttf
+    # Fallback: PIL default (looks meh)
+    try:
+        font_name = ImageFont.truetype("fonts/Inter-SemiBold.ttf", 36)
+        font_small = ImageFont.truetype("fonts/Inter-Regular.ttf", 22)
+        font_tiny = ImageFont.truetype("fonts/Inter-Regular.ttf", 18)
+    except Exception:
+        font_name = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+        font_tiny = ImageFont.load_default()
+
+    # 4) Text
+    username = member.display_name
+    draw.text((230, 45), username, font=font_name, fill=(240, 240, 245, 255))
+    draw.text((230, 95), f"Title: {title}", font=font_small, fill=(180, 185, 195, 255))
+    draw.text((730, 45), f"LVL {level}", font=font_name, fill=(120, 200, 255, 255))
+
+    # 5) XP bar + numbers
+    pct = 0.0 if xp_next <= 0 else (xp / xp_next)
+    bar_x, bar_y, bar_w, bar_h = 230, 150, 635, 26
+    draw_progress_bar(draw, bar_x, bar_y, bar_w, bar_h, pct)
+
+    draw.text((230, 185), f"XP: {xp} / {xp_next}", font=font_tiny, fill=(180, 185, 195, 255))
+
+    # 6) Export to bytes
+    out = io.BytesIO()
+    base.save(out, format="PNG")
+    return out.getvalue()
+
+
 # ✅ XP storage module (make sure xp_storage.py is next to bot.py)
 from xp_storage import (
     get_xp_state_path,
@@ -327,24 +431,28 @@ async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
 # ----------------------------
 # Commands: XP
 # ----------------------------
-@bot.command(name="xprank")
-async def xprank(ctx, member: Optional[discord.Member] = None):
-    """Show your (or someone’s) XP + level."""
-    if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
-
+@bot.command(name="rank")
+async def rank(ctx, member: discord.Member = None):
     member = member or ctx.author
-    rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
-    xp = int(rec.get("xp", 0) or 0)
-    lvl, into, span = xp_progress_to_next(xp)
 
-    msg = (
-        f"🏅 **Rank for {member.display_name}**\n"
-        f"- **Level:** {lvl}\n"
-        f"- **XP:** {xp}\n"
-        f"- **Progress:** {into}/{span} to next level"
+    # replace these with your real XP/level values
+    level = 7
+    xp = 320
+    xp_next = 500
+    title = "Regular"
+
+    png_bytes = await build_rank_card_png(
+        member=member,
+        level=level,
+        xp=xp,
+        xp_next=xp_next,
+        title=title,
+        template_path = "assets/rank_template.png"
     )
-    await ctx.send(msg)
+
+    file = discord.File(io.BytesIO(png_bytes), filename="rank.png")
+    await ctx.send(file=file)
+
 
 @bot.command(name="xpleaderboard", aliases=["xptop"])
 async def xpleaderboard(ctx, limit: int = 10):
