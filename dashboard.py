@@ -2,48 +2,39 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
+import threading
 from datetime import datetime
-from functools import wraps
-from typing import Any
 
 import bcrypt
 import psutil
-from flask import Flask, abort, redirect, render_template_string, request, session, url_for
+from functools import wraps
+from flask import Flask, request, redirect, url_for, render_template_string, session, abort
 
 from settings import LOG_PATH
 from storage import load_config, save_config, load_state, save_state
 
-# ------------------------------------------------------------
-# Flask app + bot reference
-# ------------------------------------------------------------
 app = Flask(__name__)
 
+# ----------------------------
+# Optional bot reference
+# ----------------------------
 bot_reference = None
+
 def set_bot_reference(bot):
     global bot_reference
     bot_reference = bot
 
 DASHBOARD_STARTED_AT = time.time()
 
-# ------------------------------------------------------------
-# Auth config (username/password login)
-# ------------------------------------------------------------
+# ----------------------------
+# Auth config
+# ----------------------------
 SECRET_KEY = (os.getenv("DASHBOARD_SECRET_KEY") or "").strip()
 if not SECRET_KEY:
     raise RuntimeError("DASHBOARD_SECRET_KEY missing in .env")
 app.secret_key = SECRET_KEY
 
-# Session cookie hardening
-# If you put this behind HTTPS (recommended), set DASHBOARD_HTTPS=1
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=(os.getenv("DASHBOARD_HTTPS", "").strip() == "1"),
-)
-
-# Users: {"username": "bcrypt_hash_string"}
 RAW_USERS = (os.getenv("DASHBOARD_USERS_JSON") or "{}").strip()
 try:
     DASH_USERS: dict[str, str] = json.loads(RAW_USERS)
@@ -52,17 +43,15 @@ try:
 except Exception as e:
     raise RuntimeError(f"DASHBOARD_USERS_JSON is not valid JSON: {e}")
 
-# Optional IP allowlist (comma separated)
 ALLOWED_IPS = [x.strip() for x in (os.getenv("DASHBOARD_ALLOWED_IPS") or "").split(",") if x.strip()]
 
-# Simple rate limit per IP for login attempts
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 MAX_ATTEMPTS = 8
 WINDOW_SECONDS = 10 * 60  # 10 minutes
 
 
 def _client_ip() -> str:
-    # NOTE: if you're behind a reverse proxy later, you'll want to trust X-Forwarded-For carefully.
+    # NOTE: if you later put this behind a reverse proxy, handle X-Forwarded-For carefully.
     return request.remote_addr or "unknown"
 
 
@@ -81,7 +70,7 @@ def _rate_limited() -> bool:
     return len(arr) >= MAX_ATTEMPTS
 
 
-def _record_attempt() -> None:
+def _record_attempt():
     ip = _client_ip()
     LOGIN_ATTEMPTS.setdefault(ip, []).append(time.time())
 
@@ -97,9 +86,9 @@ def login_required(fn):
     return wrapper
 
 
-# ------------------------------------------------------------
+# ----------------------------
 # UI helpers
-# ------------------------------------------------------------
+# ----------------------------
 BASE_TEMPLATE = """
 <!doctype html>
 <html>
@@ -122,7 +111,7 @@ BASE_TEMPLATE = """
       </form>
 
       <form action="{{ url_for('logout') }}" method="post" style="display:inline;">
-        <button style="background:#222;color:#ddd;border:1px solid #333;padding:6px 10px;border-radius:8px;cursor:pointer;">
+        <button style="background:#222;color:#eee;border:1px solid #333;padding:6px 10px;border-radius:8px;cursor:pointer;">
           Logout
         </button>
       </form>
@@ -167,7 +156,7 @@ def _render(body: str, flash: str = ""):
     )
 
 
-def _json_editor(title: str, obj: Any) -> str:
+def _json_editor(title: str, obj) -> str:
     pretty = json.dumps(obj, indent=2, ensure_ascii=False)
     return render_template_string(
         """
@@ -205,9 +194,9 @@ def _backup_file(path: str) -> None:
         pass
 
 
-# ------------------------------------------------------------
+# ----------------------------
 # Auth routes
-# ------------------------------------------------------------
+# ----------------------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if not _ip_allowed():
@@ -229,37 +218,28 @@ def login():
                 return redirect(url_for("logs"))
             err = "Invalid username or password."
 
-    return render_template_string(
-        """
-        <html><body style="background:#111;color:#eee;font-family:system-ui;padding:30px;">
-          <h2>Dashboard Login</h2>
-          {% if err %}<div style="color:#f66;margin:10px 0;">{{ err }}</div>{% endif %}
-          <form method="post" style="display:flex;flex-direction:column;gap:10px;max-width:320px;">
-            <input name="username" placeholder="Username"
-              style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
-            <input name="password" type="password" placeholder="Password"
-              style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
-            <button type="submit"
-              style="padding:10px;border-radius:10px;border:1px solid #333;background:#222;color:#eee;cursor:pointer;">
-              Login
-            </button>
-          </form>
-        </body></html>
-        """,
-        err=err,
-    )
+    return render_template_string("""
+    <html><body style="background:#111;color:#eee;font-family:system-ui;padding:30px;">
+      <h2>Dashboard Login</h2>
+      {% if err %}<div style="color:#f66;margin:10px 0;">{{ err }}</div>{% endif %}
+      <form method="post" style="display:flex;flex-direction:column;gap:10px;max-width:320px;">
+        <input name="username" placeholder="Username" style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
+        <input name="password" type="password" placeholder="Password" style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
+        <button type="submit" style="padding:10px;border-radius:10px;border:1px solid #333;background:#222;color:#eee;cursor:pointer;">Login</button>
+      </form>
+    </body></html>
+    """, err=err)
 
 
 @app.route("/logout", methods=["POST"])
-@login_required
 def logout():
     session.pop("dash_user", None)
     return redirect(url_for("login"))
 
 
-# ------------------------------------------------------------
+# ----------------------------
 # App routes
-# ------------------------------------------------------------
+# ----------------------------
 @app.route("/")
 @login_required
 def index():
@@ -295,12 +275,10 @@ def logs():
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
         <form method="get" style="display:flex;gap:8px;align-items:center;">
           <label style="color:#aaa;font-size:13px;">Tail</label>
-          <input name="tail" value="{tail_n}"
-            style="width:90px;background:#000;color:#eee;border:1px solid #333;border-radius:8px;padding:6px;" />
+          <input name="tail" value="{tail_n}" style="width:90px;background:#000;color:#eee;border:1px solid #333;border-radius:8px;padding:6px;" />
 
           <label style="color:#aaa;font-size:13px;">Filtered</label>
-          <select name="filtered"
-            style="background:#000;color:#eee;border:1px solid #333;border-radius:8px;padding:6px;">
+          <select name="filtered" style="background:#000;color:#eee;border:1px solid #333;border-radius:8px;padding:6px;">
             <option value="1" {"selected" if show_filtered else ""}>On</option>
             <option value="0" {"selected" if not show_filtered else ""}>Off</option>
           </select>
@@ -335,7 +313,6 @@ def status():
         <li><b>RAM:</b> {ram}%</li>
         <li><b>Dashboard uptime:</b> {proc_uptime_s}s</li>
         <li><b>Log path:</b> {_escape(LOG_PATH)}</li>
-        <li><b>IP allowlist:</b> {"(disabled)" if not ALLOWED_IPS else _escape(", ".join(ALLOWED_IPS))}</li>
       </ul>
     """
     return _render(body)
@@ -383,9 +360,6 @@ def restart():
     os._exit(1)
 
 
-# ------------------------------------------------------------
-# Runner (threaded)
-# ------------------------------------------------------------
 def run_dashboard():
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
