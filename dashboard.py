@@ -252,11 +252,11 @@ def logs():
     cfg = load_config() or {}
     filters = cfg.get("log_filters", []) or []
 
-    tail = request.args.get("tail", "400")
+    tail = request.args.get("tail", "100")
     try:
         tail_n = max(50, min(4000, int(tail)))
     except Exception:
-        tail_n = 400
+        tail_n = 100
 
     show_filtered = (request.args.get("filtered", "1").strip() != "0")
 
