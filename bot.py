@@ -286,6 +286,12 @@ F1_QUIZ_FILE = os.path.join(os.path.dirname(__file__), "f1_quiz.json")
 CIRCUIT_INFO: Dict[str, Dict[str, Any]] = {}
 CIRCUIT_ALIASES: Dict[str, str] = {}
 F1_QUIZ_QUESTIONS: List[Dict[str, Any]] = []
+QUIZ_DIFFICULTY_POINTS = {
+    "easy": 1,
+    "medium": 2,
+    "hard": 3,
+    "expert": 5,
+}
 
 def load_f1_static_data() -> None:
     global CIRCUIT_INFO, CIRCUIT_ALIASES, F1_QUIZ_QUESTIONS
@@ -708,6 +714,60 @@ def _quiz_scores_for_guild(guild_id: int) -> Dict[str, int]:
     if gid not in root or not isinstance(root.get(gid), dict):
         root[gid] = {}
     return root[gid]
+
+def _quiz_points_for_question(q: Dict[str, Any]) -> int:
+    try:
+        if "points" in q:
+            return max(1, int(q.get("points")))
+    except Exception:
+        pass
+    difficulty = str(q.get("difficulty") or "easy").lower().strip()
+    return QUIZ_DIFFICULTY_POINTS.get(difficulty, 1)
+
+def _quiz_category_for_question(q: Dict[str, Any]) -> str:
+    return str(q.get("category") or "general").lower().strip() or "general"
+
+def _quiz_history_state(guild_id: int) -> Dict[str, Any]:
+    root = _state_bucket("quiz_history")
+    gid = str(guild_id)
+    if gid not in root or not isinstance(root.get(gid), dict):
+        root[gid] = {"recent_questions": []}
+    hist = root[gid]
+    if not isinstance(hist.get("recent_questions"), list):
+        hist["recent_questions"] = []
+    return hist
+
+def _quiz_question_key(q: Dict[str, Any]) -> str:
+    return _clean_text_key(str(q.get("q") or ""))
+
+def _quiz_pick_question(guild_id: int, difficulty_filters: set[str], category_filters: set[str]) -> Optional[Dict[str, Any]]:
+    pool = []
+    for q in F1_QUIZ_QUESTIONS:
+        if not isinstance(q, dict) or not q.get("q"):
+            continue
+        q_diff = str(q.get("difficulty") or "easy").lower().strip()
+        q_cat = _quiz_category_for_question(q)
+        if difficulty_filters and q_diff not in difficulty_filters:
+            continue
+        if category_filters and q_cat not in category_filters:
+            continue
+        pool.append(q)
+    if not pool:
+        return None
+
+    hist = _quiz_history_state(guild_id)
+    recent = [str(x) for x in hist.get("recent_questions", []) if isinstance(x, str)]
+    recent_set = set(recent)
+    fresh = [q for q in pool if _quiz_question_key(q) not in recent_set]
+    chosen = random.choice(fresh if fresh else pool)
+
+    q_key = _quiz_question_key(chosen)
+    recent.append(q_key)
+    # Keep the anti-repeat window bounded and relative to question bank size.
+    max_keep = max(20, min(120, len(F1_QUIZ_QUESTIONS) // 3))
+    hist["recent_questions"] = recent[-max_keep:]
+    _save_state_quiet()
+    return chosen
 
 def _circuit_lookup(query: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     q = _clean_text_key(query)
@@ -1465,23 +1525,150 @@ async def help(ctx):
     else:
         await ctx.send("❌ You don't have access to any commands.")
 
+def _command_examples(prefix: str) -> Dict[str, str]:
+    p = prefix or "!"
+    return {
+        "ping": f"{p}ping",
+        "rank": f"{p}rank @DriverName",
+        "xpleaderboard": f"{p}xpleaderboard 10",
+        "xpset": f"{p}xpset @DriverName 2500",
+        "xpreset": f"{p}xpreset @DriverName",
+        "xpaudit": f"{p}xpaudit @DriverName",
+        "xpbackfillhistory": f"{p}xpbackfillhistory rebuild CONFIRM",
+        "schedule": f"{p}schedule 8",
+        "nextsession": f"{p}nextsession",
+        "f1reminders": f"{p}f1reminders on #admin-channel",
+        "f1reminderleads": f"{p}f1reminderleads 1440 60 15",
+        "circuit": f"{p}circuit spa",
+        "driverstats": f"{p}driver verstappen",
+        "teamstats": f"{p}team ferrari",
+        "quiz": f"{p}quiz hard strategy",
+        "quizanswer": f"{p}quizanswer virtual safety car",
+        "quizscore": f"{p}quizscore",
+        "predictpole": f"{p}predictpole Verstappen",
+        "predictsprintpole": f"{p}predictsprintpole Norris",
+        "predictpodium": f"{p}predictpodium Verstappen | Norris | Leclerc",
+        "predictsprintpodium": f"{p}predictsprintpodium Norris | Piastri | Leclerc",
+        "predictp10": f"{p}predictp10 Alonso",
+        "mypredictions": f"{p}mypredictions",
+        "predictions": f"{p}predictions",
+        "predictionsboard": f"{p}predictionsboard",
+        "predictionsetresult": f"{p}predictionsetresult podium Verstappen | Norris | Leclerc",
+        "predictionscore": f"{p}predictionscore auto",
+        "predictionleaderboard": f"{p}predictionleaderboard",
+        "configreload": f"{p}configreload",
+        "setupnotifications": f"{p}setupnotifications",
+        "setupcolors": f"{p}setupcolors",
+        "setupdrivers": f"{p}setupdrivers",
+        "instacheck": f"{p}instacheck of1.official",
+        "editmsg": f"{p}editmsg <channel_id> <message_id> New text",
+        "logrecent": f"{p}logrecent 25",
+        "standingssetup": f"{p}standingssetup both 5",
+        "racelivestart": f"{p}racelivestart",
+        "racelivestop": f"{p}racelivestop",
+        "racelivetail": f"{p}racelivetail 20",
+        "racelivekill": f"{p}racelivekill",
+        "racetestlist": f"{p}racetestlist",
+        "racetestinfo": f"{p}racetestinfo practice_short",
+        "raceteststart": f"{p}raceteststart race_chaos 5",
+        "raceteststop": f"{p}raceteststop",
+    }
+
+def _fallback_command_example(cmd: commands.Command, prefix: str) -> str:
+    sig = (cmd.signature or "").strip()
+    return f"{prefix}{cmd.name}" + (f" {sig}" if sig else "")
+
+@bot.command(name="commands", aliases=["commandlist"])
+async def commands_dm_list(ctx):
+    """
+    DM the caller a dynamic list of commands they can access, with examples.
+    """
+    prefix = getattr(ctx, "clean_prefix", None) or "!"
+    examples = _command_examples(prefix)
+    visible: List[str] = []
+    for cmd in sorted(bot.commands, key=lambda c: c.name.lower()):
+        try:
+            if await cmd.can_run(ctx):
+                ex = examples.get(cmd.name) or _fallback_command_example(cmd, prefix)
+                desc = cmd.help or "No description"
+                visible.append(f"`{prefix}{cmd.name}` - {desc}\nExample: `{ex}`")
+        except Exception:
+            continue
+
+    if not visible:
+        return await ctx.send("❌ You don't have access to any commands.")
+
+    chunks: List[str] = []
+    current = "**Available Commands (You Have Access To)**\\n"
+    for entry in visible:
+        candidate = current + ("\\n\\n" if current.strip() else "") + entry
+        if len(candidate) > 1800:
+            chunks.append(current)
+            current = entry
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+
+    try:
+        for chunk in chunks:
+            await ctx.author.send(chunk)
+        if ctx.guild is not None:
+            await ctx.send("📬 Sent your command list to your DMs.")
+    except Exception:
+        await ctx.send("❌ I couldn't DM you. Check your privacy settings and try again.")
+
 @bot.command(name="quiz", aliases=["f1quiz"])
-async def quiz(ctx):
+async def quiz(ctx, *filters: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
     if not F1_QUIZ_QUESTIONS:
         return await ctx.send("❌ No quiz questions configured.")
-    q = random.choice(F1_QUIZ_QUESTIONS)
+    difficulty_filters: set[str] = set()
+    category_filters: set[str] = set()
+    known_difficulties = set(QUIZ_DIFFICULTY_POINTS.keys())
+    known_categories = {_quiz_category_for_question(q) for q in F1_QUIZ_QUESTIONS}
+    unknown_filters: List[str] = []
+
+    for f in filters:
+        token = _clean_text_key(f).replace(" ", "_")
+        if not token:
+            continue
+        if token in known_difficulties:
+            difficulty_filters.add(token)
+            continue
+        if token in known_categories:
+            category_filters.add(token)
+            continue
+        unknown_filters.append(f)
+
+    if unknown_filters:
+        return await ctx.send(
+            "❌ Unknown quiz filter(s): "
+            + ", ".join(f"`{x}`" for x in unknown_filters)
+            + "\\nUse difficulty (`easy`, `medium`, `hard`, `expert`) and/or categories like `rules`, `circuits`, `strategy`, `bot_xp`, `weekend_format`."
+        )
+
+    q = _quiz_pick_question(ctx.guild.id, difficulty_filters, category_filters)
+    if q is None:
+        return await ctx.send("❌ No quiz questions match those filters.")
+    difficulty = str(q.get("difficulty") or "easy").lower().strip()
+    category = _quiz_category_for_question(q)
+    points = _quiz_points_for_question(q)
     F1_QUIZ_ACTIVE[ctx.guild.id] = {
         "question": q["q"],
         "answers": [_clean_text_key(a) for a in q.get("answers", [])],
         "asked_at": time.time(),
         "expires_at": time.time() + 120,
         "asked_by": ctx.author.id,
+        "difficulty": difficulty,
+        "category": category,
+        "points": points,
     }
     await ctx.send(
         "🧠 **F1 Quiz Time!**\n"
         f"{q['q']}\n"
+        f"Category: **{category.replace('_', ' ').title()}** · Difficulty: **{difficulty.title()}** · Worth: **{points}** point{'s' if points != 1 else ''}\n"
         "Reply with `!quizanswer <answer>` within 2 minutes."
     )
 
@@ -1501,10 +1688,17 @@ async def quizanswer(ctx, *, answer: str):
     if guess in answers:
         scores = _quiz_scores_for_guild(ctx.guild.id)
         uid = str(ctx.author.id)
-        scores[uid] = int(scores.get(uid, 0) or 0) + 1
+        points = max(1, int(active.get("points", 1) or 1))
+        difficulty = str(active.get("difficulty") or "easy").lower().strip()
+        category = str(active.get("category") or "general").lower().strip()
+        scores[uid] = int(scores.get(uid, 0) or 0) + points
         _save_state_quiet()
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
-        return await ctx.send(f"✅ Correct, {ctx.author.mention}! You earned **1** quiz point.")
+        return await ctx.send(
+            f"✅ Correct, {ctx.author.mention}! "
+            f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
+            f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
+        )
 
     await ctx.send("❌ Not quite. Try again while the question is still open.")
 
