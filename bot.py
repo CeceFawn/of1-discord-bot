@@ -951,6 +951,132 @@ def cfg_xp_min_level_channels() -> Dict[str, int]:
             continue
     return out
 
+def _xp_backfill_gain_for_message(msg_id: int, mn: int, mx: int) -> int:
+    # Deterministic gain so reruns are stable and don't drift due to random().
+    if mx <= mn:
+        return mn
+    span = (mx - mn) + 1
+    return mn + (int(msg_id) % span)
+
+async def _iter_xp_backfill_channels(guild: discord.Guild) -> List[discord.abc.Messageable]:
+    channels: List[discord.abc.Messageable] = []
+    channels.extend(guild.text_channels)
+    # Include active threads (private/public/news/forum) that are currently visible.
+    try:
+        channels.extend(list(guild.threads))
+    except Exception:
+        pass
+    # De-duplicate by channel id while preserving order.
+    seen: set[int] = set()
+    out: List[discord.abc.Messageable] = []
+    for ch in channels:
+        cid = getattr(ch, "id", None)
+        if cid is None or cid in seen:
+            continue
+        seen.add(cid)
+        out.append(ch)
+    return out
+
+async def _xp_rebuild_guild_from_history(guild: discord.Guild, *, skip_message_id: Optional[int] = None) -> Dict[str, int]:
+    """
+    Rebuild this guild's XP state from message history using current cooldown/gain settings.
+    Silent: no level-up announcements, direct state mutation only.
+    """
+    gid = str(guild.id)
+    mn, mx = xp_gain_range()
+    cooldown = xp_cooldown_seconds()
+
+    # Collect all accessible messages first in chronological order across channels.
+    history_rows: List[Tuple[int, int]] = []  # (unix_ts, user_id)
+    scanned_messages = 0
+    scanned_channels = 0
+    skipped_channels = 0
+
+    me = guild.me
+    channels = await _iter_xp_backfill_channels(guild)
+    for ch in channels:
+        try:
+            if me is not None:
+                perms = ch.permissions_for(me)  # type: ignore[attr-defined]
+                if not (getattr(perms, "view_channel", False) and getattr(perms, "read_message_history", False)):
+                    skipped_channels += 1
+                    continue
+        except Exception:
+            pass
+
+        try:
+            async for message in ch.history(limit=None, oldest_first=True):  # type: ignore[attr-defined]
+                scanned_messages += 1
+                if skip_message_id and int(message.id) == int(skip_message_id):
+                    continue
+                if message.guild is None or message.guild.id != guild.id:
+                    continue
+                if getattr(message.author, "bot", False):
+                    continue
+                if not isinstance(message.author, discord.Member):
+                    # fetches may return User in some thread/history contexts; still usable if it has id
+                    if not hasattr(message.author, "id"):
+                        continue
+                ts = int(message.created_at.replace(tzinfo=timezone.utc).timestamp())
+                history_rows.append((ts, int(message.author.id)))
+        except discord.Forbidden:
+            skipped_channels += 1
+            continue
+        except Exception as e:
+            logging.warning(f"[XP] Backfill channel {getattr(ch, 'id', '?')} scan error: {e}")
+            skipped_channels += 1
+            continue
+        scanned_channels += 1
+
+    history_rows.sort(key=lambda x: x[0])
+
+    # Build fresh guild XP users map.
+    guild_users: Dict[str, Dict[str, Any]] = {}
+    awarded_messages = 0
+    for ts, uid in history_rows:
+        uid_s = str(uid)
+        rec = guild_users.get(uid_s)
+        if not isinstance(rec, dict):
+            rec = {
+                "xp": 0,
+                "level": 0,
+                "last_msg_ts": 0,
+                "messages": 0,
+                "card": {"bg_url": None, "accent": None, "tagline": None},
+            }
+            guild_users[uid_s] = rec
+
+        last_ts = int(rec.get("last_msg_ts", 0) or 0)
+        if (ts - last_ts) < max(0, cooldown):
+            continue
+
+        gain = _xp_backfill_gain_for_message(uid ^ ts, mn, mx)
+        new_xp = int(rec.get("xp", 0) or 0) + gain
+        rec["xp"] = new_xp
+        rec["level"] = xp_level_from_total(new_xp)
+        rec["last_msg_ts"] = ts
+        rec["messages"] = int(rec.get("messages", 0) or 0) + 1
+        awarded_messages += 1
+
+    XP_STATE.setdefault("guilds", {})
+    XP_STATE["guilds"][gid] = {"users": guild_users}
+    _xp_mark_dirty()
+    # Flush immediately so a restart won't lose the rebuild.
+    await asyncio.to_thread(save_xp_state, XP_STATE)
+    global XP_DIRTY
+    XP_DIRTY = False
+
+    return {
+        "channels_scanned": scanned_channels,
+        "channels_skipped": skipped_channels,
+        "messages_scanned": scanned_messages,
+        "eligible_awards": awarded_messages,
+        "users_updated": len(guild_users),
+        "cooldown_seconds": cooldown,
+        "xp_min_gain": mn,
+        "xp_max_gain": mx,
+    }
+
 async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
     """
     Returns True if message was blocked (deleted).
@@ -1058,6 +1184,44 @@ async def xpreset(ctx, member: discord.Member):
     rec["messages"] = 0
     _xp_mark_dirty()
     await ctx.send(f"✅ Reset XP for {member.display_name}.")
+
+@bot.command(name="xpbackfillhistory")
+@commands.has_permissions(administrator=True)
+async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
+    """
+    TEMP ADMIN TOOL: rebuild guild XP from existing message history without level-up spam.
+    Usage: !xpbackfillhistory rebuild CONFIRM
+    """
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    mode = (mode or "").lower().strip()
+    if mode != "rebuild":
+        return await ctx.send("❌ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
+    if (confirm or "").strip().upper() != "CONFIRM":
+        return await ctx.send(
+            "⚠️ This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
+            "Run: `!xpbackfillhistory rebuild CONFIRM`"
+        )
+
+    status_msg = await ctx.send("⏳ Starting silent XP backfill (history rebuild). This may take a while...")
+    try:
+        summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=ctx.message.id)
+        await status_msg.edit(
+            content=(
+                "✅ Silent XP backfill complete.\n"
+                f"- Users updated: **{summary['users_updated']}**\n"
+                f"- Messages scanned: **{summary['messages_scanned']}**\n"
+                f"- Awarded XP events (after cooldown): **{summary['eligible_awards']}**\n"
+                f"- Channels scanned: **{summary['channels_scanned']}**\n"
+                f"- Channels skipped: **{summary['channels_skipped']}**\n"
+                f"- Cooldown used: **{summary['cooldown_seconds']}s**\n"
+                f"- XP gain range used: **{summary['xp_min_gain']}–{summary['xp_max_gain']}**\n"
+                "_No level-up messages were posted during this rebuild._"
+            )
+        )
+    except Exception as e:
+        logging.error(f"[XP] Backfill failed for guild {ctx.guild.id}: {e}")
+        await status_msg.edit(content=f"❌ XP backfill failed: {e}")
 
 @bot.command(name="xpgate")
 @commands.has_permissions(administrator=True)
