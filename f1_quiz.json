@@ -1,0 +1,10 @@
+[
+  {"q": "How many points does an F1 race winner normally get (excluding fastest lap)?", "answers": ["25"]},
+  {"q": "What flag color indicates the session is stopped?", "answers": ["red", "red flag"]},
+  {"q": "What does DRS stand for?", "answers": ["drag reduction system"]},
+  {"q": "How many drivers are on the F1 grid in a standard season start?", "answers": ["20"]},
+  {"q": "What is the maximum points-paying finishing position in a Grand Prix?", "answers": ["10th", "p10", "10"]},
+  {"q": "What tire compound is typically the hardest of the weekend set: C1, C3, or C5?", "answers": ["c1"]},
+  {"q": "What does parc ferme restrict after qualifying?", "answers": ["car setup changes", "setup changes"]},
+  {"q": "What race control status is VSC short for?", "answers": ["virtual safety car"]}
+]

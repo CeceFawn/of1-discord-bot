@@ -5,8 +5,14 @@
     "constructor_message_id": null
   },
   "driver_roles": {
-    "channel_id": null,
-    "message_id": null,
+    "channel_id": "1368328224135974972",
+    "message_id": "1370906702932873218",
     "emoji_to_role": {}
+  },
+  "reaction_panels": {
+    "colors": {
+      "channel_id": "1368328224135974972",
+      "message_id": "1368598711231447082"
+    }
   }
 }

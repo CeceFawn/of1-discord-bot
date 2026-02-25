@@ -5,6 +5,11 @@ import os
 from typing import Any, Dict
 from settings import CONFIG_PATH, STATE_PATH, ENV_PATH
 
+def _env_quote(value: str) -> str:
+    # Always quote to preserve spaces/comments/special characters in .env values.
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
 def load_json(path: str, fallback: Any) -> Any:
     if not os.path.exists(path):
         return fallback
@@ -37,12 +42,13 @@ def set_env_value(key: str, value: str, env_path: str = ENV_PATH) -> None:
     """
     lines = []
     found = False
+    rendered = _env_quote(value)
 
     if os.path.exists(env_path):
         with open(env_path, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip().startswith(f"{key}="):
-                    lines.append(f"{key}={value}\n")
+                    lines.append(f"{key}={rendered}\n")
                     found = True
                 else:
                     lines.append(line)
@@ -50,7 +56,7 @@ def set_env_value(key: str, value: str, env_path: str = ENV_PATH) -> None:
     if not found:
         if lines and not lines[-1].endswith("\n"):
             lines[-1] = lines[-1] + "\n"
-        lines.append(f"{key}={value}\n")
+        lines.append(f"{key}={rendered}\n")
 
     with open(env_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
