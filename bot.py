@@ -1185,6 +1185,45 @@ async def xpreset(ctx, member: discord.Member):
     _xp_mark_dirty()
     await ctx.send(f"✅ Reset XP for {member.display_name}.")
 
+@bot.command(name="xpaudit")
+@commands.has_permissions(administrator=True)
+async def xpaudit(ctx, member: discord.Member = None):
+    """
+    Admin: inspect a user's XP state and current tuning assumptions.
+    """
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    member = member or ctx.author
+
+    rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
+    total_xp = int(rec.get("xp", 0) or 0)
+    level = xp_level_from_total(total_xp)
+    lvl_progress, xp_in_level, xp_next = xp_progress_to_next(total_xp)
+    messages_awarded = int(rec.get("messages", 0) or 0)
+    last_ts = int(rec.get("last_msg_ts", 0) or 0)
+    last_seen_txt = datetime.fromtimestamp(last_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC") if last_ts > 0 else "never"
+
+    cd = xp_cooldown_seconds()
+    mn, mx = xp_gain_range()
+    avg_gain = (mn + mx) / 2
+    est_from_awards = int(round(messages_awarded * avg_gain))
+    delta_vs_est = total_xp - est_from_awards
+
+    body = (
+        f"🔎 **XP Audit** for {member.mention}\n"
+        f"- Level (stored/recomputed): **L{int(rec.get('level', 0) or 0)} / L{level}**\n"
+        f"- Total XP: **{total_xp}**\n"
+        f"- Progress in level: **{xp_in_level}/{xp_next}** (level calc = L{lvl_progress})\n"
+        f"- Awarded message events (XP-state counter): **{messages_awarded}**\n"
+        f"- Last XP-awarding message timestamp: `{last_seen_txt}`\n"
+        f"- Current cooldown: **{cd}s**\n"
+        f"- Current gain range: **{mn}–{mx} XP** (avg ~ {avg_gain:.1f})\n"
+        f"- Estimated XP from awarded-message count at avg gain: **~{est_from_awards}**\n"
+        f"- Delta vs estimate: **{delta_vs_est:+}**\n"
+        "_Note: `messages` here is XP-awarding events after cooldown, not total Discord messages._"
+    )
+    await ctx.send(body)
+
 @bot.command(name="xpbackfillhistory")
 @commands.has_permissions(administrator=True)
 async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
