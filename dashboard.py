@@ -9,9 +9,11 @@ import secrets
 import hmac
 from datetime import datetime
 from functools import wraps
+from urllib.parse import urlencode
 
 import bcrypt
 import psutil
+import requests
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort
 
 from settings import LOG_PATH, CONFIG_PATH, STATE_PATH
@@ -75,6 +77,16 @@ try:
         raise ValueError("must map usernames to bcrypt hash strings")
 except Exception as e:
     raise RuntimeError(f"DASHBOARD_USERS_JSON is not valid JSON: {e}")
+PASSWORD_LOGIN_ENABLED = bool(DASH_USERS)
+
+DISCORD_CLIENT_ID = (os.getenv("DASHBOARD_DISCORD_CLIENT_ID") or "").strip()
+DISCORD_CLIENT_SECRET = (os.getenv("DASHBOARD_DISCORD_CLIENT_SECRET") or "").strip()
+DISCORD_REDIRECT_URI = (os.getenv("DASHBOARD_DISCORD_REDIRECT_URI") or "").strip()
+DISCORD_ALLOWED_USER_IDS = {
+    x.strip() for x in (os.getenv("DASHBOARD_DISCORD_ALLOWED_USER_IDS") or "").split(",") if x.strip()
+}
+DISCORD_OAUTH_ENABLED = bool(DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET and DISCORD_REDIRECT_URI and DISCORD_ALLOWED_USER_IDS)
+DISCORD_API_BASE = "https://discord.com/api/v10"
 
 ALLOWED_IPS = [x.strip() for x in (os.getenv("DASHBOARD_ALLOWED_IPS") or "").split(",") if x.strip()]
 
@@ -105,6 +117,49 @@ def _record_attempt():
 
 def _clear_attempts():
     LOGIN_ATTEMPTS.pop(_client_ip(), None)
+
+def _discord_authorize_url() -> str:
+    params = {
+        "client_id": DISCORD_CLIENT_ID,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "identify",
+        "prompt": "consent",
+    }
+    return f"{DISCORD_API_BASE}/oauth2/authorize?{urlencode(params)}"
+
+def _discord_exchange_code(code: str) -> tuple[bool, dict | str]:
+    try:
+        r = requests.post(
+            f"{DISCORD_API_BASE}/oauth2/token",
+            data={
+                "client_id": DISCORD_CLIENT_ID,
+                "client_secret": DISCORD_CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": DISCORD_REDIRECT_URI,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return False, f"Token exchange failed ({r.status_code})"
+        return True, (r.json() or {})
+    except Exception as e:
+        return False, f"Token exchange error: {e}"
+
+def _discord_fetch_user(access_token: str) -> tuple[bool, dict | str]:
+    try:
+        r = requests.get(
+            f"{DISCORD_API_BASE}/users/@me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return False, f"User fetch failed ({r.status_code})"
+        return True, (r.json() or {})
+    except Exception as e:
+        return False, f"User fetch error: {e}"
 
 def login_required(fn):
     @wraps(fn)
@@ -364,7 +419,9 @@ def login():
 
     err = ""
     if request.method == "POST":
-        if _rate_limited():
+        if not PASSWORD_LOGIN_ENABLED:
+            err = "Password login is disabled. Use Discord login."
+        elif _rate_limited():
             err = "Too many attempts. Try again later."
         else:
             username = (request.form.get("username") or "").strip()
@@ -385,22 +442,100 @@ def login():
             _record_attempt()
             err = "Invalid username or password."
 
+    discord_login_url = url_for("login_discord") if DISCORD_OAUTH_ENABLED else None
     return render_template_string("""
     <html><body style="background:#111;color:#eee;font-family:system-ui;padding:30px;">
       <h2>Dashboard Login</h2>
       {% if err %}<div style="color:#f66;margin:10px 0;">{{ err }}</div>{% endif %}
+      {% if discord_login_url %}
+        <a href="{{ discord_login_url }}"
+           style="display:inline-block;margin:8px 0 14px 0;padding:10px 14px;border-radius:10px;background:#5865F2;color:#fff;text-decoration:none;font-weight:600;">
+          Login with Discord
+        </a>
+      {% endif %}
+      {% if password_login_enabled %}
       <form method="post" style="display:flex;flex-direction:column;gap:10px;max-width:320px;">
         {{ csrf_input|safe }}
         <input name="username" placeholder="Username" style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
         <input name="password" type="password" placeholder="Password" style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
         <button type="submit" style="padding:10px;border-radius:10px;border:1px solid #333;background:#222;color:#eee;cursor:pointer;">Login</button>
       </form>
+      {% elif not discord_login_url %}
+        <div style="color:#f66;margin-top:12px;">No login method is configured.</div>
+      {% endif %}
     </body></html>
-    """, err=err, csrf_input=_csrf_input())
+    """, err=err, csrf_input=_csrf_input(), discord_login_url=discord_login_url, password_login_enabled=PASSWORD_LOGIN_ENABLED)
+
+@app.route("/login/discord")
+def login_discord():
+    if not _ip_allowed():
+        abort(403)
+    if not DISCORD_OAUTH_ENABLED:
+        abort(404)
+    state = secrets.token_urlsafe(24)
+    session["_discord_oauth_state"] = state
+    params = {
+        "client_id": DISCORD_CLIENT_ID,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "identify",
+        "state": state,
+        "prompt": "consent",
+    }
+    return redirect(f"{DISCORD_API_BASE}/oauth2/authorize?{urlencode(params)}")
+
+@app.route("/oauth/discord/callback")
+def discord_oauth_callback():
+    if not _ip_allowed():
+        abort(403)
+    if not DISCORD_OAUTH_ENABLED:
+        abort(404)
+
+    state = (request.args.get("state") or "").strip()
+    expected = (session.get("_discord_oauth_state") or "").strip()
+    session.pop("_discord_oauth_state", None)
+    if not state or not expected or not hmac.compare_digest(state, expected):
+        return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>Invalid OAuth state. <a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>"), 400
+
+    if request.args.get("error"):
+        err = _escape(request.args.get("error_description") or request.args.get("error") or "OAuth denied")
+        return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>Discord login failed: {{ err }}<br><a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>", err=err), 400
+
+    code = (request.args.get("code") or "").strip()
+    if not code:
+        return redirect(url_for("login"))
+
+    ok, token_resp = _discord_exchange_code(code)
+    if not ok:
+        return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>{{ msg }}<br><a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>", msg=_escape(str(token_resp))), 400
+
+    access_token = str((token_resp or {}).get("access_token") or "")
+    if not access_token:
+        return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>Missing access token from Discord.<br><a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>"), 400
+
+    ok, user_resp = _discord_fetch_user(access_token)
+    if not ok:
+        return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>{{ msg }}<br><a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>", msg=_escape(str(user_resp))), 400
+
+    discord_user_id = str((user_resp or {}).get("id") or "").strip()
+    username = str((user_resp or {}).get("username") or "discord-user").strip()
+    global_name = str((user_resp or {}).get("global_name") or "").strip()
+    display = global_name or username or "discord-user"
+
+    if discord_user_id not in DISCORD_ALLOWED_USER_IDS:
+        return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>Discord account not allowlisted for dashboard access.<br><a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>"), 403
+
+    session["dash_user"] = f"{display} (Discord)"
+    session["dash_auth_method"] = "discord"
+    session["discord_user_id"] = discord_user_id
+    return redirect(url_for("logs"))
 
 @app.route("/logout", methods=["POST"])
 def logout():
     session.pop("dash_user", None)
+    session.pop("dash_auth_method", None)
+    session.pop("discord_user_id", None)
+    session.pop("_discord_oauth_state", None)
     return redirect(url_for("login"))
 
 # ----------------------------
