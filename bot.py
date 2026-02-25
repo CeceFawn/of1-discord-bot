@@ -269,6 +269,7 @@ ERGAST_SCHEDULE_URL = "https://ergast.com/api/f1/current.json"
 F1_SCHEDULE_CACHE: Dict[str, Any] = {"ts": 0.0, "races": []}
 F1_REMINDER_TASK: Optional[asyncio.Task] = None
 F1_QUIZ_ACTIVE: Dict[int, Dict[str, Any]] = {}
+F1_QUIZ_PENDING_OVERRIDES: Dict[int, Dict[str, Any]] = {}
 
 SESSION_LABELS = {
     "FirstPractice": "FP1",
@@ -768,6 +769,135 @@ def _quiz_pick_question(guild_id: int, difficulty_filters: set[str], category_fi
     hist["recent_questions"] = recent[-max_keep:]
     _save_state_quiet()
     return chosen
+
+def _quiz_remove_pending_overrides(guild_id: int, question_key: Optional[str] = None) -> None:
+    to_remove: List[int] = []
+    for msg_id, meta in F1_QUIZ_PENDING_OVERRIDES.items():
+        if int(meta.get("guild_id", 0) or 0) != int(guild_id):
+            continue
+        if question_key and str(meta.get("question_key") or "") != str(question_key):
+            continue
+        to_remove.append(msg_id)
+    for msg_id in to_remove:
+        F1_QUIZ_PENDING_OVERRIDES.pop(msg_id, None)
+
+def _quiz_learn_answer_variant(question_key: str, user_answer: str) -> bool:
+    normalized = _clean_text_key(user_answer)
+    if not normalized:
+        return False
+    changed = False
+    for q in F1_QUIZ_QUESTIONS:
+        if _quiz_question_key(q) != question_key:
+            continue
+        answers = q.get("answers")
+        if not isinstance(answers, list):
+            answers = []
+            q["answers"] = answers
+        existing_norm = {_clean_text_key(str(a)) for a in answers}
+        if normalized not in existing_norm:
+            answers.append(user_answer.strip())
+            changed = True
+        break
+    if not changed:
+        return False
+    try:
+        with open(F1_QUIZ_FILE, "w", encoding="utf-8") as f:
+            json.dump(F1_QUIZ_QUESTIONS, f, indent=2)
+            f.write("\n")
+        return True
+    except Exception as e:
+        logging.error(f"[Quiz] Failed to save learned answer variant: {e}")
+        return False
+
+async def _quiz_process_reaction_override(payload: discord.RawReactionActionEvent) -> bool:
+    if str(payload.emoji) != "🟢":
+        return False
+    pending = F1_QUIZ_PENDING_OVERRIDES.get(payload.message_id)
+    if not pending:
+        return False
+    if payload.guild_id is None or payload.channel_id is None:
+        return False
+    if int(pending.get("guild_id", 0) or 0) != int(payload.guild_id):
+        return False
+    if int(pending.get("channel_id", 0) or 0) != int(payload.channel_id):
+        return False
+    if bool(pending.get("resolved")):
+        return True
+
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return True
+
+    member = getattr(payload, "member", None)
+    if member is None:
+        try:
+            member = await guild.fetch_member(payload.user_id)
+        except Exception:
+            return True
+    if member is None or not getattr(member.guild_permissions, "administrator", False):
+        return True
+
+    active = F1_QUIZ_ACTIVE.get(guild.id)
+    question_key = str(pending.get("question_key") or "")
+    if not active or str(active.get("question_key") or "") != question_key:
+        return True
+    if time.time() > float(active.get("expires_at", 0) or 0):
+        F1_QUIZ_ACTIVE.pop(guild.id, None)
+        _quiz_remove_pending_overrides(guild.id, question_key)
+        return True
+
+    pending["resolved"] = True
+    user_id = int(pending.get("user_id", 0) or 0)
+    points = max(1, int(pending.get("points", 1) or 1))
+    difficulty = str(pending.get("difficulty") or "easy").lower().strip()
+    category = str(pending.get("category") or "general").lower().strip()
+    raw_guess = str(pending.get("guess_raw") or "").strip()
+    guess_key = _clean_text_key(raw_guess)
+
+    if guess_key:
+        answers = active.setdefault("answers", [])
+        if guess_key not in answers:
+            answers.append(guess_key)
+        _quiz_learn_answer_variant(question_key, raw_guess)
+
+    scores = _quiz_scores_for_guild(guild.id)
+    uid = str(user_id)
+    scores[uid] = int(scores.get(uid, 0) or 0) + points
+    _save_state_quiet()
+
+    F1_QUIZ_ACTIVE.pop(guild.id, None)
+    _quiz_remove_pending_overrides(guild.id, question_key)
+
+    channel = bot.get_channel(payload.channel_id)
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(payload.channel_id)
+        except Exception:
+            channel = None
+    if channel is not None:
+        try:
+            reply_id = int(pending.get("bot_reply_message_id", 0) or 0)
+            if reply_id:
+                bot_reply = await channel.fetch_message(reply_id)
+                await bot_reply.edit(
+                    content=(
+                        f"✅ Correct, <@{user_id}>! (fixed) "
+                        f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
+                        f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
+                    )
+                )
+            else:
+                await channel.send(
+                    f"✅ Correct, <@{user_id}>! (fixed) "
+                    f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
+                    f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
+                )
+        except Exception as e:
+            logging.warning(f"[Quiz] Failed to edit override response: {e}")
+    logging.info(
+        f"[Quiz] Override accepted by {member.id} for user {user_id} on question '{question_key[:60]}'"
+    )
+    return True
 
 def _circuit_lookup(query: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     q = _clean_text_key(query)
@@ -1657,6 +1787,7 @@ async def quiz(ctx, *filters: str):
     points = _quiz_points_for_question(q)
     F1_QUIZ_ACTIVE[ctx.guild.id] = {
         "question": q["q"],
+        "question_key": _quiz_question_key(q),
         "answers": [_clean_text_key(a) for a in q.get("answers", [])],
         "asked_at": time.time(),
         "expires_at": time.time() + 120,
@@ -1693,6 +1824,7 @@ async def quizanswer(ctx, *, answer: str):
         category = str(active.get("category") or "general").lower().strip()
         scores[uid] = int(scores.get(uid, 0) or 0) + points
         _save_state_quiet()
+        _quiz_remove_pending_overrides(ctx.guild.id, str(active.get("question_key") or ""))
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
         return await ctx.send(
             f"✅ Correct, {ctx.author.mention}! "
@@ -1700,7 +1832,27 @@ async def quizanswer(ctx, *, answer: str):
             f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
         )
 
-    await ctx.send("❌ Not quite. Try again while the question is still open.")
+    wrong_reply = await ctx.send(
+        "❌ Not quite. Try again while the question is still open. "
+        "(Admins can react 🟢 to your `!quizanswer` message to mark a valid alternate wording as correct.)"
+    )
+    try:
+        F1_QUIZ_PENDING_OVERRIDES[ctx.message.id] = {
+            "guild_id": ctx.guild.id,
+            "channel_id": ctx.channel.id,
+            "user_id": ctx.author.id,
+            "question_key": str(active.get("question_key") or _clean_text_key(str(active.get("question") or ""))),
+            "guess_raw": answer.strip(),
+            "guess_key": guess,
+            "bot_reply_message_id": wrong_reply.id,
+            "difficulty": str(active.get("difficulty") or "easy"),
+            "category": str(active.get("category") or "general"),
+            "points": int(active.get("points", 1) or 1),
+            "resolved": False,
+            "created_at": time.time(),
+        }
+    except Exception:
+        pass
 
 @bot.command(name="quizscore", aliases=["quizleaderboard"])
 async def quizscore(ctx):
@@ -2428,6 +2580,8 @@ async def on_ready():
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.user_id == bot.user.id:
+        return
+    if await _quiz_process_reaction_override(payload):
         return
     if payload.message_id not in allowed_reaction_panel_message_ids():
         return

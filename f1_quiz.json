@@ -643,24 +643,6 @@
     "category": "circuits"
   },
   {
-    "q": "Which circuit does the alias 'austin' map to in this bot's circuit data?",
-    "answers": [
-      "circuit of the americas",
-      "Circuit Of The Americas"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
-    "q": "Which circuit does the alias 'australia' map to in this bot's circuit data?",
-    "answers": [
-      "albert park grand prix circuit",
-      "Albert Park Grand Prix Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which circuit does the alias 'austria' map to in this bot's circuit data?",
     "answers": [
       "red bull ring",
@@ -724,15 +706,6 @@
     "category": "circuits"
   },
   {
-    "q": "Which circuit does the alias 'cota' map to in this bot's circuit data?",
-    "answers": [
-      "circuit of the americas",
-      "Circuit Of The Americas"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which circuit does the alias 'hungary' map to in this bot's circuit data?",
     "answers": [
       "hungaroring",
@@ -769,28 +742,10 @@
     "category": "circuits"
   },
   {
-    "q": "Which circuit does the alias 'las vegas' map to in this bot's circuit data?",
-    "answers": [
-      "las vegas strip street circuit",
-      "Las Vegas Strip Street Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which circuit does the alias 'losail' map to in this bot's circuit data?",
     "answers": [
       "losail international circuit",
       "Losail International Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
-    "q": "Which circuit does the alias 'melbourne' map to in this bot's circuit data?",
-    "answers": [
-      "albert park grand prix circuit",
-      "Albert Park Grand Prix Circuit"
     ],
     "difficulty": "medium",
     "category": "circuits"
@@ -886,15 +841,6 @@
     "category": "circuits"
   },
   {
-    "q": "Which circuit does the alias 'singapore' map to in this bot's circuit data?",
-    "answers": [
-      "marina bay street circuit",
-      "Marina Bay Street Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which circuit does the alias 'spa' map to in this bot's circuit data?",
     "answers": [
       "circuit de spa-francorchamps",
@@ -931,15 +877,6 @@
     "category": "circuits"
   },
   {
-    "q": "Which circuit does the alias 'vegas' map to in this bot's circuit data?",
-    "answers": [
-      "las vegas strip street circuit",
-      "Las Vegas Strip Street Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which circuit does the alias 'yas marina' map to in this bot's circuit data?",
     "answers": [
       "yas marina circuit",
@@ -967,46 +904,10 @@
     "category": "circuits"
   },
   {
-    "q": "Which listed F1 circuit is in Austin, USA?",
-    "answers": [
-      "circuit of the americas",
-      "Circuit Of The Americas"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which listed F1 circuit is in Budapest, Hungary?",
     "answers": [
       "hungaroring",
       "Hungaroring"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
-    "q": "Which listed F1 circuit is in Imola, Italy?",
-    "answers": [
-      "autodromo enzo e dino ferrari",
-      "Autodromo Enzo E Dino Ferrari"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
-    "q": "Which listed F1 circuit is in Las Vegas, USA?",
-    "answers": [
-      "las vegas strip street circuit",
-      "Las Vegas Strip Street Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
-    "q": "Which listed F1 circuit is in Melbourne, Australia?",
-    "answers": [
-      "albert park grand prix circuit",
-      "Albert Park Grand Prix Circuit"
     ],
     "difficulty": "medium",
     "category": "circuits"
@@ -1066,15 +967,6 @@
     "category": "circuits"
   },
   {
-    "q": "Which listed F1 circuit is in Sao Paulo, Brazil?",
-    "answers": [
-      "autodromo jose carlos pace",
-      "Autodromo Jose Carlos Pace"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
     "q": "Which listed F1 circuit is in Shanghai, China?",
     "answers": [
       "shanghai international circuit",
@@ -1088,15 +980,6 @@
     "answers": [
       "silverstone circuit",
       "Silverstone Circuit"
-    ],
-    "difficulty": "medium",
-    "category": "circuits"
-  },
-  {
-    "q": "Which listed F1 circuit is in Singapore, Singapore?",
-    "answers": [
-      "marina bay street circuit",
-      "Marina Bay Street Circuit"
     ],
     "difficulty": "medium",
     "category": "circuits"
@@ -1854,15 +1737,6 @@
     "category": "general"
   },
   {
-    "q": "What does 'personal best' lap indicate in timing?",
-    "answers": [
-      "driver's quickest lap so far",
-      "that driver's best lap"
-    ],
-    "difficulty": "easy",
-    "category": "general"
-  },
-  {
     "q": "What does 'pole position' mean?",
     "answers": [
       "fastest in qualifying",
@@ -1923,24 +1797,6 @@
     "answers": [
       "start while cars are moving",
       "moving start"
-    ],
-    "difficulty": "easy",
-    "category": "general"
-  },
-  {
-    "q": "What is a standing start?",
-    "answers": [
-      "start from stationary grid boxes",
-      "start from a standstill"
-    ],
-    "difficulty": "easy",
-    "category": "general"
-  },
-  {
-    "q": "What is a time penalty in race results?",
-    "answers": [
-      "added seconds to race time",
-      "seconds added after race"
     ],
     "difficulty": "easy",
     "category": "general"
@@ -2022,15 +1878,6 @@
     "category": "general"
   },
   {
-    "q": "What does 'in lap' mean?",
-    "answers": [
-      "lap returning to pits",
-      "lap into the pits"
-    ],
-    "difficulty": "medium",
-    "category": "general"
-  },
-  {
     "q": "What does 'out lap' mean?",
     "answers": [
       "lap leaving pits",
@@ -2058,38 +1905,10 @@
     "category": "general"
   },
   {
-    "q": "What is a cool-down lap?",
-    "answers": [
-      "lap after a timed run",
-      "lap after the run",
-      "slow lap after push lap"
-    ],
-    "difficulty": "medium",
-    "category": "general"
-  },
-  {
-    "q": "What is a drive-through penalty?",
-    "answers": [
-      "driving through pit lane without stopping",
-      "pit lane drive through"
-    ],
-    "difficulty": "medium",
-    "category": "general"
-  },
-  {
     "q": "What is a stewards' inquiry in F1?",
     "answers": [
       "official investigation by stewards",
       "race stewards investigation"
-    ],
-    "difficulty": "medium",
-    "category": "general"
-  },
-  {
-    "q": "What is a stop-go penalty?",
-    "answers": [
-      "pit stop penalty with mandatory stop time",
-      "stop in pit box for penalty"
     ],
     "difficulty": "medium",
     "category": "general"
@@ -2137,15 +1956,6 @@
     "answers": [
       "downforce",
       "ground effect downforce"
-    ],
-    "difficulty": "medium",
-    "category": "general"
-  },
-  {
-    "q": "What is understeer?",
-    "answers": [
-      "front of car runs wide",
-      "car turns less than intended"
     ],
     "difficulty": "medium",
     "category": "general"
@@ -2205,24 +2015,6 @@
       "306.578"
     ],
     "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "What does MGU-H stand for?",
-    "answers": [
-      "motor generator unit heat",
-      "motor generator unit - heat"
-    ],
-    "difficulty": "expert",
-    "category": "general"
-  },
-  {
-    "q": "What does MGU-K stand for?",
-    "answers": [
-      "motor generator unit kinetic",
-      "motor generator unit - kinetic"
-    ],
-    "difficulty": "expert",
     "category": "general"
   },
   {
@@ -2497,15 +2289,6 @@
     "answers": [
       "red",
       "red flag"
-    ],
-    "difficulty": "easy",
-    "category": "rules"
-  },
-  {
-    "q": "What is a safety car restart?",
-    "answers": [
-      "race resumes after safety car",
-      "restart after safety car"
     ],
     "difficulty": "easy",
     "category": "rules"
@@ -2976,15 +2759,6 @@
     "category": "rules"
   },
   {
-    "q": "What does a white flag usually indicate in circuit flag marshaling?",
-    "answers": [
-      "slow vehicle on track",
-      "slower vehicle on track"
-    ],
-    "category": "rules",
-    "difficulty": "hard"
-  },
-  {
     "q": "What does a yellow and red striped flag warn about?",
     "answers": [
       "slippery surface",
@@ -3061,15 +2835,6 @@
     "difficulty": "easy"
   },
   {
-    "q": "What is a brake lock-up?",
-    "answers": [
-      "wheel stops rotating under braking",
-      "tyre locks under braking"
-    ],
-    "category": "strategy",
-    "difficulty": "easy"
-  },
-  {
     "q": "A qualifying tow is another word for what effect?",
     "answers": [
       "slipstream",
@@ -3103,15 +2868,6 @@
       "downforce",
       "front-end grip",
       "grip"
-    ],
-    "category": "strategy",
-    "difficulty": "medium"
-  },
-  {
-    "q": "What does tyre degradation refer to?",
-    "answers": [
-      "loss of tyre performance over time",
-      "tyres losing grip over laps"
     ],
     "category": "strategy",
     "difficulty": "medium"
@@ -3192,15 +2948,6 @@
     "difficulty": "medium"
   },
   {
-    "q": "What is wheelspin at corner exit?",
-    "answers": [
-      "driven wheels spinning due to lack of traction",
-      "loss of traction on throttle"
-    ],
-    "category": "strategy",
-    "difficulty": "medium"
-  },
-  {
     "q": "What usually happens to lap time if tyres overheat too much?",
     "answers": [
       "lap time gets slower",
@@ -3218,14 +2965,6 @@
     ],
     "category": "strategy",
     "difficulty": "medium"
-  },
-  {
-    "q": "In F1 strategy/racecraft, what does 'cool-down lap' mean?",
-    "answers": [
-      "cool tyres and brakes"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
   },
   {
     "q": "In F1 strategy/racecraft, what does 'dirty air' mean?",
@@ -3247,14 +2986,6 @@
     "q": "In F1 strategy/racecraft, what does 'overcut' mean?",
     "answers": [
       "overcut"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
-  },
-  {
-    "q": "In F1 strategy/racecraft, what does 'push lap' mean?",
-    "answers": [
-      "set a fast time"
     ],
     "category": "strategy",
     "difficulty": "hard"
@@ -3293,53 +3024,6 @@
     "difficulty": "hard"
   },
   {
-    "q": "What does 'lift and coast' generally mean?",
-    "answers": [
-      "lifting early and coasting to save fuel",
-      "save fuel by lifting early"
-    ],
-    "difficulty": "hard",
-    "category": "strategy"
-  },
-  {
-    "q": "What does tyre blistering refer to?",
-    "answers": [
-      "overheating causing blisters in tyre surface",
-      "tyre surface blistering from heat"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
-  },
-  {
-    "q": "What does tyre graining refer to?",
-    "answers": [
-      "rubber tearing causing reduced grip",
-      "surface tearing on tyre"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
-  },
-  {
-    "q": "What is an overcut in F1 strategy?",
-    "answers": [
-      "staying out longer before pitting",
-      "pit later to gain position",
-      "longer first stint to gain position"
-    ],
-    "difficulty": "hard",
-    "category": "strategy"
-  },
-  {
-    "q": "What is an undercut in F1 strategy?",
-    "answers": [
-      "pitting earlier to gain position",
-      "pit earlier for track position",
-      "earlier pit stop to jump a rival"
-    ],
-    "difficulty": "hard",
-    "category": "strategy"
-  },
-  {
     "q": "What is brake bias?",
     "answers": [
       "front-rear braking distribution",
@@ -3347,51 +3031,6 @@
     ],
     "difficulty": "hard",
     "category": "strategy"
-  },
-  {
-    "q": "What is engine braking in simple terms?",
-    "answers": [
-      "slowing the car using engine resistance",
-      "engine resistance slows the car"
-    ],
-    "difficulty": "hard",
-    "category": "strategy"
-  },
-  {
-    "q": "Why can an overcut work in F1?",
-    "answers": [
-      "track position and tyre phase can favor staying out longer",
-      "staying out longer can gain time"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
-  },
-  {
-    "q": "Why can an overcut work in F1? (F1)",
-    "answers": [
-      "track position and tyre phase can favor staying out longer",
-      "staying out longer can gain time"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
-  },
-  {
-    "q": "Why can an undercut work in F1?",
-    "answers": [
-      "fresh tyres can produce faster laps before rival pits",
-      "fresh tyres gain time"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
-  },
-  {
-    "q": "Why can an undercut work in F1? (F1)",
-    "answers": [
-      "fresh tyres can produce faster laps before rival pits",
-      "fresh tyres gain time"
-    ],
-    "category": "strategy",
-    "difficulty": "hard"
   },
   {
     "q": "Why might a driver lose time sitting in dirty air even if they match engine power?",
@@ -3514,15 +3153,6 @@
     "difficulty": "easy"
   },
   {
-    "q": "What does a standing start mean in F1?",
-    "answers": [
-      "cars start from a standstill",
-      "starting from stationary grid positions"
-    ],
-    "category": "weekend_format",
-    "difficulty": "easy"
-  },
-  {
     "q": "What is a push lap in qualifying?",
     "answers": [
       "timed lap",
@@ -3530,15 +3160,6 @@
     ],
     "difficulty": "easy",
     "category": "weekend_format"
-  },
-  {
-    "q": "What is a warm-up lap in qualifying mainly used for?",
-    "answers": [
-      "prepare tyres and brakes",
-      "bring tyres up to temperature"
-    ],
-    "category": "weekend_format",
-    "difficulty": "easy"
   },
   {
     "q": "What is the final segment of a standard F1 qualifying session called?",
@@ -3632,24 +3253,6 @@
     "difficulty": "medium"
   },
   {
-    "q": "What does 'pit lane start' mean?",
-    "answers": [
-      "starting the race from pit lane",
-      "start from pit lane"
-    ],
-    "category": "weekend_format",
-    "difficulty": "medium"
-  },
-  {
-    "q": "What is a formation lap primarily used for?",
-    "answers": [
-      "prepare for the race start",
-      "warm tyres and brakes before start"
-    ],
-    "difficulty": "medium",
-    "category": "weekend_format"
-  },
-  {
     "q": "What is a formation lap taken before?",
     "answers": [
       "the race start",
@@ -3659,7 +3262,7 @@
     "category": "weekend_format"
   },
   {
-    "q": "What is parc ferme most often enforced after on a standard weekend?",
+    "q": "When is parc ferme most often enforced after on a standard weekend?",
     "answers": [
       "qualifying",
       "after qualifying"
@@ -3668,7 +3271,7 @@
     "difficulty": "medium"
   },
   {
-    "q": "What is the grid walk period associated with?",
+    "q": "When is the grid walk period?",
     "answers": [
       "before race start",
       "pre-race"
@@ -3761,14 +3364,5 @@
     ],
     "category": "weekend_format",
     "difficulty": "medium"
-  },
-  {
-    "q": "What is a reconnaissance lap in simple terms?",
-    "answers": [
-      "pre-race lap to the grid",
-      "lap before lining up on grid"
-    ],
-    "category": "weekend_format",
-    "difficulty": "hard"
   }
 ]
