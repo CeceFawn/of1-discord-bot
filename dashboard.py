@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 import bcrypt
 import psutil
 import requests
-from flask import Flask, request, redirect, url_for, render_template_string, session, abort
+from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
 
 from settings import LOG_PATH, CONFIG_PATH, STATE_PATH
 from storage import load_config, save_config, load_state, save_state
@@ -210,7 +210,7 @@ BASE_TEMPLATE = """
 
       <!-- Split button: Restart + dropdown -->
       <div style="display:inline-flex;align-items:stretch;gap:0;margin-left:12px;">
-        <form action="{{ url_for('bot_action', action='restart') }}" method="post" style="display:inline;margin:0;">
+        <form data-async-refresh="1" action="{{ url_for('bot_action', action='restart') }}" method="post" style="display:inline;margin:0;">
           {{ csrf_input|safe }}
           <button style="background:#300;color:#f88;border:1px solid #822;padding:6px 10px;border-radius:8px 0 0 8px;cursor:pointer;">
             Restart
@@ -219,26 +219,27 @@ BASE_TEMPLATE = """
 
         <div style="position:relative;display:inline-block;">
           <button id="actionsBtn"
+            type="button"
             style="background:#300;color:#f88;border:1px solid #822;border-left:none;padding:6px 10px;border-radius:0 8px 8px 0;cursor:pointer;">
             ▼
           </button>
 
           <div id="actionsMenu"
             style="display:none;position:absolute;z-index:50;right:0;top:110%;background:#1a1a1a;border:1px solid #333;border-radius:10px;min-width:220px;box-shadow:0 12px 40px rgba(0,0,0,.35);padding:6px;">
-            <form action="{{ url_for('bot_action', action='start') }}" method="post" style="margin:0;">
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='start') }}" method="post" style="margin:0;">
               {{ csrf_input|safe }}
               <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
                 Start bot
               </button>
             </form>
-            <form action="{{ url_for('bot_action', action='stop') }}" method="post" style="margin:0;">
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='stop') }}" method="post" style="margin:0;">
               {{ csrf_input|safe }}
               <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
                 Stop bot
               </button>
             </form>
             <div style="height:1px;background:#2a2a2a;margin:6px 0;"></div>
-            <form action="{{ url_for('bot_action', action='deploy') }}" method="post" style="margin:0;">
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploy') }}" method="post" style="margin:0;">
               {{ csrf_input|safe }}
               <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
                 Deploy update (git pull + restart)
@@ -258,6 +259,26 @@ BASE_TEMPLATE = """
           btn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); toggle(); });
           document.addEventListener('click', function(){ close(); });
           menu.addEventListener('click', function(e){ e.stopPropagation(); });
+
+          document.querySelectorAll('form[data-async-refresh="1"]').forEach(function(form){
+            form.addEventListener('submit', async function(e){
+              e.preventDefault();
+              const btnEl = form.querySelector('button');
+              if (btnEl) btnEl.disabled = true;
+              try {
+                await fetch(form.action, {
+                  method: 'POST',
+                  body: new FormData(form),
+                  credentials: 'same-origin',
+                });
+              } catch (_err) {
+                // Fall back to normal navigation if fetch fails.
+                form.submit();
+                return;
+              }
+              window.location.reload();
+            });
+          });
         })();
       </script>
 
@@ -343,6 +364,41 @@ def _backup_file(path: str) -> None:
                 dst.write(src.read())
     except Exception:
         pass
+
+def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
+    cfg = load_config() or {}
+    filters = cfg.get("log_filters", []) or []
+
+    try:
+        with open(LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-tail_n:]
+    except FileNotFoundError:
+        lines = ["Log file not found.\n"]
+    except Exception as e:
+        lines = [f"Unable to read log file: {e}\n"]
+
+    if show_filtered and filters:
+        lines = [line for line in lines if not any(x in line for x in filters)]
+
+    safe_logs = _escape("".join(lines))
+
+    last = _get_last_action()
+    last_html = ""
+    if last.get("ts"):
+        status = "OK" if last.get("ok") else "FAILED"
+        color = "#6f6" if last.get("ok") else "#f66"
+        last_html = f"""
+          <div style="margin:10px 0;padding:10px;border-radius:10px;background:#0b0b0b;border:1px solid #333;">
+            <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Last action: <b style="color:{color};">{_escape(str(last.get("action")))} · {status}</b> · {_escape(str(last.get("ts")))}</div>
+            <pre style="white-space:pre-wrap;margin:0;color:#ddd;">{_escape(last.get("output") or "")}</pre>
+          </div>
+        """
+
+    return {
+        "safe_logs": safe_logs,
+        "last_html": last_html,
+        "last_ts": str(last.get("ts") or ""),
+    }
 
 # ----------------------------
 # Bot control helpers
@@ -559,9 +615,6 @@ def index():
 @app.route("/logs")
 @login_required
 def logs():
-    cfg = load_config() or {}
-    filters = cfg.get("log_filters", []) or []
-
     tail = request.args.get("tail", "100")
     try:
         tail_n = max(50, min(4000, int(tail)))
@@ -569,31 +622,10 @@ def logs():
         tail_n = 100
 
     show_filtered = (request.args.get("filtered", "1").strip() != "0")
+    data = _build_logs_view_data(tail_n, show_filtered)
 
-    try:
-        with open(LOG_PATH, "r", encoding="utf-8") as f:
-            lines = f.readlines()[-tail_n:]
-    except FileNotFoundError:
-        lines = ["Log file not found.\n"]
-    except Exception as e:
-        lines = [f"Unable to read log file: {e}\n"]
-
-    if show_filtered and filters:
-        lines = [line for line in lines if not any(x in line for x in filters)]
-
-    safe = _escape("".join(lines))
-
-    last = _get_last_action()
-    last_html = ""
-    if last.get("ts"):
-        status = "OK" if last.get("ok") else "FAILED"
-        color = "#6f6" if last.get("ok") else "#f66"
-        last_html = f"""
-          <div style="margin:10px 0;padding:10px;border-radius:10px;background:#0b0b0b;border:1px solid #333;">
-            <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Last action: <b style="color:{color};">{_escape(str(last.get("action")))} · {status}</b> · {_escape(str(last.get("ts")))}</div>
-            <pre style="white-space:pre-wrap;margin:0;color:#ddd;">{_escape(last.get("output") or "")}</pre>
-          </div>
-        """
+    if request.args.get("ajax") == "1":
+        return jsonify(data)
 
     controls = f"""
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
@@ -618,8 +650,42 @@ def logs():
     body = (
         "<h2 style='margin:0 0 10px 0;'>Logs</h2>"
         + controls
-        + last_html
-        + f"<pre style='white-space:pre-wrap;background:#000;padding:12px;border-radius:10px;border:1px solid #333;max-width:1200px;'>{safe}</pre>"
+        + f"<div id='lastActionBox'>{data['last_html']}</div>"
+        + f"<pre id='liveLogsPre' style='white-space:pre-wrap;background:#000;padding:12px;border-radius:10px;border:1px solid #333;max-width:1200px;'>{data['safe_logs']}</pre>"
+        + """
+        <script>
+          (function(){
+            const pre = document.getElementById('liveLogsPre');
+            const lastBox = document.getElementById('lastActionBox');
+            if (!pre || !lastBox) return;
+            const url = new URL(window.location.href);
+            url.searchParams.set('ajax', '1');
+            let inFlight = false;
+            async function tick(){
+              if (inFlight || document.hidden) return;
+              inFlight = true;
+              try {
+                const wasNearBottom = (pre.scrollHeight - pre.scrollTop - pre.clientHeight) < 32;
+                const res = await fetch(url.toString(), { credentials: 'same-origin', cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (typeof data.safe_logs === 'string') {
+                  pre.innerHTML = data.safe_logs;
+                  if (wasNearBottom) pre.scrollTop = pre.scrollHeight;
+                }
+                if (typeof data.last_html === 'string') {
+                  lastBox.innerHTML = data.last_html;
+                }
+              } catch (_err) {
+                // ignore transient polling errors
+              } finally {
+                inFlight = false;
+              }
+            }
+            setInterval(tick, 2500);
+          })();
+        </script>
+        """
     )
     return _render(body)
 
