@@ -1647,7 +1647,7 @@ async def help(ctx):
     for cmd in bot.commands:
         try:
             if await cmd.can_run(ctx):
-                visible.append(f"{prefix}{cmd.name} - {cmd.help or 'No description'}")
+                visible.append(f"{prefix}{cmd.name} - {_command_description_for(cmd)}")
         except Exception:
             continue
     if visible:
@@ -1704,6 +1704,64 @@ def _command_examples(prefix: str) -> Dict[str, str]:
         "raceteststop": f"{p}raceteststop",
     }
 
+def _command_descriptions() -> Dict[str, str]:
+    return {
+        "ping": "Check whether the bot is responding.",
+        "help": "List commands you can use in this channel.",
+        "commands": "DM yourself a detailed command list with examples.",
+        "rank": "Show your XP rank card or another user's.",
+        "xpleaderboard": "Show the XP leaderboard.",
+        "xpset": "Set a user's XP manually (admin).",
+        "xpreset": "Reset a user's XP data (admin).",
+        "xpaudit": "Audit XP stats and level math for a user.",
+        "xpbackfillhistory": "Rebuild XP from existing message history silently (admin).",
+        "schedule": "Show upcoming F1 sessions from the current schedule.",
+        "nextsession": "Show the next F1 session and countdown.",
+        "f1reminders": "Configure or view automatic F1 session reminders (admin).",
+        "f1reminderleads": "Set reminder lead times in minutes (admin).",
+        "circuit": "Look up F1 circuit info by name or alias.",
+        "driverstats": "Show current stats for a driver.",
+        "teamstats": "Show current stats for a constructor/team.",
+        "quiz": "Start an F1 quiz question (supports difficulty/category filters).",
+        "quizanswer": "Answer the currently active quiz question.",
+        "quizscore": "Show the F1 quiz leaderboard.",
+        "predictpole": "Submit your qualifying pole prediction.",
+        "predictsprintpole": "Submit your sprint shootout pole prediction.",
+        "predictpodium": "Submit your race podium prediction.",
+        "predictsprintpodium": "Submit your sprint podium prediction.",
+        "predictp10": "Submit your P10 race prediction.",
+        "mypredictions": "Show your saved predictions and lock status.",
+        "predictions": "Show prediction commands and usage overview.",
+        "predictionsboard": "Show prediction entries for the current round.",
+        "predictionsetresult": "Set actual results for prediction scoring (admin).",
+        "predictionscore": "Post spoiler-safe prediction points for completed sessions (admin).",
+        "predictionleaderboard": "Show season-long prediction points totals.",
+        "configreload": "Reload config/state-backed bot settings and F1 data (admin).",
+        "setupnotifications": "Post the notifications reaction-role panel (admin).",
+        "setupcolors": "Post the color roles reaction-role panel (admin).",
+        "setupdrivers": "Post the driver roles reaction-role panel (admin).",
+        "instacheck": "Fetch the latest Instagram post URL for a username.",
+        "editmsg": "Edit a bot-authored message by channel and message ID (admin).",
+        "botinfo": "Show bot uptime and basic status (admin).",
+        "serverlist": "List servers the bot is connected to (admin).",
+        "logrecent": "Show recent lines from the bot log file (admin).",
+        "standingssetup": "Create or refresh standings messages (admin).",
+        "racelivestart": "Start race live tracking/supervision (admin).",
+        "racelivestop": "Stop race live tracking loop (admin).",
+        "racelivetail": "Show recent race-live event output (admin).",
+        "racelivekill": "Force-stop race-live worker tasks (admin).",
+        "racetestlist": "List available race simulation scenarios.",
+        "racetestinfo": "Show details for a race simulation scenario.",
+        "raceteststart": "Start a race simulation scenario (admin).",
+        "raceteststop": "Stop the active race simulation scenario (admin).",
+    }
+
+def _command_description_for(cmd: commands.Command) -> str:
+    help_text = (cmd.help or "").strip() if getattr(cmd, "help", None) else ""
+    if help_text:
+        return help_text
+    return _command_descriptions().get(cmd.name, "No description")
+
 def _fallback_command_example(cmd: commands.Command, prefix: str) -> str:
     sig = (cmd.signature or "").strip()
     return f"{prefix}{cmd.name}" + (f" {sig}" if sig else "")
@@ -1720,7 +1778,7 @@ async def commands_dm_list(ctx):
         try:
             if await cmd.can_run(ctx):
                 ex = examples.get(cmd.name) or _fallback_command_example(cmd, prefix)
-                desc = cmd.help or "No description"
+                desc = _command_description_for(cmd)
                 visible.append(f"`{prefix}{cmd.name}` - {desc}\nExample: `{ex}`")
         except Exception:
             continue
@@ -1729,9 +1787,9 @@ async def commands_dm_list(ctx):
         return await ctx.send("❌ You don't have access to any commands.")
 
     chunks: List[str] = []
-    current = "**Available Commands (You Have Access To)**\\n"
+    current = "**Available Commands (You Have Access To)**\n"
     for entry in visible:
-        candidate = current + ("\\n\\n" if current.strip() else "") + entry
+        candidate = current + ("\n\n" if current.strip() else "") + entry
         if len(candidate) > 1800:
             chunks.append(current)
             current = entry
