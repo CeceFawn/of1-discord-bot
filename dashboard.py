@@ -347,7 +347,7 @@ def _backup_file(path: str) -> None:
 # ----------------------------
 # Bot control helpers
 # ----------------------------
-def _run_cmd(cmd: list[str], cwd: str | None = None) -> tuple[int, str]:
+def _run_cmd(cmd: list[str], cwd: str | None = None, timeout_s: int = 180) -> tuple[int, str]:
     """Run a command safely (no shell=True). Return (rc, combined_output)."""
     try:
         p = subprocess.run(
@@ -356,15 +356,20 @@ def _run_cmd(cmd: list[str], cwd: str | None = None) -> tuple[int, str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=max(1, int(timeout_s)),
         )
         out = (p.stdout or "") + (p.stderr or "")
         return p.returncode, out.strip()
+    except subprocess.TimeoutExpired as e:
+        out = ((e.stdout or "") if isinstance(e.stdout, str) else "") + ((e.stderr or "") if isinstance(e.stderr, str) else "")
+        return 124, f"Timeout after {timeout_s}s while running {cmd}\n{out}".strip()
     except Exception as e:
         return 99, f"Exception while running {cmd}: {e}"
 
 def _sudo_systemctl(action: str) -> tuple[bool, str]:
     # Requires sudoers NOPASSWD for systemctl on this service.
-    rc, out = _run_cmd(["sudo", "systemctl", action, BOT_SYSTEMD_SERVICE])
+    # Use -n so it fails immediately instead of hanging waiting for a password prompt.
+    rc, out = _run_cmd(["sudo", "-n", "systemctl", action, BOT_SYSTEMD_SERVICE], timeout_s=30)
     return (rc == 0), out
 
 def _deploy_worker():
@@ -374,9 +379,10 @@ def _deploy_worker():
     try:
         chunks.append(f"Repo dir: {BOT_REPO_DIR}")
         chunks.append(f"Service: {BOT_SYSTEMD_SERVICE}")
+        chunks.append("Deploy worker started.")
 
         # git pull (fast-forward only to avoid surprise merges)
-        rc, out = _run_cmd(["git", "pull", "--ff-only"], cwd=BOT_REPO_DIR)
+        rc, out = _run_cmd(["git", "pull", "--ff-only"], cwd=BOT_REPO_DIR, timeout_s=120)
         chunks.append("---- git pull --ff-only ----")
         chunks.append(out or f"(exit {rc})")
         if rc != 0:
@@ -385,7 +391,7 @@ def _deploy_worker():
         # pip install -r requirements.txt (if pip exists and requirements exists)
         req_path = os.path.join(BOT_REPO_DIR, "requirements.txt")
         if os.path.exists(req_path) and os.path.exists(BOT_VENV_PIP):
-            rc, out = _run_cmd([BOT_VENV_PIP, "install", "-r", req_path], cwd=BOT_REPO_DIR)
+            rc, out = _run_cmd([BOT_VENV_PIP, "install", "-r", req_path], cwd=BOT_REPO_DIR, timeout_s=600)
             chunks.append("---- pip install -r requirements.txt ----")
             chunks.append(out or f"(exit {rc})")
             if rc != 0:
@@ -405,6 +411,10 @@ def _deploy_worker():
             chunks.append("Skipped because deploy steps failed.")
 
         _set_last_action("deploy", ok_all, "\n".join(chunks))
+    except Exception as e:
+        chunks.append("---- deploy worker exception ----")
+        chunks.append(f"{type(e).__name__}: {e}")
+        _set_last_action("deploy", False, "\n".join(chunks))
     finally:
         with _DEPLOY_LOCK:
             _DEPLOY_IN_PROGRESS = False
@@ -690,9 +700,9 @@ def bot_action(action: str):
             _set_last_action("deploy", False, "Deploy already running. Wait for it to finish, then refresh Logs.")
             return redirect(url_for("logs"))
         _DEPLOY_IN_PROGRESS = True
-    t = threading.Thread(target=_deploy_worker, daemon=True)
+    t = threading.Thread(target=_deploy_worker, daemon=True, name="dashboard-deploy-worker")
     t.start()
-    _set_last_action("deploy", True, "Deploy started in background… refresh Logs in a few seconds.")
+    _set_last_action("deploy", True, f"Deploy started in background (thread={t.name}). Refresh Logs in a few seconds.")
     return redirect(url_for("logs"))
 
 # Backwards-compat route name (your old template called /restart)
