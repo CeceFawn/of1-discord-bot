@@ -962,6 +962,7 @@ def get_prefix(bot, message) -> str:
 
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
 set_bot_reference(bot)
+APP_COMMANDS_SYNCED = False
 
 # ----------------------------
 # Helpers: role mapping
@@ -2617,6 +2618,7 @@ async def predictionleaderboard(ctx):
 # ----------------------------
 @bot.event
 async def on_ready():
+    global APP_COMMANDS_SYNCED
     logging.info(f"Bot is online as {bot.user}")
     if not hasattr(bot, "launch_time"):
         bot.launch_time = datetime.now()
@@ -2634,6 +2636,14 @@ async def on_ready():
 
     # F1 reminders loop
     _ensure_background_task("F1_REMINDER_TASK", f1_reminder_loop, "F1Reminder")
+
+    if not APP_COMMANDS_SYNCED:
+        try:
+            await bot.tree.sync()
+            APP_COMMANDS_SYNCED = True
+            logging.info("[Slash] Command tree synced")
+        except Exception as e:
+            logging.error(f"[Slash] Command tree sync failed: {e}")
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -2894,6 +2904,80 @@ FOLLOW_SESSION_TYPES = {
 def _parse_iso(dt_str: str) -> datetime:
     return datetime.fromisoformat(dt_str)
 
+def _race_threads_root() -> Dict[str, Any]:
+    root = _state_bucket("race_threads")
+    rounds = root.get("rounds")
+    if not isinstance(rounds, dict):
+        rounds = {}
+        root["rounds"] = rounds
+    return root
+
+def _race_thread_round_obj(round_key: str) -> Dict[str, Any]:
+    root = _race_threads_root()
+    rounds = root["rounds"]
+    if round_key not in rounds or not isinstance(rounds.get(round_key), dict):
+        rounds[round_key] = {"guilds": {}}
+    obj = rounds[round_key]
+    guilds = obj.get("guilds")
+    if not isinstance(guilds, dict):
+        guilds = {}
+        obj["guilds"] = guilds
+    return obj
+
+def _race_thread_record(round_key: str, guild_id: int) -> Optional[Dict[str, Any]]:
+    obj = _race_thread_round_obj(round_key)
+    rec = (obj.get("guilds") or {}).get(str(guild_id))
+    return rec if isinstance(rec, dict) else None
+
+def _save_race_thread_record(
+    round_key: str,
+    race_name: str,
+    guild_id: int,
+    thread: discord.Thread,
+    source: str,
+) -> None:
+    obj = _race_thread_round_obj(round_key)
+    guilds = obj["guilds"]
+    guilds[str(guild_id)] = {
+        "thread_id": int(thread.id),
+        "parent_channel_id": int(thread.parent_id or 0),
+        "thread_name": thread.name,
+        "source": (source or "auto"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if race_name:
+        obj["race_name"] = race_name
+    _save_state_quiet()
+
+def _clear_race_thread_record(round_key: str, guild_id: int) -> None:
+    obj = _race_thread_round_obj(round_key)
+    guilds = obj.get("guilds") or {}
+    if str(guild_id) in guilds:
+        del guilds[str(guild_id)]
+        _save_state_quiet()
+
+async def _fetch_saved_race_thread(guild: discord.Guild, round_key: str) -> Optional[discord.Thread]:
+    rec = _race_thread_record(round_key, guild.id)
+    if not rec:
+        return None
+    thread_id = int(rec.get("thread_id") or 0)
+    if not thread_id:
+        return None
+
+    th = guild.get_thread(thread_id)
+    if isinstance(th, discord.Thread):
+        return th
+
+    try:
+        fetched = await guild.fetch_channel(thread_id)
+        if isinstance(fetched, discord.Thread):
+            return fetched
+    except Exception:
+        pass
+
+    _clear_race_thread_record(round_key, guild.id)
+    return None
+
 async def _get_forum_channel_live(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
     forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
     if not forum_id:
@@ -2907,26 +2991,64 @@ async def _get_forum_channel_live(guild: discord.Guild) -> Optional[discord.abc.
         logging.error(f"[RaceLive] Could not fetch forum channel {forum_id}: {e}")
         return None
 
-async def _ensure_live_thread(guild: discord.Guild, title: str) -> discord.Thread:
+async def _create_race_thread(
+    guild: discord.Guild,
+    title: str,
+    opener_text: str,
+    opener_file: Optional[discord.File] = None,
+) -> discord.Thread:
     ch = await _get_forum_channel_live(guild)
     if ch is None:
         raise RuntimeError("RACE_FORUM_CHANNEL_ID not set or not accessible.")
 
     if isinstance(ch, discord.ForumChannel):
-        created = await ch.create_thread(
-            name=title,
-            content=f"📡 Live thread created by {bot.user.mention}",
-            auto_archive_duration=1440,
-        )
+        create_kwargs: Dict[str, Any] = {
+            "name": title,
+            "content": opener_text,
+            "auto_archive_duration": 1440,
+        }
+        if opener_file is not None:
+            create_kwargs["file"] = opener_file
+        created = await ch.create_thread(**create_kwargs)
         if isinstance(created, tuple) and len(created) >= 1:
             return created[0]
         return created
 
     if isinstance(ch, discord.TextChannel):
-        msg = await ch.send(f"📡 **{title}**")
-        return await msg.create_thread(name=title, auto_archive_duration=1440)
+        msg = await ch.send(f"Race Thread: **{title}**")
+        thread = await msg.create_thread(name=title, auto_archive_duration=1440)
+        if opener_file is not None:
+            await thread.send(opener_text, file=opener_file)
+        else:
+            await thread.send(opener_text)
+        return thread
 
     raise RuntimeError("RACE_FORUM_CHANNEL_ID must point to a ForumChannel or TextChannel.")
+
+async def _ensure_live_thread(
+    guild: discord.Guild,
+    round_key: str,
+    race_name: str,
+    title: str,
+) -> discord.Thread:
+    existing = await _fetch_saved_race_thread(guild, round_key)
+    if existing is not None:
+        return existing
+
+    created = await _create_race_thread(
+        guild=guild,
+        title=title,
+        opener_text=f"Live thread created by {bot.user.mention}",
+        opener_file=None,
+    )
+    _save_race_thread_record(
+        round_key=round_key,
+        race_name=race_name,
+        guild_id=guild.id,
+        thread=created,
+        source="auto",
+    )
+    return created
 
 async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optional[tuple[datetime, datetime, Dict[str, Any], list]]:
     latest = await _openf1_get(http, "sessions", {"session_key": "latest"})
@@ -3024,6 +3146,9 @@ async def race_supervisor_loop():
 
                 latest_relevant = sorted(relevant, key=_key)[-1]
                 session_key = int(latest_relevant.get("session_key"))
+                round_meta = await current_or_next_round_meta()
+                round_key = str(round_meta.get("key") or "unknown-round")
+                race_name = str(round_meta.get("race_name") or "").strip()
 
                 for guild in bot.guilds:
                     try:
@@ -3033,8 +3158,9 @@ async def race_supervisor_loop():
 
                         if in_window and not running:
                             location = str(meta.get("location") or meta.get("meeting_name") or "F1").strip()
-                            title = f"{location} — Live Weekend"
-                            thread = await _ensure_live_thread(guild, title)
+                            title_base = race_name or location
+                            title = f"{title_base} - Live Weekend"
+                            thread = await _ensure_live_thread(guild, round_key, race_name or title_base, title)
 
                             _racelog(gid, f"Supervisor starting live loop (session_key={session_key})")
                             RACE_LIVE_ENABLED[gid] = True
@@ -3091,6 +3217,77 @@ async def racelivetail(ctx, lines: int = 20):
     tail = _racetail(guild.id, lines)
     await ctx.send("```text\n" + tail[:1900] + "\n```")
 
+@bot.tree.command(name="racethread", description="Create the next race thread early with custom watchalong info.")
+@discord.app_commands.describe(
+    message="Message text for the race thread",
+    image="Optional image attachment",
+)
+async def racethread_slash(
+    interaction: discord.Interaction,
+    message: str = "",
+    image: Optional[discord.Attachment] = None,
+):
+    guild = interaction.guild
+    member = interaction.user if isinstance(interaction.user, discord.Member) else None
+    if guild is None or member is None:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+
+    perms = member.guild_permissions
+    if not (perms.administrator or perms.manage_threads or perms.manage_channels):
+        await interaction.response.send_message(
+            "You need Manage Threads, Manage Channels, or Administrator permissions to use this command.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        round_meta = await current_or_next_round_meta()
+        round_key = str(round_meta.get("key") or "unknown-round")
+        race_name = str(round_meta.get("race_name") or "F1").strip() or "F1"
+        title = f"{race_name} - Race Thread"
+        post_text = (message or "").strip() or f"Race thread for **{race_name}**."
+
+        upload_file: Optional[discord.File] = None
+        if image is not None:
+            data = await image.read()
+            upload_file = discord.File(io.BytesIO(data), filename=(image.filename or "race-thread-image.png"))
+
+        existing = await _fetch_saved_race_thread(guild, round_key)
+        if existing is not None:
+            if upload_file is not None:
+                await existing.send(post_text, file=upload_file)
+            else:
+                await existing.send(post_text)
+            await interaction.followup.send(
+                f"Race thread already exists for **{race_name}**: {existing.mention}\nPosted your update there.",
+                ephemeral=True,
+            )
+            return
+
+        created = await _create_race_thread(
+            guild=guild,
+            title=title,
+            opener_text=post_text,
+            opener_file=upload_file,
+        )
+        _save_race_thread_record(
+            round_key=round_key,
+            race_name=race_name,
+            guild_id=guild.id,
+            thread=created,
+            source="manual",
+        )
+        await interaction.followup.send(
+            f"Created race thread for **{race_name}**: {created.mention}",
+            ephemeral=True,
+        )
+    except Exception as e:
+        logging.error(f"[RaceThread] slash command failed: {e}")
+        await interaction.followup.send(f"Could not create race thread: {e}", ephemeral=True)
+
 @bot.command(name="racelivestart", aliases=["race_live_start"])
 @commands.has_permissions(administrator=True)
 async def racelivestart(ctx):
@@ -3111,8 +3308,11 @@ async def racelivestart(ctx):
             return await ctx.send("❌ No OpenF1 sessions available right now.")
         session_key = int(latest[0].get("session_key"))
 
-    title = "F1 — Live (Manual)"
-    thread = await _ensure_live_thread(guild, title)
+    round_meta = await current_or_next_round_meta()
+    round_key = str(round_meta.get("key") or "manual-round")
+    race_name = str(round_meta.get("race_name") or "F1").strip() or "F1"
+    title = f"{race_name} - Live (Manual)"
+    thread = await _ensure_live_thread(guild, round_key, race_name, title)
 
     RACE_LIVE_ENABLED[gid] = True
 
