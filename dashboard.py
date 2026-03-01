@@ -17,7 +17,7 @@ import psutil
 import requests
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
 
-from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, DEPLOY_STATUS_PATH
+from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH
 from storage import load_config, save_config, load_state, save_state
 from runtime_store import get_runtime_status, list_alerts, init_runtime_db
 
@@ -53,7 +53,7 @@ _DEPLOY_LOCK = threading.Lock()
 _DEPLOY_IN_PROGRESS = False
 _RUNTIME_STATUS_CACHE = {"ts": 0.0, "data": {}}
 _ROUND_META_CACHE = {"ts": 0.0, "data": {}}
-_RUNTIME_FILE_CACHE = {"ts": 0.0, "data": {}}
+_RUNTIME_FILE_CACHE = {"ts": 0.0, "data": {}, "source": "none", "error": ""}
 
 
 def _write_deploy_status(payload: dict) -> None:
@@ -499,23 +499,35 @@ def _runtime_file_snapshot() -> dict:
     if (now_ts - float(_RUNTIME_FILE_CACHE.get("ts", 0.0))) < 5.0:
         cached = _RUNTIME_FILE_CACHE.get("data")
         return dict(cached) if isinstance(cached, dict) else {}
+    read_error = ""
     try:
         db_data = get_runtime_status()
         if isinstance(db_data, dict) and db_data:
             _RUNTIME_FILE_CACHE["ts"] = now_ts
             _RUNTIME_FILE_CACHE["data"] = dict(db_data)
+            _RUNTIME_FILE_CACHE["source"] = "db"
+            _RUNTIME_FILE_CACHE["error"] = ""
             return db_data
-    except Exception:
-        pass
+    except Exception as e:
+        read_error = f"db read failed: {e}"
     try:
         with open(RUNTIME_STATUS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             _RUNTIME_FILE_CACHE["ts"] = now_ts
             _RUNTIME_FILE_CACHE["data"] = dict(data)
+            _RUNTIME_FILE_CACHE["source"] = "file"
+            _RUNTIME_FILE_CACHE["error"] = ""
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        if read_error:
+            read_error += f" | file read failed: {e}"
+        else:
+            read_error = f"file read failed: {e}"
+    _RUNTIME_FILE_CACHE["ts"] = now_ts
+    _RUNTIME_FILE_CACHE["data"] = {}
+    _RUNTIME_FILE_CACHE["source"] = "none"
+    _RUNTIME_FILE_CACHE["error"] = read_error
     return {}
 
 def _bot_runtime_status() -> dict:
@@ -643,12 +655,16 @@ def _status_view_data() -> dict:
     runtime_ts = _parse_iso_utc(str((runtime or {}).get("ts") or ""))
     heartbeat_age_s = int((now - runtime_ts).total_seconds()) if runtime_ts else None
     runtime_stale = bool(heartbeat_age_s is None or heartbeat_age_s > 30)
+    runtime_source = str(_RUNTIME_FILE_CACHE.get("source") or "none")
+    runtime_read_error = str(_RUNTIME_FILE_CACHE.get("error") or "")
 
     return {
         "runtime": runtime,
         "round_meta": round_meta,
         "runtime_stale": runtime_stale,
         "runtime_heartbeat_age_s": heartbeat_age_s,
+        "runtime_source": runtime_source,
+        "runtime_read_error": runtime_read_error,
         "current_round_key": current_round_key,
         "current_round_name": current_round_name,
         "current_round_record": current_round_record,
@@ -1005,6 +1021,8 @@ def status():
     openf1_window = runtime.get("openf1_window") if isinstance(runtime.get("openf1_window"), dict) else {}
     runtime_stale = bool(data.get("runtime_stale"))
     runtime_age = data.get("runtime_heartbeat_age_s")
+    runtime_source = str(data.get("runtime_source") or "none")
+    runtime_read_error = str(data.get("runtime_read_error") or "")
 
     def _badge(ok: bool, txt_ok: str = "Running", txt_no: str = "Stopped") -> str:
         color = "#6f6" if ok else "#f66"
@@ -1082,6 +1100,7 @@ def status():
       <div style="margin-bottom:10px;">
         <b>Bot heartbeat:</b> {'<span style="color:#f66;">STALE</span>' if runtime_stale else '<span style="color:#6f6;">FRESH</span>'}
         ({_escape(str(runtime_age if runtime_age is not None else '-'))}s)
+        <span style="color:#aaa;">from {_escape(runtime_source)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:12px;">
         <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
@@ -1096,10 +1115,13 @@ def status():
           <div style="margin-top:6px;"><b>Bot service:</b> {_escape(BOT_SYSTEMD_SERVICE)}</div>
           <div><b>Dashboard service:</b> {_escape(DASHBOARD_SYSTEMD_SERVICE)}</div>
           <div><b>Repo dir:</b> {_escape(BOT_REPO_DIR)}</div>
+          <div><b>Runtime DB path:</b> {_escape(RUNTIME_DB_PATH)}</div>
+          <div><b>Runtime file path:</b> {_escape(RUNTIME_STATUS_PATH)}</div>
           <div><b>Bot connected guilds:</b> {_escape(str(runtime.get("guild_count", "-")))}</div>
           <div><b>Snapshot time:</b> {_escape(_fmt_ts_utc(str(runtime.get("ts") or "")))}</div>
         </div>
       </div>
+      {"<div style='color:#f99;margin-bottom:10px;'><b>Runtime read warning:</b> " + _escape(runtime_read_error) + "</div>" if runtime_read_error else ""}
 
       <h3 style="margin:14px 0 8px 0;">Race Thread Lifecycle</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-bottom:12px;">

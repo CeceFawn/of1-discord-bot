@@ -2151,6 +2151,7 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
 
 def _write_runtime_status_file(payload: Dict[str, Any]) -> None:
     try:
+        os.makedirs(os.path.dirname(RUNTIME_STATUS_PATH) or ".", exist_ok=True)
         tmp = f"{RUNTIME_STATUS_PATH}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
