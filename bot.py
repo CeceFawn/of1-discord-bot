@@ -19,10 +19,9 @@ import requests
 from bs4 import BeautifulSoup
 import aiohttp
 
-# Load env before importing modules that read env at import time (dashboard.py)
+# Load env early for runtime config.
 load_dotenv()
 
-from dashboard import start_dashboard_thread, set_bot_reference
 from storage import load_config, save_config, load_state, save_state, set_env_value
 from settings import LOG_PATH
 
@@ -357,8 +356,29 @@ def _save_state_quiet() -> None:
     except Exception as e:
         logging.error(f"[State] save_state failed: {e}")
 
-def _record_alert(kind: str, message: str, guild_id: Optional[int] = None, user_id: Optional[int] = None) -> None:
+ALERT_RATE_LIMIT: Dict[str, float] = {}
+
+def _record_alert(
+    kind: str,
+    message: str,
+    guild_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    persist: bool = True,
+) -> None:
     try:
+        if not persist:
+            return
+        now_ts = time.time()
+        dedupe_key = f"{str(kind)}|{int(guild_id or 0)}|{int(user_id or 0)}|{str(message or '')[:80]}"
+        prev_ts = float(ALERT_RATE_LIMIT.get(dedupe_key, 0.0) or 0.0)
+        if (now_ts - prev_ts) < 30.0:
+            return
+        ALERT_RATE_LIMIT[dedupe_key] = now_ts
+        if len(ALERT_RATE_LIMIT) > 2000:
+            cutoff = now_ts - 3600.0
+            for k, v in list(ALERT_RATE_LIMIT.items()):
+                if float(v) < cutoff:
+                    ALERT_RATE_LIMIT.pop(k, None)
         root = _state_bucket("alerts")
         items = root.get("items")
         if not isinstance(items, list):
@@ -1000,7 +1020,6 @@ def get_prefix(bot, message) -> str:
     return (CFG.get("prefix") or "!").strip() or "!"
 
 bot = commands.Bot(command_prefix=get_prefix, intents=intents, help_command=None)
-set_bot_reference(bot)
 APP_COMMANDS_SYNCED = False
 
 # ----------------------------
@@ -1474,7 +1493,8 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
 
     status_msg = await ctx.send("⏳ Starting silent XP backfill (history rebuild). This may take a while...")
     try:
-        summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=ctx.message.id)
+        skip_message_id = ctx.message.id if getattr(ctx, "message", None) is not None else None
+        summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=skip_message_id)
         await status_msg.edit(
             content=(
                 "✅ Silent XP backfill complete.\n"
@@ -2940,16 +2960,16 @@ async def on_command_error(ctx, error):
 
     if isinstance(error, commands.CommandNotFound):
         logging.warning(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
-        _record_alert("command_not_found", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid)
+        _record_alert("command_not_found", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=False)
         return
 
     if isinstance(error, commands.CheckFailure):
         logging.warning(f"[CmdError] check failure {cmd_name} by user={uid} guild={gid}: {err_text}")
-        _record_alert("permission_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid)
+        _record_alert("permission_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=True)
         return
 
     logging.error(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
-    _record_alert("command_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid)
+    _record_alert("command_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=True)
 
 # ============================================================
 # Race Live (OpenF1) + Kill Switch + Debug Tail (NO underscores)
@@ -3943,11 +3963,6 @@ async def raceteststop(ctx):
         await ctx.send("🛑 Race test stopped.")
     else:
         await ctx.send("ℹ️ No race test running.")
-
-# ----------------------------
-# Start dashboard + run bot
-# ----------------------------
-start_dashboard_thread()
 
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 if not bot_token:

@@ -49,6 +49,8 @@ _LAST_ACTION = {"ts": None, "action": None, "ok": None, "output": ""}
 _LAST_ACTION_LOCK = threading.Lock()
 _DEPLOY_LOCK = threading.Lock()
 _DEPLOY_IN_PROGRESS = False
+_RUNTIME_STATUS_CACHE = {"ts": 0.0, "data": {}}
+_ROUND_META_CACHE = {"ts": 0.0, "data": {}}
 
 def _set_last_action(action: str, ok: bool, output: str):
     with _LAST_ACTION_LOCK:
@@ -434,6 +436,10 @@ def _fmt_relative(raw: str | None) -> str:
     return f"in {amount}{unit}"
 
 def _bot_runtime_status() -> dict:
+    now_ts = time.time()
+    if (now_ts - float(_RUNTIME_STATUS_CACHE.get("ts", 0.0))) < 5.0:
+        cached = _RUNTIME_STATUS_CACHE.get("data")
+        return dict(cached) if isinstance(cached, dict) else {}
     try:
         if not bot_reference:
             return {}
@@ -441,12 +447,18 @@ def _bot_runtime_status() -> dict:
         if callable(fn):
             data = fn()
             if isinstance(data, dict):
+                _RUNTIME_STATUS_CACHE["ts"] = now_ts
+                _RUNTIME_STATUS_CACHE["data"] = dict(data)
                 return data
     except Exception:
         pass
     return {}
 
 def _bot_round_meta(timeout_s: float = 4.0) -> dict:
+    now_ts = time.time()
+    if (now_ts - float(_ROUND_META_CACHE.get("ts", 0.0))) < 10.0:
+        cached = _ROUND_META_CACHE.get("data")
+        return dict(cached) if isinstance(cached, dict) else {}
     try:
         if not bot_reference:
             return {}
@@ -456,7 +468,11 @@ def _bot_round_meta(timeout_s: float = 4.0) -> dict:
             return {}
         fut = asyncio.run_coroutine_threadsafe(coro_fn(), loop)
         data = fut.result(timeout=max(0.5, float(timeout_s)))
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            _ROUND_META_CACHE["ts"] = now_ts
+            _ROUND_META_CACHE["data"] = dict(data)
+            return data
+        return {}
     except Exception:
         return {}
 
@@ -988,11 +1004,44 @@ def status():
         </div>
       </div>
 
-      <script>
-        setTimeout(function() {{ window.location.reload(); }}, 15000);
-      </script>
     """
-    return _render(body)
+    if request.args.get("ajax") == "1":
+        return jsonify({"status_html": body})
+
+    page = (
+        "<div id='statusRoot'>"
+        + body
+        + "</div>"
+        + """
+        <script>
+          (function(){
+            const root = document.getElementById('statusRoot');
+            if (!root) return;
+            const url = new URL(window.location.href);
+            url.searchParams.set('ajax', '1');
+            let inFlight = false;
+            async function tick(){
+              if (inFlight || document.hidden) return;
+              inFlight = true;
+              try {
+                const res = await fetch(url.toString(), { credentials: 'same-origin', cache: 'no-store' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data && typeof data.status_html === 'string') {
+                  root.innerHTML = data.status_html;
+                }
+              } catch (_err) {
+                // ignore transient polling errors
+              } finally {
+                inFlight = false;
+              }
+            }
+            setInterval(tick, 15000);
+          })();
+        </script>
+        """
+    )
+    return _render(page)
 
 @app.route("/config", methods=["GET", "POST"])
 @login_required
@@ -1072,3 +1121,6 @@ def run_dashboard():
 def start_dashboard_thread():
     thread = threading.Thread(target=run_dashboard, daemon=True)
     thread.start()
+
+if __name__ == "__main__":
+    run_dashboard()

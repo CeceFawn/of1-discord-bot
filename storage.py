@@ -2,8 +2,11 @@
 from __future__ import annotations
 import json
 import os
+import threading
 from typing import Any, Dict
 from settings import CONFIG_PATH, STATE_PATH, ENV_PATH
+
+_FILE_WRITE_LOCK = threading.RLock()
 
 def _env_quote(value: str) -> str:
     # Always quote to preserve spaces/comments/special characters in .env values.
@@ -17,11 +20,12 @@ def load_json(path: str, fallback: Any) -> Any:
         return json.load(f)
 
 def save_json_atomic(path: str, data: Any) -> None:
-    tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, path)
+    with _FILE_WRITE_LOCK:
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, path)
 
 def load_config() -> Dict[str, Any]:
     return load_json(CONFIG_PATH, fallback={})
@@ -40,25 +44,26 @@ def set_env_value(key: str, value: str, env_path: str = ENV_PATH) -> None:
     Upsert KEY=VALUE into .env while preserving other lines.
     Also updates os.environ for immediate use.
     """
-    lines = []
-    found = False
-    rendered = _env_quote(value)
+    with _FILE_WRITE_LOCK:
+        lines = []
+        found = False
+        rendered = _env_quote(value)
 
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip().startswith(f"{key}="):
-                    lines.append(f"{key}={rendered}\n")
-                    found = True
-                else:
-                    lines.append(line)
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith(f"{key}="):
+                        lines.append(f"{key}={rendered}\n")
+                        found = True
+                    else:
+                        lines.append(line)
 
-    if not found:
-        if lines and not lines[-1].endswith("\n"):
-            lines[-1] = lines[-1] + "\n"
-        lines.append(f"{key}={rendered}\n")
+        if not found:
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] = lines[-1] + "\n"
+            lines.append(f"{key}={rendered}\n")
 
-    with open(env_path, "w", encoding="utf-8") as f:
-        f.writelines(lines)
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
 
     os.environ[key] = str(value)
