@@ -265,6 +265,9 @@ def fetch_latest_instagram_post(username: str) -> Optional[str]:
 ERGAST_DRIVER_URL = "https://ergast.com/api/f1/current/driverStandings.json"
 ERGAST_CONSTRUCTOR_URL = "https://ergast.com/api/f1/current/constructorStandings.json"
 ERGAST_SCHEDULE_URL = "https://ergast.com/api/f1/current.json"
+JOLPICA_DRIVER_URL = "https://api.jolpi.ca/ergast/f1/current/driverStandings.json"
+JOLPICA_CONSTRUCTOR_URL = "https://api.jolpi.ca/ergast/f1/current/constructorStandings.json"
+JOLPICA_SCHEDULE_URL = "https://api.jolpi.ca/ergast/f1/current.json"
 
 F1_SCHEDULE_CACHE: Dict[str, Any] = {"ts": 0.0, "races": []}
 F1_REMINDER_TASK: Optional[asyncio.Task] = None
@@ -325,6 +328,18 @@ def _get_json(url: str):
     r = requests.get(url, timeout=20, headers={"User-Agent": "OF1-Discord-Bot"})
     r.raise_for_status()
     return r.json()
+
+def _get_json_any(urls: List[str], label: str = "api") -> Dict[str, Any]:
+    last_exc: Optional[Exception] = None
+    for url in urls:
+        try:
+            return _get_json(url)
+        except Exception as e:
+            last_exc = e
+            logging.warning(f"[F1] {label} fetch failed for {url}: {e}")
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"No {label} URLs configured.")
 
 load_f1_static_data()
 
@@ -394,7 +409,8 @@ async def fetch_current_season_schedule(force: bool = False) -> List[Dict[str, A
     if (not force) and F1_SCHEDULE_CACHE["races"] and (now_ts - float(F1_SCHEDULE_CACHE["ts"])) < 300:
         return list(F1_SCHEDULE_CACHE["races"])
 
-    data = await asyncio.to_thread(_get_json, ERGAST_SCHEDULE_URL)
+    schedule_urls = [ERGAST_SCHEDULE_URL, JOLPICA_SCHEDULE_URL]
+    data = await asyncio.to_thread(_get_json_any, schedule_urls, "schedule")
     races = data.get("MRData", {}).get("RaceTable", {}).get("Races", []) or []
     F1_SCHEDULE_CACHE["ts"] = now_ts
     F1_SCHEDULE_CACHE["races"] = list(races)
@@ -442,7 +458,10 @@ async def current_or_next_round_key() -> str:
 
 async def current_or_next_round_meta() -> Dict[str, Any]:
     key = await current_or_next_round_key()
-    races = await fetch_current_season_schedule()
+    try:
+        races = await fetch_current_season_schedule()
+    except Exception:
+        return {"key": key, "race_name": key, "race_dt": None, "sessions": []}
     for race in races:
         season = str(race.get("season") or "")
         rnd = str(race.get("round") or "")
@@ -912,7 +931,7 @@ def _circuit_lookup(query: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]
     return None, None
 
 async def fetch_driver_standings_text(limit: int = 20) -> str:
-    data = await asyncio.to_thread(_get_json, ERGAST_DRIVER_URL)
+    data = await asyncio.to_thread(_get_json_any, [ERGAST_DRIVER_URL, JOLPICA_DRIVER_URL], "driver standings")
     lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
     if not lists:
         return "No standings available."
@@ -932,7 +951,7 @@ async def fetch_driver_standings_text(limit: int = 20) -> str:
     return "🏁 **F1 Driver Standings (Current Season)**\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
 
 async def fetch_constructor_standings_text(limit: int = 10) -> str:
-    data = await asyncio.to_thread(_get_json, ERGAST_CONSTRUCTOR_URL)
+    data = await asyncio.to_thread(_get_json_any, [ERGAST_CONSTRUCTOR_URL, JOLPICA_CONSTRUCTOR_URL], "constructor standings")
     lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
     if not lists:
         return "No standings available."
@@ -2248,7 +2267,7 @@ async def circuit(ctx, *, name: str):
 @bot.command(name="driverstats", aliases=["driver"])
 async def driverstats(ctx, *, query: str):
     try:
-        data = await asyncio.to_thread(_get_json, ERGAST_DRIVER_URL)
+        data = await asyncio.to_thread(_get_json_any, [ERGAST_DRIVER_URL, JOLPICA_DRIVER_URL], "driver standings")
     except Exception as e:
         logging.error(f"[F1] driverstats failed: {e}")
         return await ctx.send("❌ Could not fetch driver standings.")
@@ -2285,7 +2304,7 @@ async def driverstats(ctx, *, query: str):
 @bot.command(name="teamstats", aliases=["team"])
 async def teamstats(ctx, *, query: str):
     try:
-        data = await asyncio.to_thread(_get_json, ERGAST_CONSTRUCTOR_URL)
+        data = await asyncio.to_thread(_get_json_any, [ERGAST_CONSTRUCTOR_URL, JOLPICA_CONSTRUCTOR_URL], "constructor standings")
     except Exception as e:
         logging.error(f"[F1] teamstats failed: {e}")
         return await ctx.send("❌ Could not fetch constructor standings.")
