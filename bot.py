@@ -5,6 +5,7 @@ import re
 import json
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 import asyncio
 import random
 from datetime import datetime, timedelta, timezone
@@ -23,7 +24,13 @@ import aiohttp
 load_dotenv()
 
 from storage import load_config, save_config, load_state, save_state, set_env_value
-from settings import LOG_PATH
+from settings import LOG_PATH, RUNTIME_STATUS_PATH
+from runtime_store import (
+    init_runtime_db,
+    upsert_runtime_status,
+    insert_alert,
+    migrate_alerts_from_state_json,
+)
 
 import io
 from PIL import Image, ImageDraw, ImageFont
@@ -168,11 +175,40 @@ from xp_storage import (
 # ----------------------------
 # Logging
 # ----------------------------
-logging.basicConfig(
-    filename=LOG_PATH,
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+class _JsonLineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _configure_logging() -> None:
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    # Avoid duplicate handlers on reload/import quirks.
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+    max_bytes = int(os.getenv("LOG_MAX_BYTES", str(5 * 1024 * 1024)) or (5 * 1024 * 1024))
+    backups = int(os.getenv("LOG_BACKUP_COUNT", "5") or 5)
+    fh = RotatingFileHandler(LOG_PATH, maxBytes=max(1024 * 1024, max_bytes), backupCount=max(1, backups), encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(_JsonLineFormatter())
+    root.addHandler(fh)
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    root.addHandler(sh)
+
+
+_configure_logging()
 
 # ----------------------------
 # Config + State (global in-memory)
@@ -215,6 +251,18 @@ XP_FLUSH_TASK: Optional[asyncio.Task] = None
 
 PERIODIC_ROLE_RECOVERY_TASK: Optional[asyncio.Task] = None
 RACE_SUPERVISOR_TASK: Optional[asyncio.Task] = None
+RUNTIME_STATUS_TASK: Optional[asyncio.Task] = None
+LOOP_HEARTBEATS: Dict[str, str] = {}
+LOOP_ERRORS: Dict[str, int] = {}
+
+
+def _loop_tick(name: str) -> None:
+    LOOP_HEARTBEATS[str(name)] = datetime.now(timezone.utc).isoformat()
+
+
+def _loop_error(name: str) -> None:
+    key = str(name)
+    LOOP_ERRORS[key] = int(LOOP_ERRORS.get(key, 0) or 0) + 1
 
 def _xp_mark_dirty() -> None:
     global XP_DIRTY
@@ -225,6 +273,7 @@ async def xp_flush_loop():
     global XP_DIRTY
     await bot.wait_until_ready()
     while not bot.is_closed():
+        _loop_tick("xp_flush")
         try:
             await asyncio.sleep(int(os.getenv("XP_FLUSH_SECONDS", "30")))
             if not XP_DIRTY:
@@ -234,6 +283,7 @@ async def xp_flush_loop():
                     await asyncio.to_thread(save_xp_state, XP_STATE)
                     XP_DIRTY = False
         except Exception as e:
+            _loop_error("xp_flush")
             logging.error(f"[XP] Flush loop error: {e}")
 
 # ----------------------------
@@ -379,21 +429,13 @@ def _record_alert(
             for k, v in list(ALERT_RATE_LIMIT.items()):
                 if float(v) < cutoff:
                     ALERT_RATE_LIMIT.pop(k, None)
-        root = _state_bucket("alerts")
-        items = root.get("items")
-        if not isinstance(items, list):
-            items = []
-            root["items"] = items
-        items.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "kind": str(kind or "info"),
-            "message": str(message or "").strip()[:500],
-            "guild_id": int(guild_id or 0),
-            "user_id": int(user_id or 0),
-        })
-        if len(items) > 200:
-            del items[:-200]
-        _save_state_quiet()
+        insert_alert(
+            ts=datetime.now(timezone.utc).isoformat(),
+            kind=str(kind or "info"),
+            message=str(message or "").strip()[:500],
+            guild_id=int(guild_id or 0),
+            user_id=int(user_id or 0),
+        )
     except Exception:
         pass
 
@@ -2048,7 +2090,12 @@ async def update_standings_once():
 async def standings_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        await update_standings_once()
+        _loop_tick("standings")
+        try:
+            await update_standings_once()
+        except Exception as e:
+            _loop_error("standings")
+            logging.error(f"[Standings] loop error: {e}")
         await asyncio.sleep(_refresh_seconds())
 
 def ensure_standings_task_running():
@@ -2096,7 +2143,44 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
             "pre_buffer_hours": int(os.getenv("OPENF1_PRE_WEEKEND_BUFFER_HOURS", os.getenv("RACE_WINDOW_PADDING_HOURS", "24")) or 24),
             "post_buffer_hours": int(os.getenv("OPENF1_POST_WEEKEND_BUFFER_HOURS", "12") or 12),
         },
+        "loop_health": {
+            "heartbeats": dict(LOOP_HEARTBEATS),
+            "errors": dict(LOOP_ERRORS),
+        },
     }
+
+def _write_runtime_status_file(payload: Dict[str, Any]) -> None:
+    try:
+        tmp = f"{RUNTIME_STATUS_PATH}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, RUNTIME_STATUS_PATH)
+    except Exception as e:
+        logging.warning(f"[RuntimeStatus] write failed: {e}")
+
+async def runtime_status_loop():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        _loop_tick("runtime_status")
+        try:
+            runtime = _runtime_status_snapshot()
+            try:
+                round_meta = await current_or_next_round_meta()
+            except Exception:
+                round_meta = {}
+            payload = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "runtime": runtime,
+                "round_meta": round_meta if isinstance(round_meta, dict) else {},
+            }
+            await asyncio.to_thread(_write_runtime_status_file, payload)
+            await asyncio.to_thread(upsert_runtime_status, payload)
+        except Exception as e:
+            _loop_error("runtime_status")
+            logging.warning(f"[RuntimeStatus] loop error: {e}")
+        interval = int(os.getenv("RUNTIME_STATUS_PUBLISH_SECONDS", "10") or 10)
+        await asyncio.sleep(max(5, min(120, interval)))
 
 @bot.hybrid_command(name="standingssetup", aliases=["standings_setup"])
 @commands.has_permissions(administrator=True)
@@ -2215,6 +2299,7 @@ def _f1_reminder_state() -> Dict[str, Any]:
 async def f1_reminder_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
+        _loop_tick("f1_reminders")
         try:
             reload_config_state()
             cfg = _f1_reminder_cfg()
@@ -2279,6 +2364,7 @@ async def f1_reminder_loop():
             if changed:
                 _save_state_quiet()
         except Exception as e:
+            _loop_error("f1_reminders")
             logging.error(f"[F1Reminder] loop error: {e}")
         await asyncio.sleep(60)
 
@@ -2728,6 +2814,13 @@ async def on_ready():
         bot.launch_time = datetime.now()
 
     reload_config_state()
+    try:
+        init_runtime_db()
+        migrated = migrate_alerts_from_state_json()
+        if migrated:
+            logging.info(f"[RuntimeDB] Migrated {migrated} alert rows from state.json")
+    except Exception as e:
+        logging.warning(f"[RuntimeDB] init/migration failed: {e}")
     setattr(bot, "of1_runtime_status_snapshot", _runtime_status_snapshot)
     setattr(bot, "of1_current_or_next_round_meta_coro", current_or_next_round_meta)
 
@@ -2742,6 +2835,7 @@ async def on_ready():
 
     # F1 reminders loop
     _ensure_background_task("F1_REMINDER_TASK", f1_reminder_loop, "F1Reminder")
+    _ensure_background_task("RUNTIME_STATUS_TASK", runtime_status_loop, "RuntimeStatus")
 
     if not APP_COMMANDS_SYNCED:
         try:
@@ -2828,6 +2922,7 @@ async def periodic_reaction_role_check():
     interval_min = 60
 
     while not bot.is_closed():
+        _loop_tick("periodic_role_recovery")
         try:
             reload_config_state()
             try:
@@ -2895,6 +2990,7 @@ async def periodic_reaction_role_check():
                                 logging.warning(f"[Recovery] Error user {user.id}: {e}")
 
         except Exception as e:
+            _loop_error("periodic_role_recovery")
             logging.error(f"[Recovery] Loop error: {e}")
 
         await asyncio.sleep(interval_min * 60)
@@ -3247,6 +3343,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         while RACE_LIVE_ENABLED.get(gid, False):
+            _loop_tick("race_live")
             try:
                 _racelog(gid, "poll race_control")
                 rc = await _openf1_get(http, "race_control", {"session_key": session_key})
@@ -3268,6 +3365,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                 _racelog(gid, "race_live_loop cancelled")
                 raise
             except Exception as e:
+                _loop_error("race_live")
                 _racelog(gid, f"ERROR {type(e).__name__}: {e}")
                 await asyncio.sleep(5)
 
@@ -3282,6 +3380,7 @@ async def race_supervisor_loop():
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         while not bot.is_closed():
+            _loop_tick("race_supervisor")
             try:
                 info = await _pick_current_meeting_and_window(http)
                 if not info:
@@ -3342,6 +3441,7 @@ async def race_supervisor_loop():
                 await asyncio.sleep(60 if in_window else idle_s)
 
             except Exception as e:
+                _loop_error("race_supervisor")
                 logging.error(f"[RaceLive] Supervisor error: {e}")
                 await asyncio.sleep(60)
 

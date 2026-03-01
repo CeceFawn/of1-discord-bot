@@ -8,5 +8,10 @@ bot_config.json
 reaction_roles.json
 state.json
 xp_state.json
+runtime_status.json
+runtime.db
+runtime.db-shm
+runtime.db-wal
+deploy_status.json
 venv/
 .venv/

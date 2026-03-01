@@ -17,8 +17,9 @@ import psutil
 import requests
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
 
-from settings import LOG_PATH, CONFIG_PATH, STATE_PATH
+from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, DEPLOY_STATUS_PATH
 from storage import load_config, save_config, load_state, save_state
+from runtime_store import get_runtime_status, list_alerts, init_runtime_db
 
 app = Flask(__name__)
 
@@ -52,6 +53,29 @@ _DEPLOY_LOCK = threading.Lock()
 _DEPLOY_IN_PROGRESS = False
 _RUNTIME_STATUS_CACHE = {"ts": 0.0, "data": {}}
 _ROUND_META_CACHE = {"ts": 0.0, "data": {}}
+_RUNTIME_FILE_CACHE = {"ts": 0.0, "data": {}}
+
+
+def _write_deploy_status(payload: dict) -> None:
+    try:
+        tmp = f"{DEPLOY_STATUS_PATH}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload or {}, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, DEPLOY_STATUS_PATH)
+    except Exception:
+        pass
+
+
+def _read_deploy_status() -> dict:
+    try:
+        if not os.path.exists(DEPLOY_STATUS_PATH):
+            return {}
+        with open(DEPLOY_STATUS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 def _set_last_action(action: str, ok: bool, output: str):
     with _LAST_ACTION_LOCK:
@@ -59,6 +83,15 @@ def _set_last_action(action: str, ok: bool, output: str):
         _LAST_ACTION["action"] = action
         _LAST_ACTION["ok"] = ok
         _LAST_ACTION["output"] = output[-8000:]  # cap output size
+    if str(action).startswith("deploy"):
+        _write_deploy_status(
+            {
+                "ts": _LAST_ACTION["ts"],
+                "action": action,
+                "ok": bool(ok),
+                "output": str(output or "")[-8000:],
+            }
+        )
 
 def _get_last_action():
     with _LAST_ACTION_LOCK:
@@ -399,6 +432,7 @@ def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
     safe_logs = _escape("".join(lines))
 
     last = _get_last_action()
+    deploy_status = _read_deploy_status()
     last_html = ""
     if last.get("ts"):
         status = "OK" if last.get("ok") else "FAILED"
@@ -410,9 +444,21 @@ def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
           </div>
         """
 
+    deploy_html = ""
+    if deploy_status.get("ts"):
+        status = "OK" if deploy_status.get("ok") else "FAILED"
+        color = "#6f6" if deploy_status.get("ok") else "#f66"
+        deploy_html = f"""
+          <div style="margin:10px 0;padding:10px;border-radius:10px;background:#0b0b0b;border:1px solid #333;">
+            <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Last deploy checkpoint: <b style="color:{color};">{_escape(str(deploy_status.get("action")))} · {status}</b> · {_escape(str(deploy_status.get("ts")))}</div>
+            <pre style="white-space:pre-wrap;margin:0;color:#ddd;">{_escape(str(deploy_status.get("output") or ""))}</pre>
+          </div>
+        """
+
     return {
         "safe_logs": safe_logs,
         "last_html": last_html,
+        "deploy_html": deploy_html,
         "last_ts": str(last.get("ts") or ""),
     }
 
@@ -448,6 +494,30 @@ def _fmt_relative(raw: str | None) -> str:
         return f"{amount}{unit} ago"
     return f"in {amount}{unit}"
 
+def _runtime_file_snapshot() -> dict:
+    now_ts = time.time()
+    if (now_ts - float(_RUNTIME_FILE_CACHE.get("ts", 0.0))) < 5.0:
+        cached = _RUNTIME_FILE_CACHE.get("data")
+        return dict(cached) if isinstance(cached, dict) else {}
+    try:
+        db_data = get_runtime_status()
+        if isinstance(db_data, dict) and db_data:
+            _RUNTIME_FILE_CACHE["ts"] = now_ts
+            _RUNTIME_FILE_CACHE["data"] = dict(db_data)
+            return db_data
+    except Exception:
+        pass
+    try:
+        with open(RUNTIME_STATUS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _RUNTIME_FILE_CACHE["ts"] = now_ts
+            _RUNTIME_FILE_CACHE["data"] = dict(data)
+            return data
+    except Exception:
+        pass
+    return {}
+
 def _bot_runtime_status() -> dict:
     now_ts = time.time()
     if (now_ts - float(_RUNTIME_STATUS_CACHE.get("ts", 0.0))) < 5.0:
@@ -455,7 +525,9 @@ def _bot_runtime_status() -> dict:
         return dict(cached) if isinstance(cached, dict) else {}
     try:
         if not bot_reference:
-            return {}
+            snap = _runtime_file_snapshot()
+            runtime = snap.get("runtime")
+            return dict(runtime) if isinstance(runtime, dict) else {}
         fn = getattr(bot_reference, "of1_runtime_status_snapshot", None)
         if callable(fn):
             data = fn()
@@ -465,7 +537,9 @@ def _bot_runtime_status() -> dict:
                 return data
     except Exception:
         pass
-    return {}
+    snap = _runtime_file_snapshot()
+    runtime = snap.get("runtime")
+    return dict(runtime) if isinstance(runtime, dict) else {}
 
 def _bot_round_meta(timeout_s: float = 4.0) -> dict:
     now_ts = time.time()
@@ -474,11 +548,15 @@ def _bot_round_meta(timeout_s: float = 4.0) -> dict:
         return dict(cached) if isinstance(cached, dict) else {}
     try:
         if not bot_reference:
-            return {}
+            snap = _runtime_file_snapshot()
+            meta = snap.get("round_meta")
+            return dict(meta) if isinstance(meta, dict) else {}
         coro_fn = getattr(bot_reference, "of1_current_or_next_round_meta_coro", None)
         loop = getattr(bot_reference, "loop", None)
         if not callable(coro_fn) or loop is None:
-            return {}
+            snap = _runtime_file_snapshot()
+            meta = snap.get("round_meta")
+            return dict(meta) if isinstance(meta, dict) else {}
         fut = asyncio.run_coroutine_threadsafe(coro_fn(), loop)
         data = fut.result(timeout=max(0.5, float(timeout_s)))
         if isinstance(data, dict):
@@ -487,7 +565,9 @@ def _bot_round_meta(timeout_s: float = 4.0) -> dict:
             return data
         return {}
     except Exception:
-        return {}
+        snap = _runtime_file_snapshot()
+        meta = snap.get("round_meta")
+        return dict(meta) if isinstance(meta, dict) else {}
 
 def _recent_log_alerts(limit: int = 20, tail_n: int = 1500) -> list[str]:
     try:
@@ -557,16 +637,18 @@ def _status_view_data() -> dict:
                 current_round_record = item
                 break
 
-    recent_alerts = []
-    alerts_root = st.get("alerts") if isinstance(st.get("alerts"), dict) else {}
-    for a in (alerts_root.get("items") or [])[-20:]:
-        if isinstance(a, dict):
-            recent_alerts.append(a)
+    recent_alerts = list_alerts(limit=20)
     log_alert_lines = _recent_log_alerts(limit=20)
+
+    runtime_ts = _parse_iso_utc(str((runtime or {}).get("ts") or ""))
+    heartbeat_age_s = int((now - runtime_ts).total_seconds()) if runtime_ts else None
+    runtime_stale = bool(heartbeat_age_s is None or heartbeat_age_s > 30)
 
     return {
         "runtime": runtime,
         "round_meta": round_meta,
+        "runtime_stale": runtime_stale,
+        "runtime_heartbeat_age_s": heartbeat_age_s,
         "current_round_key": current_round_key,
         "current_round_name": current_round_name,
         "current_round_record": current_round_record,
@@ -616,6 +698,17 @@ def _deploy_worker(target: str = "bot"):
     if target not in {"bot", "dashboard", "both"}:
         target = "bot"
     try:
+        def checkpoint(step: str, ok: bool | None = None, detail: str = "") -> None:
+            payload = {
+                "ts": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "action": f"deploy_{target}",
+                "step": str(step),
+                "ok": ok,
+                "detail": str(detail or "")[-4000:],
+            }
+            _write_deploy_status(payload)
+
+        checkpoint("started", ok=None, detail=f"target={target}")
         chunks.append(f"Repo dir: {BOT_REPO_DIR}")
         chunks.append(f"Bot service: {BOT_SYSTEMD_SERVICE}")
         chunks.append(f"Dashboard service: {DASHBOARD_SYSTEMD_SERVICE}")
@@ -627,6 +720,7 @@ def _deploy_worker(target: str = "bot"):
         chunks.append(out or f"(exit {rc})")
         if rc != 0:
             ok_all = False
+        checkpoint("git_pull", ok=(rc == 0), detail=out or f"exit={rc}")
 
         # pip install -r requirements.txt (if pip exists and requirements exists)
         req_path = os.path.join(BOT_REPO_DIR, "requirements.txt")
@@ -636,9 +730,11 @@ def _deploy_worker(target: str = "bot"):
             chunks.append(out or f"(exit {rc})")
             if rc != 0:
                 ok_all = False
+            checkpoint("pip_install", ok=(rc == 0), detail=out or f"exit={rc}")
         else:
             chunks.append("---- pip install skipped ----")
             chunks.append(f"requirements.txt exists={os.path.exists(req_path)}, venv pip exists={os.path.exists(BOT_VENV_PIP)}")
+            checkpoint("pip_install_skipped", ok=True, detail="requirements or venv pip missing")
 
         # restart service(s) only if earlier steps succeeded
         chunks.append("---- systemctl restart ----")
@@ -658,14 +754,18 @@ def _deploy_worker(target: str = "bot"):
                 chunks.append(out or ("OK" if ok else "FAILED"))
                 if not ok:
                     ok_all = False
+                checkpoint(f"restart_{label}", ok=ok, detail=out or ("OK" if ok else "FAILED"))
         else:
             chunks.append("Skipped because deploy steps failed.")
+            checkpoint("restart_skipped", ok=False, detail="earlier deploy step failed")
 
         _set_last_action(f"deploy_{target}", ok_all, "\n".join(chunks))
+        checkpoint("finished", ok=ok_all, detail="completed")
     except Exception as e:
         chunks.append("---- deploy worker exception ----")
         chunks.append(f"{type(e).__name__}: {e}")
         _set_last_action(f"deploy_{target}", False, "\n".join(chunks))
+        checkpoint("exception", ok=False, detail=f"{type(e).__name__}: {e}")
     finally:
         with _DEPLOY_LOCK:
             _DEPLOY_IN_PROGRESS = False
@@ -846,13 +946,15 @@ def logs():
         "<h2 style='margin:0 0 10px 0;'>Logs</h2>"
         + controls
         + f"<div id='lastActionBox'>{data['last_html']}</div>"
+        + f"<div id='deployStatusBox'>{data.get('deploy_html','')}</div>"
         + f"<pre id='liveLogsPre' style='white-space:pre-wrap;background:#000;padding:12px;border-radius:10px;border:1px solid #333;max-width:1200px;'>{data['safe_logs']}</pre>"
         + """
         <script>
           (function(){
             const pre = document.getElementById('liveLogsPre');
             const lastBox = document.getElementById('lastActionBox');
-            if (!pre || !lastBox) return;
+            const deployBox = document.getElementById('deployStatusBox');
+            if (!pre || !lastBox || !deployBox) return;
             const url = new URL(window.location.href);
             url.searchParams.set('ajax', '1');
             let inFlight = false;
@@ -870,6 +972,9 @@ def logs():
                 }
                 if (typeof data.last_html === 'string') {
                   lastBox.innerHTML = data.last_html;
+                }
+                if (typeof data.deploy_html === 'string') {
+                  deployBox.innerHTML = data.deploy_html;
                 }
               } catch (_err) {
                 // ignore transient polling errors
@@ -893,8 +998,13 @@ def status():
     data = _status_view_data()
     runtime = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
     loops = runtime.get("loops") if isinstance(runtime.get("loops"), dict) else {}
+    loop_health = runtime.get("loop_health") if isinstance(runtime.get("loop_health"), dict) else {}
+    hb = loop_health.get("heartbeats") if isinstance(loop_health.get("heartbeats"), dict) else {}
+    errs = loop_health.get("errors") if isinstance(loop_health.get("errors"), dict) else {}
     standings = runtime.get("standings") if isinstance(runtime.get("standings"), dict) else {}
     openf1_window = runtime.get("openf1_window") if isinstance(runtime.get("openf1_window"), dict) else {}
+    runtime_stale = bool(data.get("runtime_stale"))
+    runtime_age = data.get("runtime_heartbeat_age_s")
 
     def _badge(ok: bool, txt_ok: str = "Running", txt_no: str = "Stopped") -> str:
         color = "#6f6" if ok else "#f66"
@@ -969,6 +1079,10 @@ def status():
 
     body = f"""
       <h2 style="margin:0 0 10px 0;">Status</h2>
+      <div style="margin-bottom:10px;">
+        <b>Bot heartbeat:</b> {'<span style="color:#f66;">STALE</span>' if runtime_stale else '<span style="color:#6f6;">FRESH</span>'}
+        ({_escape(str(runtime_age if runtime_age is not None else '-'))}s)
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:12px;">
         <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
           <div style="font-weight:700;">Host</div>
@@ -1005,6 +1119,10 @@ def status():
         <li><b>Standings loop:</b> {_badge(bool(loops.get("standings")))} </li>
         <li><b>XP flush loop:</b> {_badge(bool(loops.get("xp_flush")))} </li>
         <li><b>Role recovery loop:</b> {_badge(bool(loops.get("periodic_role_recovery")))} </li>
+      </ul>
+      <ul>
+        <li><b>Loop heartbeat timestamps:</b> {_escape(str(hb))}</li>
+        <li><b>Loop error counters:</b> {_escape(str(errs))}</li>
       </ul>
       <ul>
         <li><b>Active race-live guild IDs:</b> {_escape(str((runtime.get("race_live") or {}).get("running_guild_ids", [])))}</li>
@@ -1150,6 +1268,10 @@ def restart():
     return redirect(url_for("logs"))
 
 def run_dashboard():
+    try:
+        init_runtime_db()
+    except Exception:
+        pass
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
 
