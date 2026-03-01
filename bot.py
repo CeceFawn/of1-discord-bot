@@ -2160,6 +2160,17 @@ def _write_runtime_status_file(payload: Dict[str, Any]) -> None:
     except Exception as e:
         logging.warning(f"[RuntimeStatus] write failed: {e}")
 
+
+def _json_safe_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _default(o):
+        if isinstance(o, datetime):
+            return o.astimezone(timezone.utc).isoformat()
+        return str(o)
+    try:
+        return json.loads(json.dumps(payload or {}, default=_default, ensure_ascii=False))
+    except Exception:
+        return {"ts": datetime.now(timezone.utc).isoformat(), "runtime_error": "runtime_status_payload_serialize_failed"}
+
 async def runtime_status_loop():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -2175,6 +2186,7 @@ async def runtime_status_loop():
                 "runtime": runtime,
                 "round_meta": round_meta if isinstance(round_meta, dict) else {},
             }
+            payload = _json_safe_payload(payload)
             await asyncio.to_thread(_write_runtime_status_file, payload)
             await asyncio.to_thread(upsert_runtime_status, payload)
         except Exception as e:
