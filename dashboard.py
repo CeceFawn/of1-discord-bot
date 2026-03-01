@@ -37,6 +37,7 @@ DASHBOARD_STARTED_AT = time.time()
 # Bot control config (ENV)
 # ----------------------------
 BOT_SYSTEMD_SERVICE = (os.getenv("BOT_SYSTEMD_SERVICE") or "discordbot.service").strip()
+DASHBOARD_SYSTEMD_SERVICE = (os.getenv("DASHBOARD_SYSTEMD_SERVICE") or "of1-dashboard.service").strip()
 BOT_REPO_DIR = (os.getenv("BOT_REPO_DIR") or "").strip()
 if not BOT_REPO_DIR:
     # Fallback: assume dashboard.py is inside the repo
@@ -242,10 +243,22 @@ BASE_TEMPLATE = """
               </button>
             </form>
             <div style="height:1px;background:#2a2a2a;margin:6px 0;"></div>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploy') }}" method="post" style="margin:0;">
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploybot') }}" method="post" style="margin:0;">
               {{ csrf_input|safe }}
               <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Deploy update (git pull + restart)
+                Deploy bot update
+              </button>
+            </form>
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploydashboard') }}" method="post" style="margin:0;">
+              {{ csrf_input|safe }}
+              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
+                Deploy dashboard update
+              </button>
+            </form>
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployboth') }}" method="post" style="margin:0;">
+              {{ csrf_input|safe }}
+              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
+                Deploy both (bot + dashboard)
               </button>
             </form>
           </div>
@@ -589,20 +602,24 @@ def _run_cmd(cmd: list[str], cwd: str | None = None, timeout_s: int = 180) -> tu
     except Exception as e:
         return 99, f"Exception while running {cmd}: {e}"
 
-def _sudo_systemctl(action: str) -> tuple[bool, str]:
+def _sudo_systemctl(action: str, service_name: str = BOT_SYSTEMD_SERVICE) -> tuple[bool, str]:
     # Requires sudoers NOPASSWD for systemctl on this service.
     # Use -n so it fails immediately instead of hanging waiting for a password prompt.
-    rc, out = _run_cmd(["sudo", "-n", "systemctl", action, BOT_SYSTEMD_SERVICE], timeout_s=30)
+    rc, out = _run_cmd(["sudo", "-n", "systemctl", action, service_name], timeout_s=30)
     return (rc == 0), out
 
-def _deploy_worker():
+def _deploy_worker(target: str = "bot"):
     global _DEPLOY_IN_PROGRESS
     chunks = []
     ok_all = True
+    target = (target or "bot").strip().lower()
+    if target not in {"bot", "dashboard", "both"}:
+        target = "bot"
     try:
         chunks.append(f"Repo dir: {BOT_REPO_DIR}")
-        chunks.append(f"Service: {BOT_SYSTEMD_SERVICE}")
-        chunks.append("Deploy worker started.")
+        chunks.append(f"Bot service: {BOT_SYSTEMD_SERVICE}")
+        chunks.append(f"Dashboard service: {DASHBOARD_SYSTEMD_SERVICE}")
+        chunks.append(f"Deploy worker started (target={target}).")
 
         # git pull (fast-forward only to avoid surprise merges)
         rc, out = _run_cmd(["git", "pull", "--ff-only"], cwd=BOT_REPO_DIR, timeout_s=120)
@@ -623,21 +640,32 @@ def _deploy_worker():
             chunks.append("---- pip install skipped ----")
             chunks.append(f"requirements.txt exists={os.path.exists(req_path)}, venv pip exists={os.path.exists(BOT_VENV_PIP)}")
 
-        # restart service only if earlier steps succeeded
+        # restart service(s) only if earlier steps succeeded
         chunks.append("---- systemctl restart ----")
         if ok_all:
-            ok, out = _sudo_systemctl("restart")
-            chunks.append(out or ("OK" if ok else "FAILED"))
-            if not ok:
-                ok_all = False
+            services: list[tuple[str, str]] = []
+            if target == "bot":
+                services.append(("bot", BOT_SYSTEMD_SERVICE))
+            elif target == "dashboard":
+                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
+            else:
+                services.append(("bot", BOT_SYSTEMD_SERVICE))
+                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
+
+            for label, svc in services:
+                ok, out = _sudo_systemctl("restart", svc)
+                chunks.append(f"[{label}] {svc}")
+                chunks.append(out or ("OK" if ok else "FAILED"))
+                if not ok:
+                    ok_all = False
         else:
             chunks.append("Skipped because deploy steps failed.")
 
-        _set_last_action("deploy", ok_all, "\n".join(chunks))
+        _set_last_action(f"deploy_{target}", ok_all, "\n".join(chunks))
     except Exception as e:
         chunks.append("---- deploy worker exception ----")
         chunks.append(f"{type(e).__name__}: {e}")
-        _set_last_action("deploy", False, "\n".join(chunks))
+        _set_last_action(f"deploy_{target}", False, "\n".join(chunks))
     finally:
         with _DEPLOY_LOCK:
             _DEPLOY_IN_PROGRESS = False
@@ -952,6 +980,7 @@ def status():
         <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
           <div style="font-weight:700;">Service</div>
           <div style="margin-top:6px;"><b>Bot service:</b> {_escape(BOT_SYSTEMD_SERVICE)}</div>
+          <div><b>Dashboard service:</b> {_escape(DASHBOARD_SYSTEMD_SERVICE)}</div>
           <div><b>Repo dir:</b> {_escape(BOT_REPO_DIR)}</div>
           <div><b>Bot connected guilds:</b> {_escape(str(runtime.get("guild_count", "-")))}</div>
           <div><b>Snapshot time:</b> {_escape(_fmt_ts_utc(str(runtime.get("ts") or "")))}</div>
@@ -1085,7 +1114,7 @@ def state():
 def bot_action(action: str):
     global _DEPLOY_IN_PROGRESS
     action = (action or "").strip().lower()
-    allowed = {"start", "stop", "restart", "deploy"}
+    allowed = {"start", "stop", "restart", "deploy", "deploybot", "deploydashboard", "deployboth"}
     if action not in allowed:
         abort(404)
 
@@ -1094,15 +1123,21 @@ def bot_action(action: str):
         _set_last_action(action, ok, out or ("OK" if ok else "FAILED"))
         return redirect(url_for("logs"))
 
-    # deploy: run in background so the request returns quickly
+    # deploy actions: run in background so the request returns quickly
+    target = {
+        "deploy": "bot",  # backwards-compat
+        "deploybot": "bot",
+        "deploydashboard": "dashboard",
+        "deployboth": "both",
+    }.get(action, "bot")
     with _DEPLOY_LOCK:
         if _DEPLOY_IN_PROGRESS:
-            _set_last_action("deploy", False, "Deploy already running. Wait for it to finish, then refresh Logs.")
+            _set_last_action(f"deploy_{target}", False, "Deploy already running. Wait for it to finish, then refresh Logs.")
             return redirect(url_for("logs"))
         _DEPLOY_IN_PROGRESS = True
-    t = threading.Thread(target=_deploy_worker, daemon=True, name="dashboard-deploy-worker")
+    t = threading.Thread(target=_deploy_worker, kwargs={"target": target}, daemon=True, name=f"dashboard-deploy-{target}-worker")
     t.start()
-    _set_last_action("deploy", True, f"Deploy started in background (thread={t.name}). Refresh Logs in a few seconds.")
+    _set_last_action(f"deploy_{target}", True, f"Deploy started in background (thread={t.name}). Refresh Logs in a few seconds.")
     return redirect(url_for("logs"))
 
 # Backwards-compat route name (your old template called /restart)
