@@ -357,6 +357,26 @@ def _save_state_quiet() -> None:
     except Exception as e:
         logging.error(f"[State] save_state failed: {e}")
 
+def _record_alert(kind: str, message: str, guild_id: Optional[int] = None, user_id: Optional[int] = None) -> None:
+    try:
+        root = _state_bucket("alerts")
+        items = root.get("items")
+        if not isinstance(items, list):
+            items = []
+            root["items"] = items
+        items.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "kind": str(kind or "info"),
+            "message": str(message or "").strip()[:500],
+            "guild_id": int(guild_id or 0),
+            "user_id": int(user_id or 0),
+        })
+        if len(items) > 200:
+            del items[:-200]
+        _save_state_quiet()
+    except Exception:
+        pass
+
 def _clean_text_key(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
@@ -1369,7 +1389,7 @@ async def xpleaderboard(ctx, limit: int = 10):
 
     await ctx.send("🏆 **XP Leaderboard**\n" + "\n".join(lines))
 
-@bot.command(name="xpset")
+@bot.hybrid_command(name="xpset")
 @commands.has_permissions(administrator=True)
 async def xpset(ctx, member: discord.Member, xp: int):
     """Admin: set a user's XP."""
@@ -1381,7 +1401,7 @@ async def xpset(ctx, member: discord.Member, xp: int):
     _xp_mark_dirty()
     await ctx.send(f"✅ Set {member.display_name} to {xp} XP (L{lvl}).")
 
-@bot.command(name="xpreset")
+@bot.hybrid_command(name="xpreset")
 @commands.has_permissions(administrator=True)
 async def xpreset(ctx, member: discord.Member):
     """Admin: reset a user's XP."""
@@ -1395,7 +1415,7 @@ async def xpreset(ctx, member: discord.Member):
     _xp_mark_dirty()
     await ctx.send(f"✅ Reset XP for {member.display_name}.")
 
-@bot.command(name="xpaudit")
+@bot.hybrid_command(name="xpaudit")
 @commands.has_permissions(administrator=True)
 async def xpaudit(ctx, member: discord.Member = None):
     """
@@ -1434,7 +1454,7 @@ async def xpaudit(ctx, member: discord.Member = None):
     )
     await ctx.send(body)
 
-@bot.command(name="xpbackfillhistory")
+@bot.hybrid_command(name="xpbackfillhistory")
 @commands.has_permissions(administrator=True)
 async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
     """
@@ -1472,7 +1492,7 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
         logging.error(f"[XP] Backfill failed for guild {ctx.guild.id}: {e}")
         await status_msg.edit(content=f"❌ XP backfill failed: {e}")
 
-@bot.command(name="xpgate")
+@bot.hybrid_command(name="xpgate")
 @commands.has_permissions(administrator=True)
 async def xpgate(ctx, channel: discord.TextChannel, level: int):
     """Admin: require a minimum level to talk in a channel (auto-delete)."""
@@ -1488,7 +1508,7 @@ async def xpgate(ctx, channel: discord.TextChannel, level: int):
 
     await ctx.send(f"✅ Set **#{channel.name}** minimum level to **{level}**.")
 
-@bot.command(name="xpgateclear")
+@bot.hybrid_command(name="xpgateclear")
 @commands.has_permissions(administrator=True)
 async def xpgateclear(ctx, channel: discord.TextChannel):
     """Admin: remove channel min-level gate."""
@@ -1507,7 +1527,7 @@ async def xpgateclear(ctx, channel: discord.TextChannel):
 # ----------------------------
 # Commands: config tools
 # ----------------------------
-@bot.command(name="configreload", aliases=["config_reload"])
+@bot.hybrid_command(name="configreload", aliases=["config_reload"])
 @commands.has_permissions(administrator=True)
 async def configreload(ctx):
     """Reload config.json + state.json without restarting the bot."""
@@ -1518,7 +1538,7 @@ async def configreload(ctx):
 # ----------------------------
 # Commands: reaction role setup
 # ----------------------------
-@bot.command(name="setupnotifications", aliases=["setup_notifications"])
+@bot.hybrid_command(name="setupnotifications", aliases=["setup_notifications"])
 @commands.has_permissions(administrator=True)
 async def setupnotifications(ctx):
     roles = cfg_reaction_roles()
@@ -1538,7 +1558,7 @@ async def setupnotifications(ctx):
     logging.info(f"[Notification Roles] Setup complete (Message ID: {msg.id})")
     await ctx.send(f"✅ Notifications setup message created: `{msg.id}`")
 
-@bot.command(name="setupcolors", aliases=["setup_colors"])
+@bot.hybrid_command(name="setupcolors", aliases=["setup_colors"])
 @commands.has_permissions(administrator=True)
 async def setupcolors(ctx):
     roles = cfg_color_roles()
@@ -1558,7 +1578,7 @@ async def setupcolors(ctx):
     logging.info(f"[Color Roles] Setup complete (Message ID: {msg.id})")
     await ctx.send(f"✅ Colors setup message created: `{msg.id}`")
 
-@bot.command(name="setupdrivers", aliases=["setup_drivers"])
+@bot.hybrid_command(name="setupdrivers", aliases=["setup_drivers"])
 @commands.has_permissions(administrator=True)
 async def setupdrivers(ctx):
     """
@@ -2023,7 +2043,42 @@ def _ensure_background_task(task_ref_name: str, coro_factory, label: str) -> Non
         globals()[task_ref_name] = asyncio.create_task(coro_factory())
         logging.info(f"[{label}] Loop started.")
 
-@bot.command(name="standingssetup", aliases=["standings_setup"])
+def _task_running(task: Optional[asyncio.Task]) -> bool:
+    return bool(task is not None and not task.done())
+
+def _runtime_status_snapshot() -> Dict[str, Any]:
+    running_live_guilds = []
+    for gid, task in RACE_LIVE_TASKS.items():
+        if _task_running(task):
+            running_live_guilds.append(int(gid))
+    return {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "guild_count": len(bot.guilds),
+        "loops": {
+            "standings": _task_running(STANDINGS_TASK),
+            "f1_reminders": _task_running(F1_REMINDER_TASK),
+            "race_supervisor": _task_running(RACE_SUPERVISOR_TASK),
+            "xp_flush": _task_running(XP_FLUSH_TASK),
+            "periodic_role_recovery": _task_running(PERIODIC_ROLE_RECOVERY_TASK),
+        },
+        "race_live": {
+            "enabled_guild_ids": sorted(int(g) for g, enabled in RACE_LIVE_ENABLED.items() if enabled),
+            "running_guild_ids": sorted(running_live_guilds),
+            "tracked_round_keys": dict(RACE_LIVE_ROUND_KEYS),
+        },
+        "standings": {
+            "channel_id": int(os.getenv("STANDINGS_CHANNEL_ID", "0") or 0),
+            "driver_message_id": int(os.getenv("DRIVER_STANDINGS_MESSAGE_ID", "0") or 0),
+            "constructor_message_id": int(os.getenv("CONSTRUCTOR_STANDINGS_MESSAGE_ID", "0") or 0),
+            "refresh_minutes": int(os.getenv("STANDINGS_REFRESH_MINUTES", "5") or 5),
+        },
+        "openf1_window": {
+            "pre_buffer_hours": int(os.getenv("OPENF1_PRE_WEEKEND_BUFFER_HOURS", os.getenv("RACE_WINDOW_PADDING_HOURS", "24")) or 24),
+            "post_buffer_hours": int(os.getenv("OPENF1_POST_WEEKEND_BUFFER_HOURS", "12") or 12),
+        },
+    }
+
+@bot.hybrid_command(name="standingssetup", aliases=["standings_setup"])
 @commands.has_permissions(administrator=True)
 async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     which = which.lower().strip()
@@ -2207,7 +2262,7 @@ async def f1_reminder_loop():
             logging.error(f"[F1Reminder] loop error: {e}")
         await asyncio.sleep(60)
 
-@bot.command(name="f1reminders")
+@bot.hybrid_command(name="f1reminders")
 @commands.has_permissions(administrator=True)
 async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = None):
     mode = (mode or "status").lower().strip()
@@ -2236,7 +2291,7 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
         f"- Lead minutes: `{', '.join(str(x) for x in cfg['leads'])}`"
     )
 
-@bot.command(name="f1reminderleads")
+@bot.hybrid_command(name="f1reminderleads")
 @commands.has_permissions(administrator=True)
 async def f1reminderleads(ctx, *minutes: int):
     if not minutes:
@@ -2511,7 +2566,7 @@ async def predictionsboard(ctx):
         lines.append(f"• {name} — {filled}/{len(categories)} picks")
     await ctx.send(f"📋 **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines))
 
-@bot.command(name="predictionslock")
+@bot.hybrid_command(name="predictionslock")
 @commands.has_permissions(administrator=True)
 async def predictionslock(ctx):
     meta = await _prediction_round_context()
@@ -2520,7 +2575,7 @@ async def predictionslock(ctx):
     _save_state_quiet()
     await ctx.send(f"🔒 Predictions locked for **{meta['race_name']}** (`{meta['key']}`).")
 
-@bot.command(name="predictionsunlock")
+@bot.hybrid_command(name="predictionsunlock")
 @commands.has_permissions(administrator=True)
 async def predictionsunlock(ctx):
     meta = await _prediction_round_context()
@@ -2643,6 +2698,8 @@ async def on_ready():
         bot.launch_time = datetime.now()
 
     reload_config_state()
+    setattr(bot, "of1_runtime_status_snapshot", _runtime_status_snapshot)
+    setattr(bot, "of1_current_or_next_round_meta_coro", current_or_next_round_meta)
 
     ensure_standings_task_running()
     _ensure_background_task("PERIODIC_ROLE_RECOVERY_TASK", periodic_reaction_role_check, "Recovery")
@@ -2862,12 +2919,35 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
+@bot.event
+async def on_command_error(ctx, error):
+    # Keep behavior simple: log + alert state. Individual commands can still catch and handle their own exceptions.
+    cmd_name = getattr(getattr(ctx, "command", None), "qualified_name", None) or "(unknown)"
+    err_name = type(error).__name__
+    err_text = f"{err_name}: {error}"
+    gid = getattr(getattr(ctx, "guild", None), "id", None)
+    uid = getattr(getattr(ctx, "author", None), "id", None)
+
+    if isinstance(error, commands.CommandNotFound):
+        logging.warning(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
+        _record_alert("command_not_found", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid)
+        return
+
+    if isinstance(error, commands.CheckFailure):
+        logging.warning(f"[CmdError] check failure {cmd_name} by user={uid} guild={gid}: {err_text}")
+        _record_alert("permission_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid)
+        return
+
+    logging.error(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
+    _record_alert("command_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid)
+
 # ============================================================
 # Race Live (OpenF1) + Kill Switch + Debug Tail (NO underscores)
 # ============================================================
 
 RACE_LIVE_TASKS: Dict[int, asyncio.Task] = {}
 RACE_LIVE_ENABLED: Dict[int, bool] = {}
+RACE_LIVE_ROUND_KEYS: Dict[int, str] = {}
 RACE_LIVE_DEBUG: Dict[int, deque] = {}
 RACE_LIVE_POSTED_SIGS: Dict[int, set] = {}
 RACE_LIVE_POSTED_SIGS_ORDER: Dict[int, deque] = {}
@@ -2962,10 +3042,28 @@ def _save_race_thread_record(
         "parent_channel_id": int(thread.parent_id or 0),
         "thread_name": thread.name,
         "source": (source or "auto"),
+        "weekend_state": "queued" if (source or "auto") == "manual" else "active",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     if race_name:
         obj["race_name"] = race_name
+    _save_state_quiet()
+
+def _set_race_thread_weekend_state(round_key: str, guild_id: int, weekend_state: str) -> None:
+    rec = _race_thread_record(round_key, guild_id)
+    if not rec:
+        return
+    new_state = str(weekend_state or "").strip().lower()
+    if new_state not in {"queued", "active", "past"}:
+        return
+    if str(rec.get("weekend_state") or "") == new_state:
+        return
+    rec["weekend_state"] = new_state
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if new_state == "active":
+        rec["activated_at"] = now_iso
+    elif new_state == "past":
+        rec["past_at"] = now_iso
     _save_state_quiet()
 
 def _clear_race_thread_record(round_key: str, guild_id: int) -> None:
@@ -3052,6 +3150,7 @@ async def _ensure_live_thread(
 ) -> discord.Thread:
     existing = await _fetch_saved_race_thread(guild, round_key)
     if existing is not None:
+        _set_race_thread_weekend_state(round_key, guild.id, "active")
         return existing
 
     created = await _create_race_thread(
@@ -3067,6 +3166,7 @@ async def _ensure_live_thread(
         thread=created,
         source="auto",
     )
+    _set_race_thread_weekend_state(round_key, guild.id, "active")
     return created
 
 async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optional[tuple[datetime, datetime, Dict[str, Any], list]]:
@@ -3091,11 +3191,14 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     if not starts or not ends:
         return None
 
-    pad_hours = int(os.getenv("RACE_WINDOW_PADDING_HOURS", "24"))
-    pad = timedelta(hours=max(0, min(72, pad_hours)))
+    legacy_pad = int(os.getenv("RACE_WINDOW_PADDING_HOURS", "24"))
+    pre_hours = int(os.getenv("OPENF1_PRE_WEEKEND_BUFFER_HOURS", str(legacy_pad)))
+    post_hours = int(os.getenv("OPENF1_POST_WEEKEND_BUFFER_HOURS", "12"))
+    pre_pad = timedelta(hours=max(0, min(72, pre_hours)))
+    post_pad = timedelta(hours=max(0, min(72, post_hours)))
 
-    window_start = min(starts) - pad
-    window_end = max(ends) + pad
+    window_start = min(starts) - pre_pad
+    window_end = max(ends) + post_pad
 
     meta = relevant[0]
     return window_start, window_end, meta, relevant
@@ -3183,6 +3286,7 @@ async def race_supervisor_loop():
 
                             _racelog(gid, f"Supervisor starting live loop (session_key={session_key})")
                             RACE_LIVE_ENABLED[gid] = True
+                            RACE_LIVE_ROUND_KEYS[gid] = round_key
 
                             async def runner(g=guild, th=thread, sk=session_key):
                                 try:
@@ -3198,6 +3302,10 @@ async def race_supervisor_loop():
                             _racelog(gid, "Supervisor stopping live loop (out of window)")
                             RACE_LIVE_ENABLED[gid] = False
                             task.cancel()
+                            stopped_round = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
+                            if stopped_round:
+                                _set_race_thread_weekend_state(stopped_round, gid, "past")
+                                RACE_LIVE_ROUND_KEYS.pop(gid, None)
                     except Exception as e:
                         logging.error(f"[RaceLive] Guild {guild.id} supervisor step failed: {e}")
 
@@ -3207,7 +3315,7 @@ async def race_supervisor_loop():
                 logging.error(f"[RaceLive] Supervisor error: {e}")
                 await asyncio.sleep(60)
 
-@bot.command(name="racelivekill", aliases=["race_live_kill"])
+@bot.hybrid_command(name="racelivekill", aliases=["race_live_kill"])
 @commands.has_permissions(administrator=True)
 async def racelivekill(ctx):
     """Emergency kill switch: stop race-live module only + show tail."""
@@ -3220,12 +3328,16 @@ async def racelivekill(ctx):
     t = RACE_LIVE_TASKS.get(gid)
     if t and not t.done():
         t.cancel()
+    stopped_round = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
+    if stopped_round:
+        _set_race_thread_weekend_state(stopped_round, gid, "past")
+        RACE_LIVE_ROUND_KEYS.pop(gid, None)
 
     tail = _racetail(gid, 20)
     logging.warning(f"[RaceLive][{gid}] KILL SWITCH. Tail:\n{tail}")
     await ctx.send("🛑 **Race live killed.**\n```text\n" + tail[:1800] + "\n```")
 
-@bot.command(name="racelivetail", aliases=["race_live_tail"])
+@bot.hybrid_command(name="racelivetail", aliases=["race_live_tail"])
 @commands.has_permissions(administrator=True)
 async def racelivetail(ctx, lines: int = 20):
     """Show last N debug lines for race-live module."""
@@ -3276,12 +3388,8 @@ async def racethread_slash(
 
         existing = await _fetch_saved_race_thread(guild, round_key)
         if existing is not None:
-            if upload_file is not None:
-                await existing.send(post_text, file=upload_file)
-            else:
-                await existing.send(post_text)
             await interaction.followup.send(
-                f"Race thread already exists for **{race_name}**: {existing.mention}\nPosted your update there.",
+                f"Race thread already exists for **{race_name}**: {existing.mention}\nNo new thread was created.",
                 ephemeral=True,
             )
             return
@@ -3307,7 +3415,7 @@ async def racethread_slash(
         logging.error(f"[RaceThread] slash command failed: {e}")
         await interaction.followup.send(f"Could not create race thread: {e}", ephemeral=True)
 
-@bot.command(name="racelivestart", aliases=["race_live_start"])
+@bot.hybrid_command(name="racelivestart", aliases=["race_live_start"])
 @commands.has_permissions(administrator=True)
 async def racelivestart(ctx):
     """Manually start race-live right now (ignores weekend window)."""
@@ -3334,6 +3442,7 @@ async def racelivestart(ctx):
     thread = await _ensure_live_thread(guild, round_key, race_name, title)
 
     RACE_LIVE_ENABLED[gid] = True
+    RACE_LIVE_ROUND_KEYS[gid] = round_key
 
     async def runner():
         try:
@@ -3346,7 +3455,7 @@ async def racelivestart(ctx):
     RACE_LIVE_TASKS[gid] = asyncio.create_task(runner())
     await ctx.send(f"✅ Started race live manually (session_key={session_key}).")
 
-@bot.command(name="racelivestop", aliases=["race_live_stop"])
+@bot.hybrid_command(name="racelivestop", aliases=["race_live_stop"])
 @commands.has_permissions(administrator=True)
 async def racelivestop(ctx):
     """Gracefully stop race-live for this guild."""
@@ -3359,6 +3468,10 @@ async def racelivestop(ctx):
     t = RACE_LIVE_TASKS.get(gid)
     if t and not t.done():
         t.cancel()
+    stopped_round = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
+    if stopped_round:
+        _set_race_thread_weekend_state(stopped_round, gid, "past")
+        RACE_LIVE_ROUND_KEYS.pop(gid, None)
 
     await ctx.send("🛑 Race live stopped.")
 
@@ -3831,3 +3944,4 @@ if not bot_token:
     raise RuntimeError("DISCORD_BOT_TOKEN is missing. Put it in your .env file.")
 
 bot.run(bot_token)
+

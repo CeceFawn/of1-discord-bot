@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import time
+import asyncio
 import threading
 import subprocess
 import secrets
 import hmac
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from urllib.parse import urlencode
 
@@ -400,6 +401,156 @@ def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
         "last_ts": str(last.get("ts") or ""),
     }
 
+def _parse_iso_utc(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+def _fmt_ts_utc(raw: str | None) -> str:
+    dt = _parse_iso_utc(raw)
+    if not dt:
+        return "-"
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+def _fmt_relative(raw: str | None) -> str:
+    dt = _parse_iso_utc(raw)
+    if not dt:
+        return "-"
+    delta = datetime.now(timezone.utc) - dt
+    sec = int(abs(delta.total_seconds()))
+    if sec < 60:
+        amount, unit = sec, "s"
+    elif sec < 3600:
+        amount, unit = sec // 60, "m"
+    elif sec < 86400:
+        amount, unit = sec // 3600, "h"
+    else:
+        amount, unit = sec // 86400, "d"
+    if delta.total_seconds() >= 0:
+        return f"{amount}{unit} ago"
+    return f"in {amount}{unit}"
+
+def _bot_runtime_status() -> dict:
+    try:
+        if not bot_reference:
+            return {}
+        fn = getattr(bot_reference, "of1_runtime_status_snapshot", None)
+        if callable(fn):
+            data = fn()
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+def _bot_round_meta(timeout_s: float = 4.0) -> dict:
+    try:
+        if not bot_reference:
+            return {}
+        coro_fn = getattr(bot_reference, "of1_current_or_next_round_meta_coro", None)
+        loop = getattr(bot_reference, "loop", None)
+        if not callable(coro_fn) or loop is None:
+            return {}
+        fut = asyncio.run_coroutine_threadsafe(coro_fn(), loop)
+        data = fut.result(timeout=max(0.5, float(timeout_s)))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _recent_log_alerts(limit: int = 20, tail_n: int = 1500) -> list[str]:
+    try:
+        with open(LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-max(200, int(tail_n)):]
+    except Exception:
+        return []
+    keys = (" - ERROR - ", "Traceback", "[CmdError]", "FAILED", "Exception")
+    hits = [ln.rstrip("\n") for ln in lines if any(k in ln for k in keys)]
+    return hits[-max(1, int(limit)):]
+
+def _status_view_data() -> dict:
+    st = load_state() or {}
+    runtime = _bot_runtime_status()
+    round_meta = _bot_round_meta()
+    now = datetime.now(timezone.utc)
+
+    race_root = (st.get("race_threads") or {})
+    rounds = (race_root.get("rounds") or {}) if isinstance(race_root, dict) else {}
+    flat_threads = []
+    for round_key, robj in (rounds.items() if isinstance(rounds, dict) else []):
+        if not isinstance(robj, dict):
+            continue
+        race_name = str(robj.get("race_name") or round_key)
+        guilds = robj.get("guilds") or {}
+        if not isinstance(guilds, dict):
+            continue
+        for gid, rec in guilds.items():
+            if not isinstance(rec, dict):
+                continue
+            item = dict(rec)
+            item["round_key"] = str(round_key)
+            item["race_name"] = race_name
+            item["guild_id"] = str(gid)
+            flat_threads.append(item)
+
+    flat_threads.sort(key=lambda x: (_parse_iso_utc(x.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
+    active_threads = [x for x in flat_threads if str(x.get("weekend_state") or "").lower() == "active"]
+    past_threads = [x for x in flat_threads if str(x.get("weekend_state") or "").lower() == "past"]
+    queued_threads = [x for x in flat_threads if str(x.get("weekend_state") or "").lower() == "queued"]
+
+    current_round_key = str(round_meta.get("key") or "")
+    current_round_name = str(round_meta.get("race_name") or current_round_key or "Next round")
+    round_sessions = round_meta.get("sessions") or []
+    first_session = None
+    if isinstance(round_sessions, list):
+        dts = []
+        for s in round_sessions:
+            if not isinstance(s, dict):
+                continue
+            dt = _parse_iso_utc(str(s.get("dt") or ""))
+            if dt:
+                dts.append(dt)
+        if dts:
+            first_session = min(dts)
+    race_dt = _parse_iso_utc(str(round_meta.get("race_dt") or ""))
+    runtime_window = runtime.get("openf1_window") if isinstance(runtime, dict) else {}
+    pre_h = int((runtime_window or {}).get("pre_buffer_hours", 24) or 24)
+    queued_eta = (first_session or race_dt)
+    if queued_eta:
+        queued_eta = queued_eta - timedelta(hours=max(0, min(72, pre_h)))
+
+    current_round_record = None
+    if current_round_key:
+        for item in flat_threads:
+            if str(item.get("round_key")) == current_round_key:
+                current_round_record = item
+                break
+
+    recent_alerts = []
+    alerts_root = st.get("alerts") if isinstance(st.get("alerts"), dict) else {}
+    for a in (alerts_root.get("items") or [])[-20:]:
+        if isinstance(a, dict):
+            recent_alerts.append(a)
+    log_alert_lines = _recent_log_alerts(limit=20)
+
+    return {
+        "runtime": runtime,
+        "round_meta": round_meta,
+        "current_round_key": current_round_key,
+        "current_round_name": current_round_name,
+        "current_round_record": current_round_record,
+        "queued_eta": queued_eta.isoformat() if queued_eta else "",
+        "threads_flat": flat_threads,
+        "threads_active": active_threads,
+        "threads_past": past_threads,
+        "threads_queued": queued_threads,
+        "recent_alerts": recent_alerts,
+        "recent_log_alerts": log_alert_lines,
+        "now_iso": now.isoformat(),
+    }
+
 # ----------------------------
 # Bot control helpers
 # ----------------------------
@@ -695,17 +846,151 @@ def status():
     proc_uptime_s = max(0, int(time.time() - DASHBOARD_STARTED_AT))
     cpu = psutil.cpu_percent()
     ram = psutil.virtual_memory().percent
+    data = _status_view_data()
+    runtime = data.get("runtime") if isinstance(data.get("runtime"), dict) else {}
+    loops = runtime.get("loops") if isinstance(runtime.get("loops"), dict) else {}
+    standings = runtime.get("standings") if isinstance(runtime.get("standings"), dict) else {}
+    openf1_window = runtime.get("openf1_window") if isinstance(runtime.get("openf1_window"), dict) else {}
+
+    def _badge(ok: bool, txt_ok: str = "Running", txt_no: str = "Stopped") -> str:
+        color = "#6f6" if ok else "#f66"
+        label = txt_ok if ok else txt_no
+        return f"<span style='display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid {color};color:{color};font-size:12px;'>{label}</span>"
+
+    current_round_record = data.get("current_round_record") if isinstance(data.get("current_round_record"), dict) else None
+    current_round_key = str(data.get("current_round_key") or "")
+    current_round_name = str(data.get("current_round_name") or "Next round")
+    queued_eta = _fmt_ts_utc(str(data.get("queued_eta") or ""))
+    has_current = current_round_record is not None
+    current_state = str((current_round_record or {}).get("weekend_state") or "queued").lower()
+    active_threads = data.get("threads_active") if isinstance(data.get("threads_active"), list) else []
+    past_threads = data.get("threads_past") if isinstance(data.get("threads_past"), list) else []
+    recent_alerts = data.get("recent_alerts") if isinstance(data.get("recent_alerts"), list) else []
+    log_alerts = data.get("recent_log_alerts") if isinstance(data.get("recent_log_alerts"), list) else []
+
+    active_line = "No active race thread."
+    if active_threads:
+        t = active_threads[0]
+        active_line = (
+            f"#{_escape(str(t.get('thread_name') or t.get('thread_id') or 'thread'))} "
+            f"(round {_escape(str(t.get('round_key') or '-'))}, created {_escape(_fmt_ts_utc(t.get('created_at')))})."
+        )
+
+    prior_line = "No prior race thread marked as past yet."
+    if past_threads:
+        t = past_threads[0]
+        prior_line = (
+            f"#{_escape(str(t.get('thread_name') or t.get('thread_id') or 'thread'))} "
+            f"(round {_escape(str(t.get('round_key') or '-'))}, past since {_escape(_fmt_ts_utc(t.get('past_at') or t.get('created_at')))})."
+        )
+
+    if has_current:
+        current_card = f"""
+          <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+            <div style="font-weight:700;">Current Round Thread</div>
+            <div style="margin-top:6px;"><b>Round:</b> {_escape(current_round_name)} ({_escape(current_round_key or '-')})</div>
+            <div><b>Status:</b> {_escape(current_state.title())}</div>
+            <div><b>Thread:</b> {_escape(str(current_round_record.get("thread_name") or current_round_record.get("thread_id") or "-"))}</div>
+            <div><b>Created:</b> {_escape(_fmt_ts_utc(current_round_record.get("created_at")))} ({_escape(_fmt_relative(current_round_record.get("created_at")))})</div>
+            <div><b>Source:</b> {_escape(str(current_round_record.get("source") or "-"))}</div>
+          </div>
+        """
+    else:
+        current_card = f"""
+          <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+            <div style="font-weight:700;">Next Round Queue</div>
+            <div style="margin-top:6px;"><b>Round:</b> {_escape(current_round_name)} ({_escape(current_round_key or '-')})</div>
+            <div><b>Status:</b> Queued (not created yet)</div>
+            <div><b>Expected auto-create window starts:</b> {_escape(queued_eta)}</div>
+          </div>
+        """
+
+    alert_items_html = ""
+    if recent_alerts:
+        rows = []
+        for a in reversed(recent_alerts[-10:]):
+            ts = _fmt_ts_utc(str(a.get("ts") or ""))
+            kind = str(a.get("kind") or "alert")
+            msg = str(a.get("message") or "")
+            rows.append(f"<li><b>{_escape(kind)}</b> @ {_escape(ts)} - {_escape(msg)}</li>")
+        alert_items_html = "<ul>" + "".join(rows) + "</ul>"
+    else:
+        alert_items_html = "<div style='color:#aaa;'>No recorded state alerts yet.</div>"
+
+    log_alerts_html = ""
+    if log_alerts:
+        log_alerts_html = "<pre style='white-space:pre-wrap;background:#000;padding:10px;border-radius:8px;border:1px solid #333;'>" + _escape("\n".join(log_alerts[-10:])) + "</pre>"
+    else:
+        log_alerts_html = "<div style='color:#aaa;'>No recent error-like log lines detected.</div>"
 
     body = f"""
       <h2 style="margin:0 0 10px 0;">Status</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:12px;">
+        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+          <div style="font-weight:700;">Host</div>
+          <div style="margin-top:6px;"><b>CPU:</b> {cpu}%</div>
+          <div><b>RAM:</b> {ram}%</div>
+          <div><b>Dashboard uptime:</b> {proc_uptime_s}s</div>
+          <div><b>Log path:</b> {_escape(LOG_PATH)}</div>
+        </div>
+        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+          <div style="font-weight:700;">Service</div>
+          <div style="margin-top:6px;"><b>Bot service:</b> {_escape(BOT_SYSTEMD_SERVICE)}</div>
+          <div><b>Repo dir:</b> {_escape(BOT_REPO_DIR)}</div>
+          <div><b>Bot connected guilds:</b> {_escape(str(runtime.get("guild_count", "-")))}</div>
+          <div><b>Snapshot time:</b> {_escape(_fmt_ts_utc(str(runtime.get("ts") or "")))}</div>
+        </div>
+      </div>
+
+      <h3 style="margin:14px 0 8px 0;">Race Thread Lifecycle</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-bottom:12px;">
+        {current_card}
+        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+          <div style="font-weight:700;">Active Race Thread</div>
+          <div style="margin-top:6px;">{active_line}</div>
+          <div style="margin-top:8px;font-weight:700;">Prior Race Weekend</div>
+          <div style="margin-top:6px;">{prior_line}</div>
+        </div>
+      </div>
+
+      <h3 style="margin:14px 0 8px 0;">Live Module Health</h3>
       <ul>
-        <li><b>CPU:</b> {cpu}%</li>
-        <li><b>RAM:</b> {ram}%</li>
-        <li><b>Dashboard uptime:</b> {proc_uptime_s}s</li>
-        <li><b>Log path:</b> {_escape(LOG_PATH)}</li>
-        <li><b>Bot service:</b> {_escape(BOT_SYSTEMD_SERVICE)}</li>
-        <li><b>Repo dir:</b> {_escape(BOT_REPO_DIR)}</li>
+        <li><b>Race supervisor:</b> {_badge(bool(loops.get("race_supervisor")))} </li>
+        <li><b>F1 reminders loop:</b> {_badge(bool(loops.get("f1_reminders")))} </li>
+        <li><b>Standings loop:</b> {_badge(bool(loops.get("standings")))} </li>
+        <li><b>XP flush loop:</b> {_badge(bool(loops.get("xp_flush")))} </li>
+        <li><b>Role recovery loop:</b> {_badge(bool(loops.get("periodic_role_recovery")))} </li>
       </ul>
+      <ul>
+        <li><b>Active race-live guild IDs:</b> {_escape(str((runtime.get("race_live") or {}).get("running_guild_ids", [])))}</li>
+        <li><b>Tracked race round keys:</b> {_escape(str((runtime.get("race_live") or {}).get("tracked_round_keys", {})))}</li>
+        <li><b>OpenF1 pre-weekend buffer:</b> {_escape(str(openf1_window.get("pre_buffer_hours", 24)))}h</li>
+        <li><b>OpenF1 post-weekend buffer (auto-kill):</b> {_escape(str(openf1_window.get("post_buffer_hours", 12)))}h</li>
+      </ul>
+
+      <h3 style="margin:14px 0 8px 0;">Standings Health</h3>
+      <ul>
+        <li><b>Channel ID configured:</b> {_escape(str(standings.get("channel_id", 0)))}</li>
+        <li><b>Driver message ID:</b> {_escape(str(standings.get("driver_message_id", 0)))}</li>
+        <li><b>Constructor message ID:</b> {_escape(str(standings.get("constructor_message_id", 0)))}</li>
+        <li><b>Refresh every:</b> {_escape(str(standings.get("refresh_minutes", 5)))} minute(s)</li>
+      </ul>
+
+      <h3 style="margin:14px 0 8px 0;">Alerts</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:10px;">
+        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+          <div style="font-weight:700;margin-bottom:6px;">Command/State Alerts</div>
+          {alert_items_html}
+        </div>
+        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
+          <div style="font-weight:700;margin-bottom:6px;">Recent Error-like Logs</div>
+          {log_alerts_html}
+        </div>
+      </div>
+
+      <script>
+        setTimeout(function() {{ window.location.reload(); }}, 15000);
+      </script>
     """
     return _render(body)
 
