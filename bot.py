@@ -2293,10 +2293,20 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
 
 @bot.hybrid_command(name="f1reminderleads")
 @commands.has_permissions(administrator=True)
-async def f1reminderleads(ctx, *minutes: int):
-    if not minutes:
-        return await ctx.send("❌ Usage: `!f1reminderleads 1440 60 15`")
-    leads = sorted({max(1, min(10080, int(m))) for m in minutes}, reverse=True)
+async def f1reminderleads(ctx, *, minutes: str):
+    raw = str(minutes or "").strip()
+    if not raw:
+        return await ctx.send("❌ Usage: `!f1reminderleads 1440 60 15` or `/f1reminderleads minutes:\"1440 60 15\"`")
+    parts = [p for p in re.split(r"[,\s]+", raw) if p]
+    parsed: List[int] = []
+    for p in parts:
+        try:
+            parsed.append(int(p))
+        except Exception:
+            continue
+    if not parsed:
+        return await ctx.send("❌ No valid minute values found. Example: `1440 60 15`")
+    leads = sorted({max(1, min(10080, int(m))) for m in parsed}, reverse=True)
     reload_config_state()
     CFG["f1_reminder_leads_minutes"] = leads
     save_config(CFG)
