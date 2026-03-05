@@ -8,6 +8,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
 import random
+import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Dict, Optional, Any, List, Tuple
@@ -428,7 +429,11 @@ def _openf1_fetch_login_token() -> tuple[str, float]:
         except Exception:
             logging.warning("[OpenF1Auth] OPENF1_AUTH_EXTRA_JSON is not valid JSON.")
 
-    req_headers: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "OF1-Discord-Bot"}
+    req_headers: Dict[str, str] = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": "OF1-Discord-Bot",
+    }
     hdr_raw = str(os.getenv("OPENF1_AUTH_HEADERS_JSON") or "").strip()
     if hdr_raw:
         try:
@@ -438,7 +443,7 @@ def _openf1_fetch_login_token() -> tuple[str, float]:
         except Exception:
             logging.warning("[OpenF1Auth] OPENF1_AUTH_HEADERS_JSON is not valid JSON.")
 
-    r = requests.post(auth_url, json=payload, headers=req_headers, timeout=20)
+    r = requests.post(auth_url, data=payload, headers=req_headers, timeout=20)
     r.raise_for_status()
     body = r.json() if r.content else {}
     token = str(_json_path_get(body, token_key) or "").strip()
@@ -1310,13 +1315,12 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
                 full_name = (f"{first} {last}").strip() or str(r.get("driver_name") or f"#{num}")
             out.append(
                 {
-                    "position": int(r.get("position", 0) or 0),
-                    "points": int(r.get("points", 0) or 0),
+                    "position": int(r.get("position_current", r.get("position", 0)) or 0),
+                    "points": int(r.get("points_current", r.get("points", 0)) or 0),
                     "driver_number": num,
                     "code": str(dmeta.get("name_acronym") or "").strip(),
                     "name": full_name,
                     "team": str(dmeta.get("team_name") or "Unknown").strip() or "Unknown",
-                    "wins": r.get("wins"),
                 }
             )
         out = [x for x in out if int(x.get("position", 0) or 0) > 0]
@@ -1339,10 +1343,9 @@ async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, 
                 continue
             out.append(
                 {
-                    "position": int(r.get("position", 0) or 0),
-                    "points": int(r.get("points", 0) or 0),
+                    "position": int(r.get("position_current", r.get("position", 0)) or 0),
+                    "points": int(r.get("points_current", r.get("points", 0)) or 0),
                     "name": str(r.get("team_name") or "Unknown").strip() or "Unknown",
-                    "wins": r.get("wins"),
                 }
             )
         out = [x for x in out if int(x.get("position", 0) or 0) > 0]
