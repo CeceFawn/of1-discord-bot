@@ -701,10 +701,21 @@ def _run_cmd(cmd: list[str], cwd: str | None = None, timeout_s: int = 180) -> tu
         return 99, f"Exception while running {cmd}: {e}"
 
 def _sudo_systemctl(action: str, service_name: str = BOT_SYSTEMD_SERVICE) -> tuple[bool, str]:
-    # Requires sudoers NOPASSWD for systemctl on this service.
-    # Use -n so it fails immediately instead of hanging waiting for a password prompt.
-    rc, out = _run_cmd(["sudo", "-n", "systemctl", action, service_name], timeout_s=30)
-    return (rc == 0), out
+    # Try direct systemctl first (dashboard often runs as root). Fallback to sudo -n.
+    rc, out = _run_cmd(["systemctl", action, service_name], timeout_s=30)
+    if rc == 0:
+        return True, out
+    rc2, out2 = _run_cmd(["sudo", "-n", "systemctl", action, service_name], timeout_s=30)
+    merged = "\n".join(x for x in [out, out2] if x).strip()
+    return (rc2 == 0), merged
+
+
+def _service_is_active(service_name: str = BOT_SYSTEMD_SERVICE) -> tuple[bool, str]:
+    rc, out = _run_cmd(["systemctl", "is-active", service_name], timeout_s=15)
+    if rc != 0:
+        rc2, out2 = _run_cmd(["sudo", "-n", "systemctl", "is-active", service_name], timeout_s=15)
+        return (rc2 == 0 and (out2 or "").strip() == "active"), (out2 or "").strip()
+    return ((out or "").strip() == "active"), (out or "").strip()
 
 def _deploy_worker(target: str = "bot"):
     global _DEPLOY_IN_PROGRESS
@@ -1260,7 +1271,17 @@ def bot_action(action: str):
 
     if action in {"start", "stop", "restart"}:
         ok, out = _sudo_systemctl(action)
-        _set_last_action(action, ok, out or ("OK" if ok else "FAILED"))
+        # Validate expected state so button outcomes are obvious in Logs.
+        expected_active = action in {"start", "restart"}
+        is_active, state_txt = _service_is_active(BOT_SYSTEMD_SERVICE)
+        state_ok = (is_active == expected_active)
+        final_ok = bool(ok and state_ok)
+        combined = (out or "").strip()
+        if state_txt:
+            combined = (combined + "\n" if combined else "") + f"is-active: {state_txt}"
+        if not state_ok:
+            combined = (combined + "\n" if combined else "") + f"Expected active={expected_active}, got active={is_active}"
+        _set_last_action(action, final_ok, combined or ("OK" if final_ok else "FAILED"))
         return redirect(url_for("logs"))
 
     # deploy actions: run in background so the request returns quickly
