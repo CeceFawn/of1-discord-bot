@@ -4726,11 +4726,18 @@ async def racereplay(ctx, year: int, round_num: int, speed: float = 10.0):
             if not meetings:
                 await ctx.send(f"\u274C No OpenF1 meetings found for `{year}`.")
                 return
-            if round_num < 1 or round_num > len(meetings):
-                await ctx.send(f"\u274C Round must be between `1` and `{len(meetings)}` for `{year}`.")
+            race_meetings = [
+                m for m in meetings
+                if any(_session_type_upper(s) == "RACE" for s in (m.get("sessions") or []))
+            ]
+            if not race_meetings:
+                await ctx.send(f"\u274C No race weekends with a `RACE` session were found for `{year}`.")
+                return
+            if round_num < 1 or round_num > len(race_meetings):
+                await ctx.send(f"\u274C Round must be between `1` and `{len(race_meetings)}` for `{year}`.")
                 return
 
-            target = meetings[round_num - 1]
+            target = race_meetings[round_num - 1]
             sessions = target.get("sessions") or []
             race_session = next((s for s in sessions if _session_type_upper(s) == "RACE"), None)
             if not race_session:
