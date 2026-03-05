@@ -1160,6 +1160,10 @@ def status():
       <ul>
         <li><b>Active race-live guild IDs:</b> {_escape(str((runtime.get("race_live") or {}).get("running_guild_ids", [])))}</li>
         <li><b>Tracked race round keys:</b> {_escape(str((runtime.get("race_live") or {}).get("tracked_round_keys", {})))}</li>
+        <li><b>Live session kinds:</b> {_escape(str((runtime.get("race_live") or {}).get("session_kinds", {})))}</li>
+        <li><b>Last live event timestamps:</b> {_escape(str((runtime.get("race_live") or {}).get("last_event_ts", {})))}</li>
+        <li><b>Live spoiler delay:</b> {_escape(str((runtime.get("race_live") or {}).get("delay_seconds", 0)))}s</li>
+        <li><b>Live poll interval:</b> {_escape(str((runtime.get("race_live") or {}).get("poll_seconds", 3)))}s</li>
         <li><b>OpenF1 pre-weekend buffer:</b> {_escape(str(openf1_window.get("pre_buffer_hours", 24)))}h</li>
         <li><b>OpenF1 post-weekend buffer (auto-kill):</b> {_escape(str(openf1_window.get("post_buffer_hours", 12)))}h</li>
       </ul>

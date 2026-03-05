@@ -2257,6 +2257,9 @@ def _command_examples(prefix: str) -> Dict[str, str]:
         "racelivestart": f"{p}racelivestart",
         "racelivestop": f"{p}racelivestop",
         "racelivetail": f"{p}racelivetail 20",
+        "setdelay": f"{p}setdelay 2",
+        "setpoll": f"{p}setpoll 3",
+        "livesettings": f"{p}livesettings",
         "racelivekill": f"{p}racelivekill",
         "racetestlist": f"{p}racetestlist",
         "racetestinfo": f"{p}racetestinfo practice_short",
@@ -2311,6 +2314,9 @@ def _command_descriptions() -> Dict[str, str]:
         "racelivestart": "Start race live tracking/supervision (admin).",
         "racelivestop": "Stop race live tracking loop (admin).",
         "racelivetail": "Show recent race-live event output (admin).",
+        "setdelay": "Set race-live spoiler delay in seconds (admin).",
+        "setpoll": "Set race-live OpenF1 poll interval in seconds (admin).",
+        "livesettings": "Show race-live settings/status (admin).",
         "racelivekill": "Force-stop race-live worker tasks (admin).",
         "racetestlist": "List available race simulation scenarios.",
         "racetestinfo": "Show details for a race simulation scenario.",
@@ -2594,6 +2600,10 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
             "enabled_guild_ids": sorted(int(g) for g, enabled in RACE_LIVE_ENABLED.items() if enabled),
             "running_guild_ids": sorted(running_live_guilds),
             "tracked_round_keys": dict(RACE_LIVE_ROUND_KEYS),
+            "session_kinds": {str(g): str(k) for g, k in RACE_LIVE_SESSION_KINDS.items()},
+            "last_event_ts": {str(g): str(ts) for g, ts in RACE_LIVE_LAST_EVENT_TS.items()},
+            "delay_seconds": _race_live_delay_seconds(),
+            "poll_seconds": _race_live_poll_seconds(),
         },
         "standings": {
             "channel_id": int(os.getenv("STANDINGS_CHANNEL_ID", "0") or 0),
@@ -3536,9 +3546,80 @@ async def on_command_error(ctx, error):
 RACE_LIVE_TASKS: Dict[int, asyncio.Task] = {}
 RACE_LIVE_ENABLED: Dict[int, bool] = {}
 RACE_LIVE_ROUND_KEYS: Dict[int, str] = {}
+RACE_LIVE_SESSION_KINDS: Dict[int, str] = {}
+RACE_LIVE_LAST_EVENT_TS: Dict[int, str] = {}
 RACE_LIVE_DEBUG: Dict[int, deque] = {}
 RACE_LIVE_POSTED_SIGS: Dict[int, set] = {}
 RACE_LIVE_POSTED_SIGS_ORDER: Dict[int, deque] = {}
+
+def _race_live_delay_seconds() -> float:
+    bucket = _state_bucket("race_live")
+    try:
+        v = float(bucket.get("delay_seconds", 0.0) or 0.0)
+    except Exception:
+        v = 0.0
+    return max(0.0, min(30.0, v))
+
+def _set_race_live_delay_seconds(seconds: float) -> float:
+    v = max(0.0, min(30.0, float(seconds)))
+    bucket = _state_bucket("race_live")
+    bucket["delay_seconds"] = v
+    _save_state_quiet()
+    return v
+
+def _race_live_poll_seconds() -> float:
+    bucket = _state_bucket("race_live")
+    raw = bucket.get("poll_seconds", None)
+    if raw is None:
+        raw = os.getenv("OPENF1_ACTIVE_POLL_SECONDS", "3")
+    try:
+        v = float(raw)
+    except Exception:
+        v = 3.0
+    return max(1.0, min(15.0, v))
+
+def _set_race_live_poll_seconds(seconds: float) -> float:
+    v = max(1.0, min(15.0, float(seconds)))
+    bucket = _state_bucket("race_live")
+    bucket["poll_seconds"] = v
+    _save_state_quiet()
+    return v
+
+def _race_control_emoji_for_message(msg: str) -> str:
+    t = str(msg or "").lower()
+    if "double yellow" in t:
+        return "🟨"
+    if "yellow" in t:
+        return "🟨"
+    if "purple" in t:
+        return "🟣"
+    if "virtual safety car" in t or " vsc" in t or t.startswith("vsc"):
+        return "🟠"
+    if "safety car" in t:
+        return "🟡"
+    if "red flag" in t or t.startswith("red "):
+        return "🔴"
+    if "green flag" in t or "green light" in t or t.startswith("green"):
+        return "🟢"
+    if "chequered flag" in t or "checkered flag" in t or "session ended" in t:
+        return "🏁"
+    return "ℹ️"
+
+def _normalize_session_kind(session_type: str) -> str:
+    st = str(session_type or "").upper().strip()
+    if st in {"QUALI", "QUALIFYING"}:
+        return "QUALI"
+    if st in {"SPRINT QUALIFYING", "SPRINT SHOOTOUT"}:
+        return "SPRINT_QUALI"
+    if st == "SPRINT":
+        return "SPRINT"
+    if st == "RACE":
+        return "RACE"
+    return st
+
+def _extract_quali_segment(msg: str) -> Optional[str]:
+    m = re.search(r"\b(SQ[123]|Q[123])\b", str(msg or "").upper())
+    return m.group(1) if m else None
 
 def _racelog(gid: int, msg: str) -> None:
     buf = RACE_LIVE_DEBUG.setdefault(gid, deque(maxlen=200))
@@ -3564,6 +3645,123 @@ def _race_sig_seen_or_add(gid: int, sig: str) -> bool:
         old = order.popleft()
         sigs.discard(old)
     return False
+
+async def _openf1_driver_name_map(http: aiohttp.ClientSession, session_key: int) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    try:
+        rows = await _openf1_get(http, "drivers", {"session_key": session_key}, caller="race_live_drivers")
+    except Exception:
+        return out
+    if not isinstance(rows, list):
+        return out
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        num = str(r.get("driver_number") or "").strip()
+        if not num:
+            continue
+        label = (
+            str(r.get("broadcast_name") or "").strip()
+            or str(r.get("name_acronym") or "").strip()
+            or str(r.get("full_name") or "").strip()
+            or num
+        )
+        out[num] = label
+    return out
+
+async def _openf1_latest_positions(http: aiohttp.ClientSession, session_key: int) -> Dict[str, int]:
+    try:
+        rows = await _openf1_get(http, "position", {"session_key": session_key}, caller="race_live_positions")
+    except Exception:
+        return {}
+    if not isinstance(rows, list):
+        return {}
+
+    latest: Dict[str, Tuple[str, int]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        num = str(r.get("driver_number") or "").strip()
+        if not num:
+            continue
+        try:
+            pos = int(r.get("position"))
+        except Exception:
+            continue
+        dt = str(r.get("date") or "")
+        prev = latest.get(num)
+        if prev is None or dt >= prev[0]:
+            latest[num] = (dt, pos)
+    return {num: pos for num, (_dt, pos) in latest.items()}
+
+async def _post_quali_boundary_summary(
+    thread: discord.Thread,
+    http: aiohttp.ClientSession,
+    session_key: int,
+    session_kind: str,
+    segment: str,
+    driver_map: Dict[str, str],
+) -> None:
+    positions = await _openf1_latest_positions(http, session_key)
+    if not positions:
+        return
+
+    ordered = sorted(positions.items(), key=lambda kv: kv[1])
+    seg = str(segment or "").upper().strip()
+    if seg not in {"Q1", "Q2", "Q3", "SQ1", "SQ2", "SQ3"}:
+        return
+
+    is_sprint_quali = session_kind == "SPRINT_QUALI"
+    cutoff_title = "Sprint Qualifying" if is_sprint_quali else "Qualifying"
+
+    def _name(num: str) -> str:
+        return driver_map.get(num, f"#{num}")
+
+    if seg in {"Q1", "SQ1"}:
+        knocked = [(num, pos) for num, pos in ordered if pos >= 16]
+        if not knocked:
+            return
+        body = "\n".join(f"P{pos} {_name(num)}" for num, pos in knocked[:5])
+        await thread.send(_wrap_spoiler(f"🚫 {cutoff_title} {seg} Knockouts\n{body}"))
+        return
+
+    if seg in {"Q2", "SQ2"}:
+        knocked = [(num, pos) for num, pos in ordered if 11 <= pos <= 15]
+        if not knocked:
+            return
+        body = "\n".join(f"P{pos} {_name(num)}" for num, pos in knocked[:5])
+        await thread.send(_wrap_spoiler(f"🚫 {cutoff_title} {seg} Knockouts\n{body}"))
+        return
+
+    # Q3 / SQ3
+    top10 = [(num, pos) for num, pos in ordered if 1 <= pos <= 10]
+    if not top10:
+        return
+    body = "\n".join(f"P{pos} {_name(num)}" for num, pos in top10[:10])
+    await thread.send(_wrap_spoiler(f"📊 {cutoff_title} Top 10\n{body}"))
+
+async def _post_race_or_sprint_final_summary(
+    thread: discord.Thread,
+    http: aiohttp.ClientSession,
+    session_key: int,
+    session_kind: str,
+    driver_map: Dict[str, str],
+) -> None:
+    positions = await _openf1_latest_positions(http, session_key)
+    if not positions:
+        return
+    ordered = sorted(positions.items(), key=lambda kv: kv[1])
+    if session_kind == "SPRINT":
+        top_n = 8
+        title = "Sprint Final Classification (Top 8)"
+    else:
+        top_n = 10
+        title = "Race Final Classification (Top 10)"
+    rows = [(num, pos) for num, pos in ordered if 1 <= pos <= top_n]
+    if not rows:
+        return
+    body = "\n".join(f"P{pos} {driver_map.get(num, f'#{num}')}" for num, pos in rows[:top_n])
+    await thread.send(_wrap_spoiler(f"📊 {title}\n{body}"))
 
 async def _openf1_get(
     http: aiohttp.ClientSession,
@@ -3822,22 +4020,29 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     meta = relevant[0]
     return window_start, window_end, meta, relevant
 
-async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_key: int):
+async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_key: int, session_type: str = ""):
     gid = guild.id
     RACE_LIVE_ENABLED[gid] = True
     RACE_LIVE_POSTED_SIGS.setdefault(gid, set())
     RACE_LIVE_POSTED_SIGS_ORDER.setdefault(gid, deque())
 
-    poll_s = float(os.getenv("OPENF1_ACTIVE_POLL_SECONDS", "3"))
-    poll_s = max(1.0, min(15.0, poll_s))
+    poll_s = _race_live_poll_seconds()
+    session_kind = _normalize_session_kind(session_type)
 
-    _racelog(gid, f"race_live_loop started (session_key={session_key}, poll={poll_s}s)")
+    _racelog(
+        gid,
+        f"race_live_loop started (session_key={session_key}, session={session_kind or session_type or 'UNKNOWN'}, poll={poll_s}s)",
+    )
     await thread.send(f"📡 Live follower attached. `session_key={session_key}`")
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
+        driver_map = await _openf1_driver_name_map(http, session_key)
+        posted_segment_summaries: set[str] = set()
+        posted_final_summary = False
         while RACE_LIVE_ENABLED.get(gid, False):
             _loop_tick("race_live")
             try:
+                poll_s = _race_live_poll_seconds()
                 _racelog(gid, "poll race_control")
                 rc = await _openf1_get(http, "race_control", {"session_key": session_key}, caller="race_live_race_control")
                 _racelog(gid, f"race_control items={len(rc)}")
@@ -3850,7 +4055,62 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                     sig = f"{dt}|{msg}"
                     if _race_sig_seen_or_add(gid, sig):
                         continue
-                    await thread.send(f"\U0001F3C1 {msg}")
+                    delay_s = _race_live_delay_seconds()
+                    if delay_s > 0:
+                        await asyncio.sleep(delay_s)
+                    emoji = _race_control_emoji_for_message(msg)
+                    await thread.send(f"{emoji} {msg}")
+                    RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
+
+                    if session_kind in {"QUALI", "SPRINT_QUALI"}:
+                        seg = _extract_quali_segment(msg)
+                        if not seg:
+                            m_upper = msg.upper()
+                            if ("CHECKERED" in m_upper) or ("CHEQUERED" in m_upper) or ("SESSION END" in m_upper):
+                                seg = "SQ3" if session_kind == "SPRINT_QUALI" else "Q3"
+                        if not seg:
+                            continue
+                        upper_msg = msg.upper()
+                        looks_boundary = (
+                            ("END" in upper_msg)
+                            or ("RESULT" in upper_msg)
+                            or ("CHECKERED" in upper_msg)
+                            or ("CHEQUERED" in upper_msg)
+                            or ("ELIMINATED" in upper_msg)
+                        )
+                        key = f"{seg}:{'end' if looks_boundary else 'other'}"
+                        if looks_boundary and key not in posted_segment_summaries:
+                            posted_segment_summaries.add(key)
+                            try:
+                                await _post_quali_boundary_summary(
+                                    thread=thread,
+                                    http=http,
+                                    session_key=session_key,
+                                    session_kind=session_kind,
+                                    segment=seg,
+                                    driver_map=driver_map,
+                                )
+                            except Exception as e:
+                                _racelog(gid, f"quali summary failed for {seg}: {e}")
+                    elif session_kind in {"RACE", "SPRINT"}:
+                        upper_msg = msg.upper()
+                        session_end = (
+                            ("CHECKERED" in upper_msg)
+                            or ("CHEQUERED" in upper_msg)
+                            or ("SESSION END" in upper_msg)
+                        )
+                        if session_end and not posted_final_summary:
+                            posted_final_summary = True
+                            try:
+                                await _post_race_or_sprint_final_summary(
+                                    thread=thread,
+                                    http=http,
+                                    session_key=session_key,
+                                    session_kind=session_kind,
+                                    driver_map=driver_map,
+                                )
+                            except Exception as e:
+                                _racelog(gid, f"final summary failed: {e}")
 
                 await asyncio.sleep(poll_s)
 
@@ -3890,6 +4150,7 @@ async def race_supervisor_loop():
 
                 latest_relevant = sorted(relevant, key=_key)[-1]
                 session_key = int(latest_relevant.get("session_key"))
+                session_type = str(latest_relevant.get("session_type") or latest_relevant.get("session_name") or "")
                 round_meta = await current_or_next_round_meta()
                 round_key = str(round_meta.get("key") or "unknown-round")
                 race_name = str(round_meta.get("race_name") or "").strip()
@@ -3906,13 +4167,14 @@ async def race_supervisor_loop():
                             title = f"{title_base} - Live Weekend"
                             thread = await _ensure_live_thread(guild, round_key, race_name or title_base, title)
 
-                            _racelog(gid, f"Supervisor starting live loop (session_key={session_key})")
+                            _racelog(gid, f"Supervisor starting live loop (session_key={session_key}, session={session_type or 'unknown'})")
                             RACE_LIVE_ENABLED[gid] = True
                             RACE_LIVE_ROUND_KEYS[gid] = round_key
+                            RACE_LIVE_SESSION_KINDS[gid] = _normalize_session_kind(session_type)
 
-                            async def runner(g=guild, th=thread, sk=session_key):
+                            async def runner(g=guild, th=thread, sk=session_key, st=session_type):
                                 try:
-                                    await race_live_loop(g, th, sk)
+                                    await race_live_loop(g, th, sk, st)
                                 except asyncio.CancelledError:
                                     pass
                                 except Exception as e:
@@ -3928,6 +4190,8 @@ async def race_supervisor_loop():
                             if stopped_round:
                                 _set_race_thread_weekend_state(stopped_round, gid, "past")
                                 RACE_LIVE_ROUND_KEYS.pop(gid, None)
+                                RACE_LIVE_SESSION_KINDS.pop(gid, None)
+                                RACE_LIVE_LAST_EVENT_TS.pop(gid, None)
                     except Exception as e:
                         logging.error(f"[RaceLive] Guild {guild.id} supervisor step failed: {e}")
 
@@ -3955,6 +4219,8 @@ async def racelivekill(ctx):
     if stopped_round:
         _set_race_thread_weekend_state(stopped_round, gid, "past")
         RACE_LIVE_ROUND_KEYS.pop(gid, None)
+    RACE_LIVE_SESSION_KINDS.pop(gid, None)
+    RACE_LIVE_LAST_EVENT_TS.pop(gid, None)
 
     tail = _racetail(gid, 20)
     logging.warning(f"[RaceLive][{gid}] KILL SWITCH. Tail:\n{tail}")
@@ -3970,6 +4236,38 @@ async def racelivetail(ctx, lines: int = 20):
     lines = max(1, min(50, int(lines)))
     tail = _racetail(guild.id, lines)
     await ctx.send("```text\n" + tail[:1900] + "\n```")
+
+@bot.hybrid_command(name="setdelay")
+@commands.has_permissions(administrator=True)
+async def setdelay(ctx, seconds: float):
+    """Set race-live spoiler delay in seconds for current and future sessions."""
+    value = _set_race_live_delay_seconds(seconds)
+    await ctx.send(f"✅ Race-live delay set to `{value:.1f}` second(s).")
+
+@bot.hybrid_command(name="setpoll")
+@commands.has_permissions(administrator=True)
+async def setpoll(ctx, seconds: float):
+    """Set race-live OpenF1 poll interval in seconds for current and future sessions."""
+    value = _set_race_live_poll_seconds(seconds)
+    await ctx.send(f"✅ Race-live poll interval set to `{value:.1f}` second(s).")
+
+@bot.hybrid_command(name="livesettings")
+@commands.has_permissions(administrator=True)
+async def livesettings(ctx):
+    """Show race-live runtime settings and active session types."""
+    delay_s = _race_live_delay_seconds()
+    poll_s = _race_live_poll_seconds()
+    active = sorted(int(g) for g, v in RACE_LIVE_ENABLED.items() if v)
+    running = sorted(int(g) for g, t in RACE_LIVE_TASKS.items() if _task_running(t))
+    kinds = {str(g): str(k) for g, k in (RACE_LIVE_SESSION_KINDS or {}).items()}
+    await ctx.send(
+        "ℹ️ **Race Live Settings**\n"
+        f"- Delay: `{delay_s:.1f}s`\n"
+        f"- Poll interval: `{poll_s:.1f}s`\n"
+        f"- Active guild IDs: `{active}`\n"
+        f"- Running guild IDs: `{running}`\n"
+        f"- Session kinds: `{kinds}`"
+    )
 
 @bot.tree.command(name="racethread", description="Create the next race thread early with custom watchalong info.")
 @discord.app_commands.describe(
@@ -4055,8 +4353,9 @@ async def racelivestart(ctx):
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         latest = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="racelivestart_latest")
         if not latest:
-            return await ctx.send("âŒ No OpenF1 sessions available right now.")
+            return await ctx.send("\u274C No OpenF1 sessions available right now.")
         session_key = int(latest[0].get("session_key"))
+        session_type = str(latest[0].get("session_type") or latest[0].get("session_name") or "")
 
     round_meta = await current_or_next_round_meta()
     round_key = str(round_meta.get("key") or "manual-round")
@@ -4066,17 +4365,18 @@ async def racelivestart(ctx):
 
     RACE_LIVE_ENABLED[gid] = True
     RACE_LIVE_ROUND_KEYS[gid] = round_key
+    RACE_LIVE_SESSION_KINDS[gid] = _normalize_session_kind(session_type)
 
     async def runner():
         try:
-            await race_live_loop(guild, thread, session_key)
+            await race_live_loop(guild, thread, session_key, session_type)
         except asyncio.CancelledError:
             pass
         except Exception as e:
             _racelog(gid, f"FATAL {type(e).__name__}: {e}")
 
     RACE_LIVE_TASKS[gid] = asyncio.create_task(runner())
-    await ctx.send(f"✅ Started race live manually (session_key={session_key}).")
+    await ctx.send(f"\u2705 Started race live manually (session_key={session_key}, session={session_type or 'unknown'}).")
 
 @bot.hybrid_command(name="racelivestop", aliases=["race_live_stop"])
 @commands.has_permissions(administrator=True)
@@ -4095,6 +4395,8 @@ async def racelivestop(ctx):
     if stopped_round:
         _set_race_thread_weekend_state(stopped_round, gid, "past")
         RACE_LIVE_ROUND_KEYS.pop(gid, None)
+    RACE_LIVE_SESSION_KINDS.pop(gid, None)
+    RACE_LIVE_LAST_EVENT_TS.pop(gid, None)
 
     await ctx.send("🛑 Race live stopped.")
 
