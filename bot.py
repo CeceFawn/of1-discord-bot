@@ -2247,6 +2247,8 @@ def _command_examples(prefix: str) -> Dict[str, str]:
         "racetestinfo": f"{p}racetestinfo practice_short",
         "raceteststart": f"{p}raceteststart race_chaos 5",
         "raceteststop": f"{p}raceteststop",
+        "openf1check": f"{p}openf1check 2026",
+        "racereplay": f"{p}racereplay 2023 1 10",
     }
 
 def _command_descriptions() -> Dict[str, str]:
@@ -2299,6 +2301,8 @@ def _command_descriptions() -> Dict[str, str]:
         "racetestinfo": "Show details for a race simulation scenario.",
         "raceteststart": "Start a race simulation scenario (admin).",
         "raceteststop": "Stop the active race simulation scenario (admin).",
+        "openf1check": "Run OpenF1 API/auth/championship diagnostics (admin).",
+        "racereplay": "Replay a historical race-control feed into a test thread (admin).",
     }
 
 def _command_description_for(cmd: commands.Command) -> str:
@@ -2806,7 +2810,7 @@ async def f1_reminder_loop():
                         continue
                     if delta_m <= lead and delta_m >= max(0, lead - 1):
                         msg = (
-                            f"â° **F1 Reminder**: **{item['race_name']} ? {item['session_label']}** starts "
+                            f"⏰ **F1 Reminder**: **{item['race_name']} — {item['session_label']}** starts "
                             f"{'now' if delta_m == 0 else f'in about {delta_m}m'}.\n"
                             f"🕒 `{_fmt_dt_local(dt)}` ({_f1_tz_name()})"
                         )
@@ -4127,7 +4131,7 @@ EVENT_STYLE = {
     "RED":           ("🔴", "**RED FLAG**"),
     "YELLOW":         ("🟡", "**YELLOW**"),
     "SEGMENT_START":  ("🟦", "**Segment started**"),
-    "SEGMENT_END":    ("â¬›", "**Segment ended**"),
+    "SEGMENT_END":    ("⬛", "**Segment ended**"),
     "PURPLE_SECTOR":  ("🟣", "**Purple sector**"),
     "CHECKERED_FLAG": ("\U0001F3C1", "**CHEQUERED FLAG**"),
     "CLASSIFICATION_READY": ("📊", "**Classification ready**"),
@@ -4439,7 +4443,7 @@ def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
 async def racetestlist(ctx):
     scenarios = _load_race_scenarios()
     names = sorted(scenarios.keys())
-    await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
+    await ctx.send("\U0001F9EA **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
 
 @bot.command(name="racetestinfo", aliases=["race_test_info"])
 @commands.has_permissions(administrator=True)
@@ -4447,7 +4451,7 @@ async def racetestinfo(ctx, scenario: str):
     try:
         name, sc = _resolve_scenario(scenario)
     except Exception as e:
-        await ctx.send(f"âŒ {e}")
+        await ctx.send(f"\u274C {e}")
         return
 
     title = _scenario_title(sc, fallback=name)
@@ -4458,7 +4462,7 @@ async def racetestinfo(ctx, scenario: str):
     has_cls = bool((sc.get("classification") or {}).get("results"))
 
     await ctx.send(
-        "🧪 **Scenario info**\n"
+        "\U0001F9EA **Scenario info**\n"
         f"- **Key:** `{name}`\n"
         f"- **Title:** {title}\n"
         f"- **Session:** `{session_type}`\n"
@@ -4474,16 +4478,16 @@ async def racetestresults(ctx, scenario: str):
     try:
         name, sc = _resolve_scenario(scenario)
     except Exception as e:
-        await ctx.send(f"âŒ {e}")
+        await ctx.send(f"\u274C {e}")
         return
 
     session_type = _scenario_session(sc)
     if session_type == "RACE":
         body = _format_race_classification(sc)
-        await ctx.send(_wrap_spoiler("📊 Race Classification\n" + body))
+        await ctx.send(_wrap_spoiler("\U0001F4CA Race Classification\n" + body))
     elif session_type in ("QUALI", "QUALIFYING"):
         body = _format_quali_classification(sc)
-        await ctx.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
+        await ctx.send(_wrap_spoiler("\U0001F4CA Qualifying Results\n" + body))
     else:
         await ctx.send(f"\u2139\uFE0F Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
 
@@ -4492,7 +4496,7 @@ async def racetestresults(ctx, scenario: str):
 async def raceteststart(ctx, scenario: str = None, speed: float = None):
     guild = ctx.guild
     if not guild:
-        await ctx.send("âŒ Must be run in a server.")
+        await ctx.send("\u274C Must be run in a server.")
         return
 
     scenario = (scenario or os.getenv("RACE_TEST_DEFAULT_SCENARIO") or "practice_short").strip()
@@ -4516,14 +4520,14 @@ async def raceteststart(ctx, scenario: str = None, speed: float = None):
         except Exception as e:
             logging.error(f"[RaceTest] Scenario '{scenario}' failed: {e}")
             try:
-                await ctx.send(f"âŒ Race test failed: {e}")
+                await ctx.send(f"\u274C Race test failed: {e}")
             except Exception:
                 pass
 
     task = asyncio.create_task(runner())
     RACE_TEST_TASKS[guild.id] = task
 
-    await ctx.send(f"🧪 Starting race test: `{scenario}` (speed x{speed})")
+    await ctx.send(f"\U0001F9EA Starting race test: `{scenario}` (speed x{speed})")
 
 @bot.command(name="raceteststop", aliases=["race_test_stop"])
 @commands.has_permissions(administrator=True)
@@ -4534,13 +4538,256 @@ async def raceteststop(ctx):
     t = RACE_TEST_TASKS.get(guild.id)
     if t and not t.done():
         t.cancel()
-        await ctx.send("🛑 Race test stopped.")
+        await ctx.send("\U0001F6D1 Race test stopped.")
     else:
         await ctx.send("\u2139\uFE0F No race test running.")
+
+def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
+    sessions = _openf1_get_json("sessions", {"year": int(year)}, 30, "racereplay_sessions")
+    if not isinstance(sessions, list):
+        return []
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        meeting_name_l = str(s.get("meeting_name") or "").lower()
+        official_name_l = str(s.get("meeting_official_name") or "").lower()
+        if "test" in meeting_name_l or "test" in official_name_l:
+            continue
+        if ("grand prix" not in meeting_name_l) and ("grand prix" not in official_name_l):
+            continue
+
+        mk = str(s.get("meeting_key") or "").strip()
+        if not mk:
+            continue
+
+        dt = _parse_openf1_dt(s.get("date_start"))
+        if dt is None:
+            continue
+
+        slot = grouped.setdefault(mk, {"meeting_key": mk, "sessions": [], "base": s})
+        slot["sessions"].append(s)
+        if len(str(s.get("meeting_official_name") or "")) > len(str(slot["base"].get("meeting_official_name") or "")):
+            slot["base"] = s
+
+    rows: List[Dict[str, Any]] = []
+    for mk, obj in grouped.items():
+        ss = [x for x in obj.get("sessions", []) if isinstance(x, dict)]
+        if not ss:
+            continue
+        race_s = next((x for x in ss if _session_type_upper(x) == "RACE"), None)
+        race_dt = _parse_openf1_dt((race_s or ss[-1]).get("date_start"))
+        if race_dt is None:
+            continue
+        base = obj.get("base") or {}
+        race_name = (
+            str(base.get("meeting_name") or "").strip()
+            or str(base.get("meeting_official_name") or "").strip()
+            or f"{str(base.get('country_name') or 'F1').strip()} Grand Prix"
+        )
+        rows.append(
+            {
+                "meeting_key": mk,
+                "race_name": race_name,
+                "race_dt": race_dt,
+                "sessions": sorted(
+                    ss,
+                    key=lambda x: _parse_openf1_dt(x.get("date_start")) or datetime.min.replace(tzinfo=timezone.utc),
+                ),
+            }
+        )
+
+    rows.sort(key=lambda x: x["race_dt"])
+    for i2, r in enumerate(rows, start=1):
+        r["round"] = i2
+    return rows
+
+@bot.command(name="openf1check")
+@commands.has_permissions(administrator=True)
+async def openf1check(ctx, year: int = None):
+    target_year = int(year or datetime.now(timezone.utc).year)
+
+    def _probe(endpoint: str, params: Dict[str, Any], caller: str) -> Tuple[str, int, str]:
+        t0 = time.time()
+        try:
+            data = _openf1_get_json(endpoint, params=params, timeout=20, caller=caller)
+            elapsed = int((time.time() - t0) * 1000)
+            if isinstance(data, list):
+                extra = f"rows={len(data)}"
+            elif isinstance(data, dict):
+                extra = f"keys={len(data.keys())}"
+            else:
+                extra = f"type={type(data).__name__}"
+            return ("OK", elapsed, extra)
+        except Exception as e:
+            elapsed = int((time.time() - t0) * 1000)
+            return ("FAIL", elapsed, str(e)[:140])
+
+    def _run() -> Dict[str, Any]:
+        out: Dict[str, Any] = {"year": target_year, "checks": []}
+        api_key_present = bool(str(os.getenv("OPENF1_API_KEY") or "").strip())
+        auth_url = bool(str(os.getenv("OPENF1_AUTH_URL") or "").strip())
+        auth_user = bool(str(os.getenv("OPENF1_AUTH_USERNAME") or "").strip())
+        auth_pass = bool(str(os.getenv("OPENF1_AUTH_PASSWORD") or "").strip())
+        auth_ready = auth_url and auth_user and auth_pass
+        out["auth_mode"] = f"api_key={api_key_present} auth_creds={auth_ready}"
+
+        t0 = time.time()
+        try:
+            token = _openf1_get_bearer_token(force_refresh=True)
+            elapsed = int((time.time() - t0) * 1000)
+            out["checks"].append(("auth_token", "OK" if token else "WARN", elapsed, "token present" if token else "no token"))
+        except Exception as e:
+            elapsed = int((time.time() - t0) * 1000)
+            out["checks"].append(("auth_token", "FAIL", elapsed, str(e)[:140]))
+
+        latest_status, latest_ms, latest_extra = _probe("sessions", {"session_key": "latest"}, "openf1check_latest")
+        out["checks"].append(("sessions_latest", latest_status, latest_ms, latest_extra))
+
+        year_status, year_ms, year_extra = _probe("sessions", {"year": target_year}, "openf1check_year")
+        out["checks"].append((f"sessions_year_{target_year}", year_status, year_ms, year_extra))
+
+        candidate_key = None
+        try:
+            meetings = _openf1_meeting_groups_for_year(target_year)
+            if meetings:
+                last = meetings[-1]
+                race_session = next((s for s in last["sessions"] if _session_type_upper(s) == "RACE"), None)
+                if race_session:
+                    candidate_key = race_session.get("session_key")
+            out["checks"].append(("meeting_map", "OK", 0, f"meetings={len(meetings)}"))
+        except Exception as e:
+            out["checks"].append(("meeting_map", "FAIL", 0, str(e)[:140]))
+
+        if candidate_key:
+            ds, dms, de = _probe("championship_drivers", {"session_key": candidate_key}, "openf1check_drivers")
+            cs, cms, ce = _probe("championship_teams", {"session_key": candidate_key}, "openf1check_teams")
+            out["checks"].append(("championship_drivers", ds, dms, de))
+            out["checks"].append(("championship_teams", cs, cms, ce))
+        else:
+            out["checks"].append(("championship_drivers", "WARN", 0, "no candidate race session"))
+            out["checks"].append(("championship_teams", "WARN", 0, "no candidate race session"))
+        return out
+
+    report = await asyncio.to_thread(_run)
+    lines = [
+        "\U0001F9EA **OpenF1 Health Check**",
+        f"- Year: `{report['year']}`",
+        f"- Auth mode: `{report['auth_mode']}`",
+    ]
+    for name, status, ms, extra in report.get("checks", []):
+        badge = "\u2705" if status == "OK" else ("\u26A0\uFE0F" if status == "WARN" else "\u274C")
+        lines.append(f"- {badge} `{name}`: **{status}** ({ms}ms) - {extra}")
+    await ctx.send("\n".join(lines))
+
+@bot.command(name="racereplay")
+@commands.has_permissions(administrator=True)
+async def racereplay(ctx, year: int, round_num: int, speed: float = 10.0):
+    guild = ctx.guild
+    if not guild:
+        return await ctx.send("\u274C Must be run in a server.")
+
+    try:
+        speed = float(speed)
+    except Exception:
+        speed = 10.0
+    speed = max(0.1, min(50.0, speed))
+
+    max_events = int(os.getenv("RACE_REPLAY_MAX_EVENTS", "350") or 350)
+    max_events = max(50, min(2000, max_events))
+
+    existing = RACE_TEST_TASKS.get(guild.id)
+    if existing and not existing.done():
+        existing.cancel()
+
+    async def runner():
+        try:
+            meetings = await asyncio.to_thread(_openf1_meeting_groups_for_year, int(year))
+            if not meetings:
+                await ctx.send(f"\u274C No OpenF1 meetings found for `{year}`.")
+                return
+            if round_num < 1 or round_num > len(meetings):
+                await ctx.send(f"\u274C Round must be between `1` and `{len(meetings)}` for `{year}`.")
+                return
+
+            target = meetings[round_num - 1]
+            sessions = target.get("sessions") or []
+            race_session = next((s for s in sessions if _session_type_upper(s) == "RACE"), None)
+            if not race_session:
+                await ctx.send(f"\u274C No race session found for `{target['race_name']}`.")
+                return
+
+            session_key = race_session.get("session_key")
+            if not session_key:
+                await ctx.send("\u274C OpenF1 race session is missing `session_key`.")
+                return
+
+            rc = await asyncio.to_thread(
+                _openf1_get_json,
+                "race_control",
+                {"session_key": session_key},
+                30,
+                "racereplay_race_control",
+            )
+            if not isinstance(rc, list) or not rc:
+                await ctx.send("\u274C No race-control events returned for that session.")
+                return
+
+            cleaned: List[Tuple[datetime, str]] = []
+            for item in rc:
+                if not isinstance(item, dict):
+                    continue
+                msg = str(item.get("message") or "").strip()
+                dt = _parse_openf1_dt(item.get("date"))
+                if not msg or dt is None:
+                    continue
+                cleaned.append((dt, msg))
+            cleaned.sort(key=lambda x: x[0])
+            if not cleaned:
+                await ctx.send("\u274C No usable replay events were found.")
+                return
+
+            truncated = False
+            if len(cleaned) > max_events:
+                cleaned = cleaned[:max_events]
+                truncated = True
+
+            title = f"{target['race_name']} {year} Replay R{round_num}"
+            thread = await _ensure_test_thread(guild, title)
+            if not thread:
+                await ctx.send("\u274C Could not create/find test thread for replay.")
+                return
+
+            await thread.send(
+                f"\U0001F9EA Starting replay: **{target['race_name']}** (`{year}` round `{round_num}`)\n"
+                f"Session key: `{session_key}` | Speed: `x{speed}` | Events: `{len(cleaned)}`"
+                + ("\n\u26A0\uFE0F Replay truncated by `RACE_REPLAY_MAX_EVENTS`." if truncated else "")
+            )
+
+            prev_dt: Optional[datetime] = None
+            for dt, msg in cleaned:
+                if prev_dt is not None:
+                    raw_wait = max(0.0, (dt - prev_dt).total_seconds()) / speed
+                    await asyncio.sleep(min(3.0, raw_wait))
+                await thread.send(f"\U0001F3C1 {msg}")
+                prev_dt = dt
+
+            await thread.send(f"\u2705 Replay complete. Posted `{len(cleaned)}` events at `x{speed}`.")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logging.error(f"[RaceReplay] failed: {e}")
+            try:
+                await ctx.send(f"\u274C Replay failed: {e}")
+            except Exception:
+                pass
+
+    RACE_TEST_TASKS[guild.id] = asyncio.create_task(runner())
+    await ctx.send(f"\U0001F9EA Queued replay for `{year}` round `{round_num}` at `x{speed}`.")
 
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 if not bot_token:
     raise RuntimeError("DISCORD_BOT_TOKEN is missing. Put it in your .env file.")
 
 bot.run(bot_token)
-
