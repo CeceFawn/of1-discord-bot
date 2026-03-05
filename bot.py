@@ -320,7 +320,7 @@ JOLPICA_DRIVER_URL = "https://api.jolpi.ca/ergast/f1/current/driverStandings.jso
 JOLPICA_CONSTRUCTOR_URL = "https://api.jolpi.ca/ergast/f1/current/constructorStandings.json"
 JOLPICA_SCHEDULE_URL = "https://api.jolpi.ca/ergast/f1/current.json"
 
-F1_SCHEDULE_CACHE: Dict[str, Any] = {"ts": 0.0, "races": []}
+F1_SCHEDULE_CACHE: Dict[str, Any] = {"ts": 0.0, "races": [], "fail_until": 0.0, "fail_count": 0}
 F1_REMINDER_TASK: Optional[asyncio.Task] = None
 F1_QUIZ_ACTIVE: Dict[int, Dict[str, Any]] = {}
 F1_QUIZ_PENDING_OVERRIDES: Dict[int, Dict[str, Any]] = {}
@@ -396,6 +396,20 @@ _OPENF1_TOKEN_CACHE: Dict[str, Any] = {"token": "", "expires_at": 0.0, "fetched_
 _OPENF1_TOKEN_LOCK = threading.RLock()
 _OPENF1_TRACE_LOCK = threading.RLock()
 _OPENF1_TRACE: Dict[str, Any] = {"window_start": time.time(), "rows": {}}
+_OPENF1_AUTH_RETRY_AFTER_TS: float = 0.0
+_OPENF1_ENDPOINT_COOLDOWN: Dict[str, float] = {}
+_OPENF1_CANDIDATE_SESSIONS_CACHE: Dict[str, Any] = {"ts": 0.0, "keys": []}
+
+
+def _openf1_set_endpoint_cooldown(endpoint: str, seconds: int) -> None:
+    sec = max(1, min(1800, int(seconds)))
+    _OPENF1_ENDPOINT_COOLDOWN[str(endpoint or "").strip().lower()] = time.time() + sec
+
+
+def _openf1_get_endpoint_cooldown_remaining(endpoint: str) -> int:
+    until = float(_OPENF1_ENDPOINT_COOLDOWN.get(str(endpoint or "").strip().lower(), 0.0) or 0.0)
+    remaining = int(until - time.time())
+    return max(0, remaining)
 
 
 def _openf1_trace_record(caller: str, endpoint: str, status_code: int, latency_ms: int) -> None:
@@ -518,12 +532,17 @@ def _openf1_fetch_login_token() -> tuple[str, float]:
 
 
 def _openf1_get_bearer_token(force_refresh: bool = False) -> str:
+    global _OPENF1_AUTH_RETRY_AFTER_TS
     static_bearer = str(os.getenv("OPENF1_BEARER_TOKEN") or "").strip()
     if static_bearer:
         return static_bearer
 
     with _OPENF1_TOKEN_LOCK:
         now_ts = time.time()
+        if now_ts < float(_OPENF1_AUTH_RETRY_AFTER_TS or 0.0):
+            token = str(_OPENF1_TOKEN_CACHE.get("token") or "")
+            expires_at = float(_OPENF1_TOKEN_CACHE.get("expires_at") or 0.0)
+            return token if token and now_ts < expires_at else ""
         token = str(_OPENF1_TOKEN_CACHE.get("token") or "")
         expires_at = float(_OPENF1_TOKEN_CACHE.get("expires_at") or 0.0)
         if (not force_refresh) and token and (now_ts < (expires_at - 120.0)):
@@ -532,9 +551,20 @@ def _openf1_get_bearer_token(force_refresh: bool = False) -> str:
             new_token, new_expires_at = _openf1_fetch_login_token()
         except Exception as e:
             logging.warning(f"[OpenF1Auth] token refresh failed: {e}")
+            err = str(e)
+            if "422" in err:
+                _OPENF1_AUTH_RETRY_AFTER_TS = now_ts + 60.0
+            elif "429" in err:
+                _OPENF1_AUTH_RETRY_AFTER_TS = now_ts + 120.0
+            elif "503" in err:
+                _OPENF1_AUTH_RETRY_AFTER_TS = now_ts + 30.0
+            else:
+                _OPENF1_AUTH_RETRY_AFTER_TS = now_ts + 15.0
             return token if token and now_ts < expires_at else ""
         if not new_token:
+            _OPENF1_AUTH_RETRY_AFTER_TS = now_ts + 30.0
             return token if token and now_ts < expires_at else ""
+        _OPENF1_AUTH_RETRY_AFTER_TS = 0.0
         _OPENF1_TOKEN_CACHE["token"] = new_token
         _OPENF1_TOKEN_CACHE["expires_at"] = float(new_expires_at)
         _OPENF1_TOKEN_CACHE["fetched_at"] = now_ts
@@ -561,6 +591,10 @@ def _openf1_get_json(
     timeout: int = 20,
     caller: str = "unknown",
 ) -> Any:
+    cooldown_s = _openf1_get_endpoint_cooldown_remaining(endpoint)
+    if cooldown_s > 0:
+        raise RuntimeError(f"OpenF1 endpoint cooldown active for {endpoint} ({cooldown_s}s)")
+
     url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
     t0 = time.time()
     r = requests.get(url, params=params or {}, timeout=timeout, headers=_openf1_auth_headers())
@@ -568,6 +602,11 @@ def _openf1_get_json(
         r = requests.get(url, params=params or {}, timeout=timeout, headers=_openf1_auth_headers(force_refresh=True))
     latency_ms = int((time.time() - t0) * 1000)
     _openf1_trace_record(caller=str(caller or "unknown"), endpoint=str(endpoint or ""), status_code=int(r.status_code), latency_ms=latency_ms)
+    if int(r.status_code) == 429:
+        retry_after = int(r.headers.get("Retry-After", "60") or 60)
+        _openf1_set_endpoint_cooldown(endpoint, retry_after)
+    elif int(r.status_code) == 503:
+        _openf1_set_endpoint_cooldown(endpoint, 15)
     r.raise_for_status()
     return r.json()
 
@@ -767,6 +806,10 @@ def _normalize_schedule_from_openf1(sessions: List[Dict[str, Any]], year: int) -
 
 async def fetch_current_season_schedule(force: bool = False) -> List[Dict[str, Any]]:
     now_ts = time.time()
+    fail_until = float(F1_SCHEDULE_CACHE.get("fail_until", 0.0) or 0.0)
+    if (not force) and now_ts < fail_until:
+        remaining = int(fail_until - now_ts)
+        raise RuntimeError(f"OpenF1 schedule backoff active ({max(1, remaining)}s)")
     if (not force) and F1_SCHEDULE_CACHE["races"] and (now_ts - float(F1_SCHEDULE_CACHE["ts"])) < 300:
         return list(F1_SCHEDULE_CACHE["races"])
 
@@ -776,8 +819,14 @@ async def fetch_current_season_schedule(force: bool = False) -> List[Dict[str, A
         sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year}, 20, "schedule_fetch")
         if isinstance(sessions, list) and sessions:
             races = _normalize_schedule_from_openf1(sessions, year=year)
+            F1_SCHEDULE_CACHE["fail_until"] = 0.0
+            F1_SCHEDULE_CACHE["fail_count"] = 0
     except Exception as e:
         logging.warning(f"[F1] OpenF1 schedule fetch failed: {e}")
+        fail_count = int(F1_SCHEDULE_CACHE.get("fail_count", 0) or 0) + 1
+        F1_SCHEDULE_CACHE["fail_count"] = fail_count
+        backoff = min(300, 15 * (2 ** min(5, fail_count - 1)))
+        F1_SCHEDULE_CACHE["fail_until"] = now_ts + backoff
 
     if not races:
         raise RuntimeError("OpenF1 schedule unavailable or empty.")
@@ -1300,6 +1349,12 @@ def _circuit_lookup(query: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]
     return None, None
 
 async def _openf1_candidate_race_session_keys() -> List[Any]:
+    now_ts = time.time()
+    cached_keys = _OPENF1_CANDIDATE_SESSIONS_CACHE.get("keys")
+    cached_ts = float(_OPENF1_CANDIDATE_SESSIONS_CACHE.get("ts", 0.0) or 0.0)
+    if isinstance(cached_keys, list) and cached_keys and (now_ts - cached_ts) < 300:
+        return list(cached_keys)
+
     now = datetime.now(timezone.utc)
     candidates: List[Any] = ["latest"]
     years = [now.year, now.year - 1]
@@ -1325,6 +1380,8 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
                 candidates.append(key)
         if len(candidates) > 1:
             break
+    _OPENF1_CANDIDATE_SESSIONS_CACHE["ts"] = now_ts
+    _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
 async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]:
@@ -1332,6 +1389,12 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
     for session_key in candidates:
         try:
             rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
+        except requests.HTTPError as e:
+            code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
+            if code == 404:
+                _openf1_set_endpoint_cooldown("championship_drivers", 900)
+                break
+            continue
         except Exception:
             continue
         if not isinstance(rows, list) or not rows:
@@ -1385,6 +1448,12 @@ async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, 
     for session_key in candidates:
         try:
             rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key}, 20, "standings_teams")
+        except requests.HTTPError as e:
+            code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
+            if code == 404:
+                _openf1_set_endpoint_cooldown("championship_teams", 900)
+                break
+            continue
         except Exception:
             continue
         if not isinstance(rows, list) or not rows:
@@ -3483,6 +3552,10 @@ async def _openf1_get(
     params: Dict[str, Any],
     caller: str = "race_live",
 ) -> Any:
+    cooldown_s = _openf1_get_endpoint_cooldown_remaining(endpoint)
+    if cooldown_s > 0:
+        raise RuntimeError(f"OpenF1 endpoint cooldown active for {endpoint} ({cooldown_s}s)")
+
     url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
     for attempt in range(2):
         force_refresh = bool(attempt == 1)
@@ -3506,6 +3579,11 @@ async def _openf1_get(
                     continue
                 text = await r.text()
                 raise RuntimeError(f"OpenF1 auth error {r.status}: {text[:200]}")
+            if int(r.status) == 429:
+                retry_after = int(r.headers.get("Retry-After", "60") or 60)
+                _openf1_set_endpoint_cooldown(endpoint, retry_after)
+            elif int(r.status) == 503:
+                _openf1_set_endpoint_cooldown(endpoint, 15)
             r.raise_for_status()
             return await r.json()
     raise RuntimeError("OpenF1 auth retry exhausted.")
