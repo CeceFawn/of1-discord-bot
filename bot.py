@@ -723,16 +723,29 @@ def _session_entries_for_race(race: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _openf1_session_type(session: Dict[str, Any]) -> str:
     return str(session.get("session_type") or session.get("session_name") or "").strip()
 
+def _openf1_is_weekend_session(session: Dict[str, Any]) -> bool:
+    st = _openf1_session_type(session).upper().strip()
+    if not st:
+        return False
+    # Exclude testing sessions explicitly.
+    if "TEST" in st:
+        return False
+    return st in {
+        "PRACTICE",
+        "QUALIFYING",
+        "QUALI",
+        "SPRINT",
+        "SPRINT QUALIFYING",
+        "SPRINT SHOOTOUT",
+        "RACE",
+    }
+
 def _normalize_schedule_from_openf1(sessions: List[Dict[str, Any]], year: int) -> List[Dict[str, Any]]:
     grouped: Dict[str, Dict[str, Any]] = {}
     for s in sessions:
         if not isinstance(s, dict):
             continue
-        meeting_name_l = str(s.get("meeting_name") or "").lower()
-        official_name_l = str(s.get("meeting_official_name") or "").lower()
-        if "test" in meeting_name_l or "test" in official_name_l:
-            continue
-        if ("grand prix" not in meeting_name_l) and ("grand prix" not in official_name_l):
+        if not _openf1_is_weekend_session(s):
             continue
         mk = str(s.get("meeting_key") or "")
         if not mk:
@@ -755,6 +768,8 @@ def _normalize_schedule_from_openf1(sessions: List[Dict[str, Any]], year: int) -
         race_name = (
             str(base.get("meeting_name") or "").strip()
             or str(base.get("meeting_official_name") or "").strip()
+            or (f"{str(base.get('country_name') or '').strip()} Grand Prix".strip() if str(base.get("country_name") or "").strip() else "")
+            or (f"{str(base.get('location') or '').strip()} Grand Prix".strip() if str(base.get("location") or "").strip() else "")
             or f"{str(base.get('country_name') or 'F1').strip()} Grand Prix"
         )
         circuit_name = str(base.get("circuit_short_name") or base.get("location") or "Unknown Circuit").strip()
@@ -4543,7 +4558,11 @@ async def raceteststop(ctx):
         await ctx.send("\u2139\uFE0F No race test running.")
 
 def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
-    sessions = _openf1_get_json("sessions", {"year": int(year)}, 30, "racereplay_sessions")
+    y = int(year)
+    sessions = _openf1_get_json("sessions", {"year": y}, 30, "racereplay_sessions")
+    if not isinstance(sessions, list) or not sessions:
+        # Fallback: fetch without year filter and then filter locally.
+        sessions = _openf1_get_json("sessions", {}, 30, "racereplay_sessions_fallback")
     if not isinstance(sessions, list):
         return []
 
@@ -4551,11 +4570,7 @@ def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
     for s in sessions:
         if not isinstance(s, dict):
             continue
-        meeting_name_l = str(s.get("meeting_name") or "").lower()
-        official_name_l = str(s.get("meeting_official_name") or "").lower()
-        if "test" in meeting_name_l or "test" in official_name_l:
-            continue
-        if ("grand prix" not in meeting_name_l) and ("grand prix" not in official_name_l):
+        if not _openf1_is_weekend_session(s):
             continue
 
         mk = str(s.get("meeting_key") or "").strip()
@@ -4564,6 +4579,8 @@ def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
 
         dt = _parse_openf1_dt(s.get("date_start"))
         if dt is None:
+            continue
+        if int(dt.year) != y:
             continue
 
         slot = grouped.setdefault(mk, {"meeting_key": mk, "sessions": [], "base": s})
@@ -4584,6 +4601,8 @@ def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
         race_name = (
             str(base.get("meeting_name") or "").strip()
             or str(base.get("meeting_official_name") or "").strip()
+            or (f"{str(base.get('country_name') or '').strip()} Grand Prix".strip() if str(base.get("country_name") or "").strip() else "")
+            or (f"{str(base.get('location') or '').strip()} Grand Prix".strip() if str(base.get("location") or "").strip() else "")
             or f"{str(base.get('country_name') or 'F1').strip()} Grand Prix"
         )
         rows.append(
