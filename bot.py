@@ -309,8 +309,9 @@ def fetch_latest_instagram_post(username: str) -> Optional[str]:
         return None
 
 # ----------------------------
-# Standings (Ergast)
+# F1 data providers
 # ----------------------------
+OPENF1_BASE = "https://api.openf1.org/v1"
 ERGAST_DRIVER_URL = "https://ergast.com/api/f1/current/driverStandings.json"
 ERGAST_CONSTRUCTOR_URL = "https://ergast.com/api/f1/current/constructorStandings.json"
 ERGAST_SCHEDULE_URL = "https://ergast.com/api/f1/current.json"
@@ -389,6 +390,143 @@ def _get_json_any(urls: List[str], label: str = "api") -> Dict[str, Any]:
     if last_exc:
         raise last_exc
     raise RuntimeError(f"No {label} URLs configured.")
+
+_OPENF1_TOKEN_CACHE: Dict[str, Any] = {"token": "", "expires_at": 0.0, "fetched_at": 0.0}
+_OPENF1_TOKEN_LOCK = threading.RLock()
+
+
+def _json_path_get(obj: Any, path: str) -> Any:
+    cur = obj
+    for part in [p for p in str(path or "").split(".") if p]:
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return None
+    return cur
+
+
+def _openf1_fetch_login_token() -> tuple[str, float]:
+    auth_url = str(os.getenv("OPENF1_AUTH_URL") or "").strip()
+    username = str(os.getenv("OPENF1_AUTH_USERNAME") or "").strip()
+    password = str(os.getenv("OPENF1_AUTH_PASSWORD") or "").strip()
+    if not auth_url or not username or not password:
+        return "", 0.0
+
+    user_field = str(os.getenv("OPENF1_AUTH_USERNAME_FIELD") or "username").strip() or "username"
+    pass_field = str(os.getenv("OPENF1_AUTH_PASSWORD_FIELD") or "password").strip() or "password"
+    token_key = str(os.getenv("OPENF1_AUTH_TOKEN_JSON_KEY") or "access_token").strip() or "access_token"
+    expires_in_key = str(os.getenv("OPENF1_AUTH_EXPIRES_IN_JSON_KEY") or "expires_in").strip() or "expires_in"
+    expires_at_key = str(os.getenv("OPENF1_AUTH_EXPIRES_AT_JSON_KEY") or "").strip()
+
+    payload: Dict[str, Any] = {user_field: username, pass_field: password}
+    extra_raw = str(os.getenv("OPENF1_AUTH_EXTRA_JSON") or "").strip()
+    if extra_raw:
+        try:
+            extra = json.loads(extra_raw)
+            if isinstance(extra, dict):
+                payload.update(extra)
+        except Exception:
+            logging.warning("[OpenF1Auth] OPENF1_AUTH_EXTRA_JSON is not valid JSON.")
+
+    req_headers: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "OF1-Discord-Bot"}
+    hdr_raw = str(os.getenv("OPENF1_AUTH_HEADERS_JSON") or "").strip()
+    if hdr_raw:
+        try:
+            h = json.loads(hdr_raw)
+            if isinstance(h, dict):
+                req_headers.update({str(k): str(v) for k, v in h.items()})
+        except Exception:
+            logging.warning("[OpenF1Auth] OPENF1_AUTH_HEADERS_JSON is not valid JSON.")
+
+    r = requests.post(auth_url, json=payload, headers=req_headers, timeout=20)
+    r.raise_for_status()
+    body = r.json() if r.content else {}
+    token = str(_json_path_get(body, token_key) or "").strip()
+    if not token:
+        raise RuntimeError("auth response missing token")
+
+    now_ts = time.time()
+    expires_at = 0.0
+    if expires_at_key:
+        raw_exp_at = _json_path_get(body, expires_at_key)
+        if isinstance(raw_exp_at, (int, float)):
+            expires_at = float(raw_exp_at)
+        elif isinstance(raw_exp_at, str) and raw_exp_at.strip():
+            try:
+                expires_at = datetime.fromisoformat(raw_exp_at.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                expires_at = 0.0
+    if expires_at <= 0.0:
+        raw_exp_in = _json_path_get(body, expires_in_key)
+        try:
+            exp_in = int(raw_exp_in)
+        except Exception:
+            exp_in = 3600
+        exp_in = max(60, exp_in)
+        expires_at = now_ts + exp_in
+
+    return token, expires_at
+
+
+def _openf1_get_bearer_token(force_refresh: bool = False) -> str:
+    static_bearer = str(os.getenv("OPENF1_BEARER_TOKEN") or "").strip()
+    if static_bearer:
+        return static_bearer
+
+    with _OPENF1_TOKEN_LOCK:
+        now_ts = time.time()
+        token = str(_OPENF1_TOKEN_CACHE.get("token") or "")
+        expires_at = float(_OPENF1_TOKEN_CACHE.get("expires_at") or 0.0)
+        if (not force_refresh) and token and (now_ts < (expires_at - 120.0)):
+            return token
+        try:
+            new_token, new_expires_at = _openf1_fetch_login_token()
+        except Exception as e:
+            logging.warning(f"[OpenF1Auth] token refresh failed: {e}")
+            return token if token and now_ts < expires_at else ""
+        if not new_token:
+            return token if token and now_ts < expires_at else ""
+        _OPENF1_TOKEN_CACHE["token"] = new_token
+        _OPENF1_TOKEN_CACHE["expires_at"] = float(new_expires_at)
+        _OPENF1_TOKEN_CACHE["fetched_at"] = now_ts
+        return new_token
+
+
+def _openf1_auth_headers(force_refresh: bool = False) -> Dict[str, str]:
+    headers: Dict[str, str] = {"User-Agent": "OF1-Discord-Bot"}
+    api_key = str(os.getenv("OPENF1_API_KEY") or "").strip()
+    if api_key:
+        headers["x-api-key"] = api_key
+
+    bearer = _openf1_get_bearer_token(force_refresh=force_refresh)
+    if bearer:
+        auth_header_name = str(os.getenv("OPENF1_AUTH_HEADER_NAME") or "Authorization").strip() or "Authorization"
+        auth_prefix = str(os.getenv("OPENF1_AUTH_HEADER_PREFIX") or "Bearer").strip()
+        headers[auth_header_name] = f"{auth_prefix} {bearer}".strip()
+    return headers
+
+
+def _openf1_get_json(endpoint: str, params: Optional[Dict[str, Any]] = None, timeout: int = 20) -> Any:
+    url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
+    r = requests.get(url, params=params or {}, timeout=timeout, headers=_openf1_auth_headers())
+    if r.status_code in (401, 403):
+        r = requests.get(url, params=params or {}, timeout=timeout, headers=_openf1_auth_headers(force_refresh=True))
+    r.raise_for_status()
+    return r.json()
+
+def _parse_openf1_dt(dt_raw: Any) -> Optional[datetime]:
+    if not dt_raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(dt_raw).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+def _dt_to_ergast_parts(dt: Optional[datetime]) -> Tuple[str, str]:
+    if dt is None:
+        return "", ""
+    u = dt.astimezone(timezone.utc)
+    return u.strftime("%Y-%m-%d"), u.strftime("%H:%M:%SZ")
 
 load_f1_static_data()
 
@@ -486,14 +624,106 @@ def _session_entries_for_race(race: Dict[str, Any]) -> List[Dict[str, Any]]:
     entries.sort(key=lambda x: x["dt"])
     return entries
 
+def _openf1_session_type(session: Dict[str, Any]) -> str:
+    return str(session.get("session_type") or session.get("session_name") or "").strip()
+
+def _normalize_schedule_from_openf1(sessions: List[Dict[str, Any]], year: int) -> List[Dict[str, Any]]:
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        meeting_name_l = str(s.get("meeting_name") or "").lower()
+        official_name_l = str(s.get("meeting_official_name") or "").lower()
+        if "test" in meeting_name_l or "test" in official_name_l:
+            continue
+        if ("grand prix" not in meeting_name_l) and ("grand prix" not in official_name_l):
+            continue
+        mk = str(s.get("meeting_key") or "")
+        if not mk:
+            continue
+        dt = _parse_openf1_dt(s.get("date_start"))
+        if dt is None:
+            continue
+        slot = grouped.setdefault(mk, {"sessions": [], "base": s})
+        slot["sessions"].append((dt, s))
+        if len(str(s.get("meeting_official_name") or "")) > len(str(slot["base"].get("meeting_official_name") or "")):
+            slot["base"] = s
+
+    events: List[Dict[str, Any]] = []
+    for _mk, obj in grouped.items():
+        ss = sorted(obj["sessions"], key=lambda x: x[0])
+        if not ss:
+            continue
+        base = obj["base"]
+        season = str(base.get("year") or year)
+        race_name = (
+            str(base.get("meeting_name") or "").strip()
+            or str(base.get("meeting_official_name") or "").strip()
+            or f"{str(base.get('country_name') or 'F1').strip()} Grand Prix"
+        )
+        circuit_name = str(base.get("circuit_short_name") or base.get("location") or "Unknown Circuit").strip()
+
+        practice_sessions = [x for x in ss if _openf1_session_type(x[1]).upper().strip() == "PRACTICE"]
+        quali_session = next((x for x in ss if "QUALIFYING" in _openf1_session_type(x[1]).upper() and "SPRINT" not in _openf1_session_type(x[1]).upper()), None)
+        sprint_quali_session = next((x for x in ss if _openf1_session_type(x[1]).upper().strip() in {"SPRINT QUALIFYING", "SPRINT SHOOTOUT"}), None)
+        sprint_session = next((x for x in ss if _openf1_session_type(x[1]).upper().strip() == "SPRINT"), None)
+        race_session = next((x for x in ss if _openf1_session_type(x[1]).upper().strip() == "RACE"), None)
+        race_dt = race_session[0] if race_session else ss[-1][0]
+
+        race_date, race_time = _dt_to_ergast_parts(race_dt)
+        race_obj: Dict[str, Any] = {
+            "season": season,
+            "round": "0",
+            "raceName": race_name,
+            "Circuit": {"circuitName": circuit_name},
+            "date": race_date,
+            "time": race_time,
+            "_race_dt": race_dt,
+        }
+
+        if len(practice_sessions) >= 1:
+            d, t = _dt_to_ergast_parts(practice_sessions[0][0])
+            race_obj["FirstPractice"] = {"date": d, "time": t}
+        if len(practice_sessions) >= 2:
+            d, t = _dt_to_ergast_parts(practice_sessions[1][0])
+            race_obj["SecondPractice"] = {"date": d, "time": t}
+        if len(practice_sessions) >= 3:
+            d, t = _dt_to_ergast_parts(practice_sessions[2][0])
+            race_obj["ThirdPractice"] = {"date": d, "time": t}
+        if quali_session:
+            d, t = _dt_to_ergast_parts(quali_session[0])
+            race_obj["Qualifying"] = {"date": d, "time": t}
+        if sprint_quali_session:
+            d, t = _dt_to_ergast_parts(sprint_quali_session[0])
+            race_obj["SprintShootout"] = {"date": d, "time": t}
+        if sprint_session:
+            d, t = _dt_to_ergast_parts(sprint_session[0])
+            race_obj["Sprint"] = {"date": d, "time": t}
+
+        events.append(race_obj)
+
+    events.sort(key=lambda r: r.get("_race_dt") or datetime.max.replace(tzinfo=timezone.utc))
+    for i, race in enumerate(events, start=1):
+        race["round"] = str(i)
+        race.pop("_race_dt", None)
+    return events
+
 async def fetch_current_season_schedule(force: bool = False) -> List[Dict[str, Any]]:
     now_ts = time.time()
     if (not force) and F1_SCHEDULE_CACHE["races"] and (now_ts - float(F1_SCHEDULE_CACHE["ts"])) < 300:
         return list(F1_SCHEDULE_CACHE["races"])
 
-    schedule_urls = [ERGAST_SCHEDULE_URL, JOLPICA_SCHEDULE_URL]
-    data = await asyncio.to_thread(_get_json_any, schedule_urls, "schedule")
-    races = data.get("MRData", {}).get("RaceTable", {}).get("Races", []) or []
+    year = datetime.now(timezone.utc).year
+    races: List[Dict[str, Any]] = []
+    try:
+        sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year})
+        if isinstance(sessions, list) and sessions:
+            races = _normalize_schedule_from_openf1(sessions, year=year)
+    except Exception as e:
+        logging.warning(f"[F1] OpenF1 schedule fetch failed: {e}")
+
+    if not races:
+        raise RuntimeError("OpenF1 schedule unavailable or empty.")
     F1_SCHEDULE_CACHE["ts"] = now_ts
     F1_SCHEDULE_CACHE["races"] = list(races)
     return list(races)
@@ -761,12 +991,12 @@ async def _announce_prediction_session_scores(ctx, meta: Dict[str, Any], session
 
     label = _prediction_session_labels().get(session_key, session_key)
     if rows:
-        body = "\n".join(f"• {name} — **+{pts}** pts" for pts, name in rows)
+        body = "\n".join(f"â€¢ {name} â€” **+{pts}** pts" for pts, name in rows)
     else:
         body = "No predictions were submitted."
-    msg = f"🧮 **{meta['race_name']} — {label} Prediction Points** (spoiler-safe)\n{body}"
+    msg = f"ðŸ§® **{meta['race_name']} â€” {label} Prediction Points** (spoiler-safe)\n{body}"
     if len(msg) > 1900:
-        msg = msg[:1850] + "\n… (truncated)"
+        msg = msg[:1850] + "\nâ€¦ (truncated)"
     await ctx.send(msg)
     return True
 
@@ -911,7 +1141,7 @@ def _quiz_learn_answer_variant(question_key: str, user_answer: str) -> bool:
         return False
 
 async def _quiz_process_reaction_override(payload: discord.RawReactionActionEvent) -> bool:
-    if str(payload.emoji) != "🟢":
+    if str(payload.emoji) != "ðŸŸ¢":
         return False
     pending = F1_QUIZ_PENDING_OVERRIDES.get(payload.message_id)
     if not pending:
@@ -982,15 +1212,15 @@ async def _quiz_process_reaction_override(payload: discord.RawReactionActionEven
                 bot_reply = await channel.fetch_message(reply_id)
                 await bot_reply.edit(
                     content=(
-                        f"✅ Correct, <@{user_id}>! (fixed) "
-                        f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
+                        f"âœ… Correct, <@{user_id}>! (fixed) "
+                        f"({category.replace('_', ' ').title()} Â· {difficulty.title()}) "
                         f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
                     )
                 )
             else:
                 await channel.send(
-                    f"✅ Correct, <@{user_id}>! (fixed) "
-                    f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
+                    f"âœ… Correct, <@{user_id}>! (fixed) "
+                    f"({category.replace('_', ' ').title()} Â· {difficulty.title()}) "
                     f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
                 )
         except Exception as e:
@@ -1012,44 +1242,133 @@ def _circuit_lookup(query: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]
             return name, CIRCUIT_INFO[name]
     return None, None
 
+async def _openf1_candidate_race_session_keys() -> List[Any]:
+    now = datetime.now(timezone.utc)
+    candidates: List[Any] = ["latest"]
+    years = [now.year, now.year - 1]
+    for year in years:
+        try:
+            sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year, "session_type": "Race"})
+        except Exception:
+            continue
+        if not isinstance(sessions, list):
+            continue
+        parsed = []
+        for s in sessions:
+            if not isinstance(s, dict):
+                continue
+            key = s.get("session_key")
+            dt = _parse_openf1_dt(s.get("date_start"))
+            if key is None or dt is None:
+                continue
+            parsed.append((dt, key))
+        parsed.sort(key=lambda x: x[0], reverse=True)
+        for _dt, key in parsed:
+            if key not in candidates:
+                candidates.append(key)
+        if len(candidates) > 1:
+            break
+    return candidates
+
+async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]:
+    candidates = await _openf1_candidate_race_session_keys()
+    for session_key in candidates:
+        try:
+            rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key})
+        except Exception:
+            continue
+        if not isinstance(rows, list) or not rows:
+            continue
+        meta_map: Dict[int, Dict[str, Any]] = {}
+        try:
+            drivers = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key})
+            if isinstance(drivers, list):
+                for d in drivers:
+                    if not isinstance(d, dict):
+                        continue
+                    try:
+                        n = int(d.get("driver_number"))
+                    except Exception:
+                        continue
+                    meta_map[n] = d
+        except Exception:
+            pass
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            try:
+                num = int(r.get("driver_number"))
+            except Exception:
+                num = 0
+            dmeta = meta_map.get(num, {})
+            full_name = str(dmeta.get("full_name") or "").strip()
+            if not full_name:
+                first = str(dmeta.get("first_name") or "").strip()
+                last = str(dmeta.get("last_name") or "").strip()
+                full_name = (f"{first} {last}").strip() or str(r.get("driver_name") or f"#{num}")
+            out.append(
+                {
+                    "position": int(r.get("position", 0) or 0),
+                    "points": int(r.get("points", 0) or 0),
+                    "driver_number": num,
+                    "code": str(dmeta.get("name_acronym") or "").strip(),
+                    "name": full_name,
+                    "team": str(dmeta.get("team_name") or "Unknown").strip() or "Unknown",
+                    "wins": r.get("wins"),
+                }
+            )
+        out = [x for x in out if int(x.get("position", 0) or 0) > 0]
+        out.sort(key=lambda x: int(x.get("position", 999) or 999))
+        return out[: max(1, int(limit))]
+    return []
+
+async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, Any]]:
+    candidates = await _openf1_candidate_race_session_keys()
+    for session_key in candidates:
+        try:
+            rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key})
+        except Exception:
+            continue
+        if not isinstance(rows, list) or not rows:
+            continue
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            out.append(
+                {
+                    "position": int(r.get("position", 0) or 0),
+                    "points": int(r.get("points", 0) or 0),
+                    "name": str(r.get("team_name") or "Unknown").strip() or "Unknown",
+                    "wins": r.get("wins"),
+                }
+            )
+        out = [x for x in out if int(x.get("position", 0) or 0) > 0]
+        out.sort(key=lambda x: int(x.get("position", 999) or 999))
+        return out[: max(1, int(limit))]
+    return []
+
 async def fetch_driver_standings_text(limit: int = 20) -> str:
-    data = await asyncio.to_thread(_get_json_any, [ERGAST_DRIVER_URL, JOLPICA_DRIVER_URL], "driver standings")
-    lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
-    if not lists:
-        return "No standings available."
-    standings = lists[0].get("DriverStandings", [])[:limit]
-
-    lines = []
-    for s in standings:
-        pos = s.get("position", "?")
-        pts = s.get("points", "0")
-        drv = s.get("Driver", {})
-        given = drv.get("givenName", "")
-        family = drv.get("familyName", "")
-        constructor = (s.get("Constructors") or [{}])[0].get("name", "")
-        lines.append(f"{pos:>2}. {given} {family} — {pts} pts ({constructor})")
-
-    updated = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    return "🏁 **F1 Driver Standings (Current Season)**\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
+    rows = await _openf1_driver_standings_rows(limit=limit)
+    if rows:
+        lines = []
+        for r in rows[: max(1, int(limit))]:
+            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts ({r.get('team', 'Unknown')})")
+        updated = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
+    return "No standings available from OpenF1."
 
 async def fetch_constructor_standings_text(limit: int = 10) -> str:
-    data = await asyncio.to_thread(_get_json_any, [ERGAST_CONSTRUCTOR_URL, JOLPICA_CONSTRUCTOR_URL], "constructor standings")
-    lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
-    if not lists:
-        return "No standings available."
-    standings = lists[0].get("ConstructorStandings", [])[:limit]
-
-    lines = []
-    for s in standings:
-        pos = s.get("position", "?")
-        pts = s.get("points", "0")
-        name = s.get("Constructor", {}).get("name", "")
-        lines.append(f"{pos:>2}. {name} — {pts} pts")
-
-    updated = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    return "🏁 **F1 Constructor Standings (Current Season)**\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
-
-# ----------------------------
+    rows = await _openf1_constructor_standings_rows(limit=limit)
+    if rows:
+        lines = []
+        for r in rows[: max(1, int(limit))]:
+            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
+        updated = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        return "F1 Constructor Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
+    return "No standings available from OpenF1."
 # Discord setup
 # ----------------------------
 intents = discord.Intents.default()
@@ -1393,7 +1712,7 @@ async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
 
     try:
         await message.author.send(
-            f"🚫 You need **level {need}** to talk in **#{message.channel.name}**.\n"
+            f"ðŸš« You need **level {need}** to talk in **#{message.channel.name}**.\n"
             f"You're currently **level {user_level}**."
         )
     except Exception:
@@ -1408,7 +1727,7 @@ async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
 async def rank(ctx, member: discord.Member = None):
     member = member or ctx.author
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
 
     rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
     total_xp = int(rec.get("xp", 0) or 0)
@@ -1433,7 +1752,7 @@ async def rank(ctx, member: discord.Member = None):
 async def xpleaderboard(ctx, limit: int = 10):
     """Top XP users in this server."""
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     limit = max(3, min(20, int(limit)))
 
     rows = get_top_users_by_xp(XP_STATE, ctx.guild.id, limit=limit)
@@ -1446,35 +1765,35 @@ async def xpleaderboard(ctx, limit: int = 10):
         name = member.display_name if member else f"<@{uid}>"
         # Recompute level in case someone edited XP manually
         real_lvl = xp_level_from_total(xp)
-        lines.append(f"{i:>2}. {name} — **L{real_lvl}** ({xp} XP)")
+        lines.append(f"{i:>2}. {name} â€” **L{real_lvl}** ({xp} XP)")
 
-    await ctx.send("🏆 **XP Leaderboard**\n" + "\n".join(lines))
+    await ctx.send("ðŸ† **XP Leaderboard**\n" + "\n".join(lines))
 
 @bot.hybrid_command(name="xpset")
 @commands.has_permissions(administrator=True)
 async def xpset(ctx, member: discord.Member, xp: int):
     """Admin: set a user's XP."""
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     xp = max(0, int(xp))
     lvl = xp_level_from_total(xp)
     set_user_xp_level(XP_STATE, ctx.guild.id, member.id, xp=xp, level=lvl)
     _xp_mark_dirty()
-    await ctx.send(f"✅ Set {member.display_name} to {xp} XP (L{lvl}).")
+    await ctx.send(f"âœ… Set {member.display_name} to {xp} XP (L{lvl}).")
 
 @bot.hybrid_command(name="xpreset")
 @commands.has_permissions(administrator=True)
 async def xpreset(ctx, member: discord.Member):
     """Admin: reset a user's XP."""
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
     rec["xp"] = 0
     rec["level"] = 0
     rec["last_msg_ts"] = 0
     rec["messages"] = 0
     _xp_mark_dirty()
-    await ctx.send(f"✅ Reset XP for {member.display_name}.")
+    await ctx.send(f"âœ… Reset XP for {member.display_name}.")
 
 @bot.hybrid_command(name="xpaudit")
 @commands.has_permissions(administrator=True)
@@ -1483,7 +1802,7 @@ async def xpaudit(ctx, member: discord.Member = None):
     Admin: inspect a user's XP state and current tuning assumptions.
     """
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     member = member or ctx.author
 
     rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
@@ -1501,14 +1820,14 @@ async def xpaudit(ctx, member: discord.Member = None):
     delta_vs_est = total_xp - est_from_awards
 
     body = (
-        f"🔎 **XP Audit** for {member.mention}\n"
+        f"ðŸ”Ž **XP Audit** for {member.mention}\n"
         f"- Level (stored/recomputed): **L{int(rec.get('level', 0) or 0)} / L{level}**\n"
         f"- Total XP: **{total_xp}**\n"
         f"- Progress in level: **{xp_in_level}/{xp_next}** (level calc = L{lvl_progress})\n"
         f"- Awarded message events (XP-state counter): **{messages_awarded}**\n"
         f"- Last XP-awarding message timestamp: `{last_seen_txt}`\n"
         f"- Current cooldown: **{cd}s**\n"
-        f"- Current gain range: **{mn}–{mx} XP** (avg ~ {avg_gain:.1f})\n"
+        f"- Current gain range: **{mn}â€“{mx} XP** (avg ~ {avg_gain:.1f})\n"
         f"- Estimated XP from awarded-message count at avg gain: **~{est_from_awards}**\n"
         f"- Delta vs estimate: **{delta_vs_est:+}**\n"
         "_Note: `messages` here is XP-awarding events after cooldown, not total Discord messages._"
@@ -1523,43 +1842,43 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
     Usage: !xpbackfillhistory rebuild CONFIRM
     """
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     mode = (mode or "").lower().strip()
     if mode != "rebuild":
-        return await ctx.send("❌ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
+        return await ctx.send("âŒ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
     if (confirm or "").strip().upper() != "CONFIRM":
         return await ctx.send(
-            "⚠️ This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
+            "âš ï¸ This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
             "Run: `!xpbackfillhistory rebuild CONFIRM`"
         )
 
-    status_msg = await ctx.send("⏳ Starting silent XP backfill (history rebuild). This may take a while...")
+    status_msg = await ctx.send("â³ Starting silent XP backfill (history rebuild). This may take a while...")
     try:
         skip_message_id = ctx.message.id if getattr(ctx, "message", None) is not None else None
         summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=skip_message_id)
         await status_msg.edit(
             content=(
-                "✅ Silent XP backfill complete.\n"
+                "âœ… Silent XP backfill complete.\n"
                 f"- Users updated: **{summary['users_updated']}**\n"
                 f"- Messages scanned: **{summary['messages_scanned']}**\n"
                 f"- Awarded XP events (after cooldown): **{summary['eligible_awards']}**\n"
                 f"- Channels scanned: **{summary['channels_scanned']}**\n"
                 f"- Channels skipped: **{summary['channels_skipped']}**\n"
                 f"- Cooldown used: **{summary['cooldown_seconds']}s**\n"
-                f"- XP gain range used: **{summary['xp_min_gain']}–{summary['xp_max_gain']}**\n"
+                f"- XP gain range used: **{summary['xp_min_gain']}â€“{summary['xp_max_gain']}**\n"
                 "_No level-up messages were posted during this rebuild._"
             )
         )
     except Exception as e:
         logging.error(f"[XP] Backfill failed for guild {ctx.guild.id}: {e}")
-        await status_msg.edit(content=f"❌ XP backfill failed: {e}")
+        await status_msg.edit(content=f"âŒ XP backfill failed: {e}")
 
 @bot.hybrid_command(name="xpgate")
 @commands.has_permissions(administrator=True)
 async def xpgate(ctx, channel: discord.TextChannel, level: int):
     """Admin: require a minimum level to talk in a channel (auto-delete)."""
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     level = max(0, min(500, int(level)))
 
     reload_config_state()
@@ -1568,14 +1887,14 @@ async def xpgate(ctx, channel: discord.TextChannel, level: int):
     CFG["xp_min_level_channels"] = mapping
     save_config(CFG)
 
-    await ctx.send(f"✅ Set **#{channel.name}** minimum level to **{level}**.")
+    await ctx.send(f"âœ… Set **#{channel.name}** minimum level to **{level}**.")
 
 @bot.hybrid_command(name="xpgateclear")
 @commands.has_permissions(administrator=True)
 async def xpgateclear(ctx, channel: discord.TextChannel):
     """Admin: remove channel min-level gate."""
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
 
     reload_config_state()
     mapping = cfg_xp_min_level_channels()
@@ -1584,7 +1903,7 @@ async def xpgateclear(ctx, channel: discord.TextChannel):
     CFG["xp_min_level_channels"] = mapping
     save_config(CFG)
 
-    await ctx.send(f"✅ Cleared min-level gate for **#{channel.name}**.")
+    await ctx.send(f"âœ… Cleared min-level gate for **#{channel.name}**.")
 
 # ----------------------------
 # Commands: config tools
@@ -1595,7 +1914,7 @@ async def configreload(ctx):
     """Reload config.json + state.json without restarting the bot."""
     reload_config_state()
     load_f1_static_data()
-    await ctx.send("✅ Reloaded config.json, state.json, and F1 data files.")
+    await ctx.send("âœ… Reloaded config.json, state.json, and F1 data files.")
 
 # ----------------------------
 # Commands: reaction role setup
@@ -1605,12 +1924,12 @@ async def configreload(ctx):
 async def setupnotifications(ctx):
     roles = cfg_reaction_roles()
     if not roles:
-        await ctx.send("❌ No reaction_roles configured in config.json.")
+        await ctx.send("âŒ No reaction_roles configured in config.json.")
         return
 
-    description = "📰 **Get notified!**\nReact to opt in to pingable news roles."
+    description = "ðŸ“° **Get notified!**\nReact to opt in to pingable news roles."
     for emoji, role in roles.items():
-        description += f"\n{emoji} → `{role}`"
+        description += f"\n{emoji} â†’ `{role}`"
 
     msg = await ctx.send(description)
     for emoji in roles.keys():
@@ -1618,19 +1937,19 @@ async def setupnotifications(ctx):
     write_reaction_panel_state("notifications", ctx.channel.id, msg.id)
 
     logging.info(f"[Notification Roles] Setup complete (Message ID: {msg.id})")
-    await ctx.send(f"✅ Notifications setup message created: `{msg.id}`")
+    await ctx.send(f"âœ… Notifications setup message created: `{msg.id}`")
 
 @bot.hybrid_command(name="setupcolors", aliases=["setup_colors"])
 @commands.has_permissions(administrator=True)
 async def setupcolors(ctx):
     roles = cfg_color_roles()
     if not roles:
-        await ctx.send("❌ No color_roles configured in config.json.")
+        await ctx.send("âŒ No color_roles configured in config.json.")
         return
 
-    description = "🎨 **Choose your name color!**\nReact with an emoji to get a matching role. Only one color can be active at a time."
+    description = "ðŸŽ¨ **Choose your name color!**\nReact with an emoji to get a matching role. Only one color can be active at a time."
     for emoji, role in roles.items():
-        description += f"\n{emoji} → `{role}`"
+        description += f"\n{emoji} â†’ `{role}`"
 
     msg = await ctx.send(description)
     for emoji in roles.keys():
@@ -1638,7 +1957,7 @@ async def setupcolors(ctx):
     write_reaction_panel_state("colors", ctx.channel.id, msg.id)
 
     logging.info(f"[Color Roles] Setup complete (Message ID: {msg.id})")
-    await ctx.send(f"✅ Colors setup message created: `{msg.id}`")
+    await ctx.send(f"âœ… Colors setup message created: `{msg.id}`")
 
 @bot.hybrid_command(name="setupdrivers", aliases=["setup_drivers"])
 @commands.has_permissions(administrator=True)
@@ -1649,15 +1968,15 @@ async def setupdrivers(ctx):
     """
     guild = ctx.guild
     if guild is None:
-        await ctx.send("❌ This must be run in a server.")
+        await ctx.send("âŒ This must be run in a server.")
         return
 
     emoji_name_map = cfg_driver_emoji_names()
     if not emoji_name_map:
-        await ctx.send("❌ No driver_emoji_names configured in config.json.")
+        await ctx.send("âŒ No driver_emoji_names configured in config.json.")
         return
 
-    description = "🏎 **Choose your favorite F1 driver!**\nReact to get a fan role:"
+    description = "ðŸŽ **Choose your favorite F1 driver!**\nReact to get a fan role:"
     emoji_to_role: Dict[str, str] = {}
     missing = []
 
@@ -1666,12 +1985,12 @@ async def setupdrivers(ctx):
         if emoji_obj:
             emoji_str = str(emoji_obj)  # "<:Name:123>"
             emoji_to_role[emoji_str] = role_name
-            description += f"\n{emoji_obj} → `{role_name}`"
+            description += f"\n{emoji_obj} â†’ `{role_name}`"
         else:
             missing.append(emoji_name)
 
     if missing:
-        await ctx.send("⚠️ Missing custom emojis: " + ", ".join(missing))
+        await ctx.send("âš ï¸ Missing custom emojis: " + ", ".join(missing))
 
     msg = await ctx.send(description)
     for emoji_str in emoji_to_role.keys():
@@ -1680,7 +1999,7 @@ async def setupdrivers(ctx):
     write_state_driver_map(channel_id=ctx.channel.id, message_id=msg.id, emoji_to_role=emoji_to_role)
 
     logging.info(f"[Driver Roles] Setup complete (Channel {ctx.channel.id}, Message {msg.id})")
-    await ctx.send(f"✅ Driver roles message created and saved to state.json: `{msg.id}`")
+    await ctx.send(f"âœ… Driver roles message created and saved to state.json: `{msg.id}`")
 
 # ----------------------------
 # Commands: instagram quick check
@@ -1690,9 +2009,9 @@ async def setupdrivers(ctx):
 async def instacheck(ctx, username: str = "of1.official"):
     post_url = await asyncio.to_thread(fetch_latest_instagram_post, username)
     if post_url:
-        await ctx.send(f"📸 Latest Instagram post from `{username}`:\n{post_url}")
+        await ctx.send(f"ðŸ“¸ Latest Instagram post from `{username}`:\n{post_url}")
     else:
-        await ctx.send("❌ Could not retrieve the latest Instagram post.")
+        await ctx.send("âŒ Could not retrieve the latest Instagram post.")
 
 # ----------------------------
 # Utility commands
@@ -1702,29 +2021,29 @@ async def instacheck(ctx, username: str = "of1.official"):
 async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
     channel = bot.get_channel(channel_id)
     if not channel:
-        await ctx.send("❌ Could not find that channel.")
+        await ctx.send("âŒ Could not find that channel.")
         return
     try:
         msg = await channel.fetch_message(message_id)
         if msg.author != bot.user:
-            await ctx.send("⚠️ I can only edit my own messages.")
+            await ctx.send("âš ï¸ I can only edit my own messages.")
             return
         await msg.edit(content=new_text)
-        await ctx.send("✅ Message updated.")
+        await ctx.send("âœ… Message updated.")
     except Exception as e:
-        await ctx.send(f"❌ Failed to edit message: {e}")
+        await ctx.send(f"âŒ Failed to edit message: {e}")
 
 @bot.command(name="botinfo")
 @commands.has_permissions(administrator=True)
 async def botinfo(ctx):
     uptime = datetime.now() - bot.launch_time
-    await ctx.send(f"🛠 **Bot Uptime:** {uptime}")
+    await ctx.send(f"ðŸ›  **Bot Uptime:** {uptime}")
 
 @bot.command(name="serverlist")
 @commands.has_permissions(administrator=True)
 async def serverlist(ctx):
     guild_names = ", ".join(g.name for g in bot.guilds)
-    await ctx.send(f"🤖 Connected to: {guild_names}")
+    await ctx.send(f"ðŸ¤– Connected to: {guild_names}")
 
 @bot.command(name="logrecent")
 @commands.has_permissions(administrator=True)
@@ -1736,7 +2055,7 @@ async def logrecent(ctx, lines: int = 10):
         text = "".join(all_lines[-lines:])
         await ctx.send(f"```\n{text[:1900]}\n```")
     except Exception as e:
-        await ctx.send(f"❌ Could not read log: {e}")
+        await ctx.send(f"âŒ Could not read log: {e}")
 
 @bot.command(name="ping")
 async def ping(ctx):
@@ -1755,7 +2074,7 @@ async def help(ctx):
     if visible:
         await ctx.send("**Available Commands:**\n" + "\n".join(visible))
     else:
-        await ctx.send("❌ You don't have access to any commands.")
+        await ctx.send("âŒ You don't have access to any commands.")
 
 def _command_examples(prefix: str) -> Dict[str, str]:
     p = prefix or "!"
@@ -1886,7 +2205,7 @@ async def commands_dm_list(ctx):
             continue
 
     if not visible:
-        return await ctx.send("❌ You don't have access to any commands.")
+        return await ctx.send("âŒ You don't have access to any commands.")
 
     chunks: List[str] = []
     current = "**Available Commands (You Have Access To)**\n"
@@ -1904,16 +2223,16 @@ async def commands_dm_list(ctx):
         for chunk in chunks:
             await ctx.author.send(chunk)
         if ctx.guild is not None:
-            await ctx.send("📬 Sent your command list to your DMs.")
+            await ctx.send("ðŸ“¬ Sent your command list to your DMs.")
     except Exception:
-        await ctx.send("❌ I couldn't DM you. Check your privacy settings and try again.")
+        await ctx.send("âŒ I couldn't DM you. Check your privacy settings and try again.")
 
 @bot.command(name="quiz", aliases=["f1quiz"])
 async def quiz(ctx, *filters: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     if not F1_QUIZ_QUESTIONS:
-        return await ctx.send("❌ No quiz questions configured.")
+        return await ctx.send("âŒ No quiz questions configured.")
     difficulty_filters: set[str] = set()
     category_filters: set[str] = set()
     known_difficulties = set(QUIZ_DIFFICULTY_POINTS.keys())
@@ -1934,14 +2253,14 @@ async def quiz(ctx, *filters: str):
 
     if unknown_filters:
         return await ctx.send(
-            "❌ Unknown quiz filter(s): "
+            "âŒ Unknown quiz filter(s): "
             + ", ".join(f"`{x}`" for x in unknown_filters)
             + "\\nUse difficulty (`easy`, `medium`, `hard`, `expert`) and/or categories like `rules`, `circuits`, `strategy`, `bot_xp`, `weekend_format`."
         )
 
     q = _quiz_pick_question(ctx.guild.id, difficulty_filters, category_filters)
     if q is None:
-        return await ctx.send("❌ No quiz questions match those filters.")
+        return await ctx.send("âŒ No quiz questions match those filters.")
     difficulty = str(q.get("difficulty") or "easy").lower().strip()
     category = _quiz_category_for_question(q)
     points = _quiz_points_for_question(q)
@@ -1957,22 +2276,22 @@ async def quiz(ctx, *filters: str):
         "points": points,
     }
     await ctx.send(
-        "🧠 **F1 Quiz Time!**\n"
+        "ðŸ§  **F1 Quiz Time!**\n"
         f"{q['q']}\n"
-        f"Category: **{category.replace('_', ' ').title()}** · Difficulty: **{difficulty.title()}** · Worth: **{points}** point{'s' if points != 1 else ''}\n"
+        f"Category: **{category.replace('_', ' ').title()}** Â· Difficulty: **{difficulty.title()}** Â· Worth: **{points}** point{'s' if points != 1 else ''}\n"
         "Reply with `!quizanswer <answer>` within 2 minutes."
     )
 
 @bot.command(name="quizanswer")
 async def quizanswer(ctx, *, answer: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     active = F1_QUIZ_ACTIVE.get(ctx.guild.id)
     if not active:
-        return await ctx.send("ℹ️ No active quiz question. Start one with `!quiz`.")
+        return await ctx.send("â„¹ï¸ No active quiz question. Start one with `!quiz`.")
     if time.time() > float(active.get("expires_at", 0)):
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
-        return await ctx.send("⌛ That quiz question expired. Start a new one with `!quiz`.")
+        return await ctx.send("âŒ› That quiz question expired. Start a new one with `!quiz`.")
 
     guess = _clean_text_key(answer)
     answers = active.get("answers") or []
@@ -1987,14 +2306,14 @@ async def quizanswer(ctx, *, answer: str):
         _quiz_remove_pending_overrides(ctx.guild.id, str(active.get("question_key") or ""))
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
         return await ctx.send(
-            f"✅ Correct, {ctx.author.mention}! "
-            f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
+            f"âœ… Correct, {ctx.author.mention}! "
+            f"({category.replace('_', ' ').title()} Â· {difficulty.title()}) "
             f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
         )
 
     wrong_reply = await ctx.send(
-        "❌ Not quite. Try again while the question is still open. "
-        "(Admins can react 🟢 to your `!quizanswer` message to mark a valid alternate wording as correct.)"
+        "âŒ Not quite. Try again while the question is still open. "
+        "(Admins can react ðŸŸ¢ to your `!quizanswer` message to mark a valid alternate wording as correct.)"
     )
     try:
         F1_QUIZ_PENDING_OVERRIDES[ctx.message.id] = {
@@ -2017,17 +2336,17 @@ async def quizanswer(ctx, *, answer: str):
 @bot.command(name="quizscore", aliases=["quizleaderboard"])
 async def quizscore(ctx):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     scores = _quiz_scores_for_guild(ctx.guild.id)
     if not scores:
-        return await ctx.send("ℹ️ No quiz scores yet.")
+        return await ctx.send("â„¹ï¸ No quiz scores yet.")
     rows = sorted(((int(v), uid) for uid, v in scores.items()), reverse=True)[:20]
     lines = []
     for i, (pts, uid) in enumerate(rows, start=1):
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
-        lines.append(f"{i:>2}. {name} — **{pts}**")
-    await ctx.send("🧠 **F1 Quiz Leaderboard**\n" + "\n".join(lines))
+        lines.append(f"{i:>2}. {name} â€” **{pts}**")
+    await ctx.send("ðŸ§  **F1 Quiz Leaderboard**\n" + "\n".join(lines))
 
 # ----------------------------
 # Standings updater
@@ -2200,7 +2519,7 @@ async def runtime_status_loop():
 async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     which = which.lower().strip()
     if which not in ("drivers", "constructors", "both"):
-        await ctx.send("❌ Use: `drivers`, `constructors`, or `both`.")
+        await ctx.send("âŒ Use: `drivers`, `constructors`, or `both`.")
         return
 
     refresh_minutes = max(1, min(120, int(refresh_minutes)))
@@ -2210,14 +2529,14 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     created = []
 
     if which in ("drivers", "both"):
-        msg = await ctx.send("🏁 **F1 Driver Standings (Current Season)**\nLoading...")
+        msg = await ctx.send("ðŸ **F1 Driver Standings (Current Season)**\nLoading...")
         set_env_value("DRIVER_STANDINGS_MESSAGE_ID", str(msg.id))
-        created.append(f"✅ Drivers message: `{msg.id}`")
+        created.append(f"âœ… Drivers message: `{msg.id}`")
 
     if which in ("constructors", "both"):
-        msg = await ctx.send("🏁 **F1 Constructor Standings (Current Season)**\nLoading...")
+        msg = await ctx.send("ðŸ **F1 Constructor Standings (Current Season)**\nLoading...")
         set_env_value("CONSTRUCTOR_STANDINGS_MESSAGE_ID", str(msg.id))
-        created.append(f"✅ Constructors message: `{msg.id}`")
+        created.append(f"âœ… Constructors message: `{msg.id}`")
 
     reload_config_state()
     if "standings" not in STATE:
@@ -2231,10 +2550,10 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     ensure_standings_task_running()
 
     await ctx.send(
-        "📌 Standings configured.\n"
+        "ðŸ“Œ Standings configured.\n"
         + "\n".join(created)
-        + f"\n⏱ Refresh: {refresh_minutes} min\n"
-        "ℹ️ IDs saved to `.env` so it continues after restart."
+        + f"\nâ± Refresh: {refresh_minutes} min\n"
+        "â„¹ï¸ IDs saved to `.env` so it continues after restart."
     )
 
 # ----------------------------
@@ -2247,10 +2566,10 @@ async def schedule(ctx, count: int = 8):
         items = await upcoming_f1_sessions(limit=count)
     except Exception as e:
         logging.error(f"[F1] schedule failed: {e}")
-        return await ctx.send("❌ Could not fetch the F1 schedule right now.")
+        return await ctx.send("âŒ Could not fetch the F1 schedule right now.")
 
     if not items:
-        return await ctx.send("ℹ️ No upcoming sessions found.")
+        return await ctx.send("â„¹ï¸ No upcoming sessions found.")
 
     tz = _f1_tz()
     tz_name = _f1_tz_name() if tz != timezone.utc else "UTC"
@@ -2261,9 +2580,9 @@ async def schedule(ctx, count: int = 8):
         mins = int((delta.total_seconds() % 3600) // 60)
         countdown = f"in {hrs}h {mins}m" if delta.total_seconds() > 0 else "started"
         lines.append(
-            f"• **{item['race_name']}** — {item['session_label']} at `{_fmt_dt_local(item['dt'], tz)}` ({countdown})"
+            f"â€¢ **{item['race_name']}** â€” {item['session_label']} at `{_fmt_dt_local(item['dt'], tz)}` ({countdown})"
         )
-    await ctx.send(f"📅 **Upcoming F1 Sessions** ({tz_name})\n" + "\n".join(lines))
+    await ctx.send(f"ðŸ“… **Upcoming F1 Sessions** ({tz_name})\n" + "\n".join(lines))
 
 @bot.command(name="nextsession", aliases=["nextf1"])
 async def nextsession(ctx):
@@ -2271,18 +2590,18 @@ async def nextsession(ctx):
         items = await upcoming_f1_sessions(limit=1)
     except Exception as e:
         logging.error(f"[F1] nextsession failed: {e}")
-        return await ctx.send("❌ Could not fetch the next session right now.")
+        return await ctx.send("âŒ Could not fetch the next session right now.")
     if not items:
-        return await ctx.send("ℹ️ No upcoming sessions found.")
+        return await ctx.send("â„¹ï¸ No upcoming sessions found.")
     item = items[0]
     delta = item["dt"] - datetime.now(timezone.utc)
     total_minutes = max(0, int(delta.total_seconds() // 60))
     days, rem = divmod(total_minutes, 1440)
     hrs, mins = divmod(rem, 60)
     await ctx.send(
-        f"⏭️ **Next F1 session:** **{item['race_name']} — {item['session_label']}**\n"
-        f"🕒 `{_fmt_dt_local(item['dt'])}` ({_f1_tz_name()})\n"
-        f"⏳ In **{days}d {hrs}h {mins}m**"
+        f"â­ï¸ **Next F1 session:** **{item['race_name']} â€” {item['session_label']}**\n"
+        f"ðŸ•’ `{_fmt_dt_local(item['dt'])}` ({_f1_tz_name()})\n"
+        f"â³ In **{days}d {hrs}h {mins}m**"
     )
 
 def _f1_reminder_cfg() -> Dict[str, Any]:
@@ -2363,9 +2682,9 @@ async def f1_reminder_loop():
                         continue
                     if delta_m <= lead and delta_m >= max(0, lead - 1):
                         msg = (
-                            f"⏰ **F1 Reminder**: **{item['race_name']} — {item['session_label']}** starts "
+                            f"â° **F1 Reminder**: **{item['race_name']} â€” {item['session_label']}** starts "
                             f"{'now' if delta_m == 0 else f'in about {delta_m}m'}.\n"
-                            f"🕒 `{_fmt_dt_local(dt)}` ({_f1_tz_name()})"
+                            f"ðŸ•’ `{_fmt_dt_local(dt)}` ({_f1_tz_name()})"
                         )
                         try:
                             await channel.send(msg)
@@ -2389,22 +2708,22 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
         if channel is None:
             channel = ctx.channel if isinstance(ctx.channel, discord.TextChannel) else None
         if channel is None:
-            return await ctx.send("❌ Provide a text channel, e.g. `!f1reminders on #channel`.")
+            return await ctx.send("âŒ Provide a text channel, e.g. `!f1reminders on #channel`.")
         reload_config_state()
         CFG["f1_reminders_enabled"] = True
         CFG["f1_reminders_channel_id"] = int(channel.id)
         save_config(CFG)
-        return await ctx.send(f"✅ F1 reminders enabled in {channel.mention}.")
+        return await ctx.send(f"âœ… F1 reminders enabled in {channel.mention}.")
     if mode in {"off", "disable"}:
         reload_config_state()
         CFG["f1_reminders_enabled"] = False
         save_config(CFG)
-        return await ctx.send("✅ F1 reminders disabled.")
+        return await ctx.send("âœ… F1 reminders disabled.")
 
     cfg = _f1_reminder_cfg()
     ch_txt = f"<#{cfg['channel_id']}>" if cfg["channel_id"] else "(not set)"
     await ctx.send(
-        "ℹ️ **F1 reminders status**\n"
+        "â„¹ï¸ **F1 reminders status**\n"
         f"- Enabled: `{cfg['enabled']}`\n"
         f"- Channel: {ch_txt}\n"
         f"- Lead minutes: `{', '.join(str(x) for x in cfg['leads'])}`"
@@ -2415,7 +2734,7 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
 async def f1reminderleads(ctx, *, minutes: str):
     raw = str(minutes or "").strip()
     if not raw:
-        return await ctx.send("❌ Usage: `!f1reminderleads 1440 60 15` or `/f1reminderleads minutes:\"1440 60 15\"`")
+        return await ctx.send("âŒ Usage: `!f1reminderleads 1440 60 15` or `/f1reminderleads minutes:\"1440 60 15\"`")
     parts = [p for p in re.split(r"[,\s]+", raw) if p]
     parsed: List[int] = []
     for p in parts:
@@ -2424,23 +2743,23 @@ async def f1reminderleads(ctx, *, minutes: str):
         except Exception:
             continue
     if not parsed:
-        return await ctx.send("❌ No valid minute values found. Example: `1440 60 15`")
+        return await ctx.send("âŒ No valid minute values found. Example: `1440 60 15`")
     leads = sorted({max(1, min(10080, int(m))) for m in parsed}, reverse=True)
     reload_config_state()
     CFG["f1_reminder_leads_minutes"] = leads
     save_config(CFG)
-    await ctx.send(f"✅ F1 reminder leads set to: `{', '.join(str(x) for x in leads)}` minutes.")
+    await ctx.send(f"âœ… F1 reminder leads set to: `{', '.join(str(x) for x in leads)}` minutes.")
 
 @bot.command(name="circuit")
 async def circuit(ctx, *, name: str):
     key, info = _circuit_lookup(name)
     if not info:
-        return await ctx.send("❌ Circuit not found in local data. Try a GP/city/circuit name (e.g. `!circuit spa`).")
+        return await ctx.send("âŒ Circuit not found in local data. Try a GP/city/circuit name (e.g. `!circuit spa`).")
     race_distance = info.get("race_distance_km")
     if race_distance is None and info.get("length_km") and info.get("laps"):
         race_distance = round(float(info["length_km"]) * int(info["laps"]), 3)
     await ctx.send(
-        f"🏎️ **{key.title()}**\n"
+        f"ðŸŽï¸ **{key.title()}**\n"
         f"- Location: {info.get('location', 'Unknown')}, {info.get('country', 'Unknown')}\n"
         f"- Corners: **{info.get('corners', '?')}**\n"
         f"- Lap length: **{info.get('length_km', '?')} km**\n"
@@ -2451,72 +2770,59 @@ async def circuit(ctx, *, name: str):
 @bot.command(name="driverstats", aliases=["driver"])
 async def driverstats(ctx, *, query: str):
     try:
-        data = await asyncio.to_thread(_get_json_any, [ERGAST_DRIVER_URL, JOLPICA_DRIVER_URL], "driver standings")
+        rows = await _openf1_driver_standings_rows(limit=30)
     except Exception as e:
         logging.error(f"[F1] driverstats failed: {e}")
-        return await ctx.send("❌ Could not fetch driver standings.")
+        return await ctx.send("Could not fetch driver standings from OpenF1.")
 
-    standings_lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
-    if not standings_lists:
-        return await ctx.send("ℹ️ No driver standings available.")
-    rows = standings_lists[0].get("DriverStandings", [])
+    if not rows:
+        return await ctx.send("No driver standings available from OpenF1.")
+
     q = _clean_text_key(query)
     match = None
     for row in rows:
-        drv = row.get("Driver", {})
-        hay = " ".join(
-            str(x) for x in [
-                drv.get("driverId"), drv.get("code"), drv.get("givenName"), drv.get("familyName")
-            ] if x
-        )
+        hay = " ".join(str(x) for x in [row.get("name"), row.get("code"), row.get("driver_number"), row.get("team")] if x)
         if q in _clean_text_key(hay):
             match = row
             break
     if not match:
-        return await ctx.send("❌ Driver not found in current standings.")
+        return await ctx.send("Driver not found in current standings.")
 
-    drv = match.get("Driver", {})
-    constructor = (match.get("Constructors") or [{}])[0].get("name", "Unknown")
     await ctx.send(
-        f"👤 **{drv.get('givenName','')} {drv.get('familyName','')}** ({drv.get('code') or drv.get('driverId') or '?'})\n"
-        f"- Position: **P{match.get('position','?')}**\n"
-        f"- Points: **{match.get('points','0')}**\n"
-        f"- Wins: **{match.get('wins','0')}**\n"
-        f"- Team: **{constructor}**"
+        f"**{match.get('name', 'Unknown')}** ({match.get('code') or match.get('driver_number') or '?'})\n"
+        f"- Position: **P{match.get('position', '?')}**\n"
+        f"- Points: **{match.get('points', '0')}**\n"
+        f"- Wins: **{match.get('wins', 'N/A')}**\n"
+        f"- Team: **{match.get('team', 'Unknown')}**"
     )
 
 @bot.command(name="teamstats", aliases=["team"])
 async def teamstats(ctx, *, query: str):
     try:
-        data = await asyncio.to_thread(_get_json_any, [ERGAST_CONSTRUCTOR_URL, JOLPICA_CONSTRUCTOR_URL], "constructor standings")
+        rows = await _openf1_constructor_standings_rows(limit=20)
     except Exception as e:
         logging.error(f"[F1] teamstats failed: {e}")
-        return await ctx.send("❌ Could not fetch constructor standings.")
+        return await ctx.send("Could not fetch constructor standings from OpenF1.")
 
-    standings_lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
-    if not standings_lists:
-        return await ctx.send("ℹ️ No constructor standings available.")
-    rows = standings_lists[0].get("ConstructorStandings", [])
+    if not rows:
+        return await ctx.send("No constructor standings available from OpenF1.")
+
     q = _clean_text_key(query)
     match = None
     for row in rows:
-        c = row.get("Constructor", {})
-        hay = " ".join(str(x) for x in [c.get("constructorId"), c.get("name"), c.get("nationality")] if x)
+        hay = " ".join(str(x) for x in [row.get("name"), row.get("team_name"), row.get("nationality")] if x)
         if q in _clean_text_key(hay):
             match = row
             break
     if not match:
-        return await ctx.send("❌ Team not found in current standings.")
+        return await ctx.send("Team not found in current standings.")
 
-    c = match.get("Constructor", {})
     await ctx.send(
-        f"🏁 **{c.get('name','Unknown Team')}**\n"
-        f"- Position: **P{match.get('position','?')}**\n"
-        f"- Points: **{match.get('points','0')}**\n"
-        f"- Wins: **{match.get('wins','0')}**\n"
-        f"- Nationality: **{c.get('nationality','?')}**"
+        f"**{match.get('name', 'Unknown Team')}**\n"
+        f"- Position: **P{match.get('position', '?')}**\n"
+        f"- Points: **{match.get('points', '0')}**\n"
+        f"- Wins: **{match.get('wins', 'N/A')}**"
     )
-
 async def _prediction_round_context() -> Dict[str, Any]:
     try:
         meta = await current_or_next_round_meta()
@@ -2532,107 +2838,107 @@ async def _prediction_round_context() -> Dict[str, Any]:
 def _pred_entry_summary(entry: Dict[str, Any]) -> str:
     podium = entry.get("podium") or []
     sprint_podium = entry.get("sprint_podium") or []
-    podium_txt = " | ".join(str(x) for x in podium) if isinstance(podium, list) and podium else "—"
-    sprint_podium_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "—"
+    podium_txt = " | ".join(str(x) for x in podium) if isinstance(podium, list) and podium else "â€”"
+    sprint_podium_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "â€”"
     return (
-        f"- Pole: `{entry.get('pole') or '—'}`\n"
-        f"- Sprint Pole: `{entry.get('sprint_pole') or '—'}`\n"
+        f"- Pole: `{entry.get('pole') or 'â€”'}`\n"
+        f"- Sprint Pole: `{entry.get('sprint_pole') or 'â€”'}`\n"
         f"- Podium: `{podium_txt}`\n"
         f"- Sprint Podium: `{sprint_podium_txt}`\n"
-        f"- P10: `{entry.get('p10') or '—'}`"
+        f"- P10: `{entry.get('p10') or 'â€”'}`"
     )
 
 @bot.command(name="predictpole")
 async def predictpole(ctx, *, driver: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "pole"):
         return await ctx.send(
-            f"🔒 Pole predictions are locked for **{meta['race_name']}** "
+            f"ðŸ”’ Pole predictions are locked for **{meta['race_name']}** "
             f"(locked at Qualifying start: `{_prediction_category_lock_text(meta, 'pole')}`)."
         )
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["pole"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ Pole pick saved for **{meta['race_name']}**: `{entry['pole']}`")
+    await ctx.send(f"âœ… Pole pick saved for **{meta['race_name']}**: `{entry['pole']}`")
 
 @bot.command(name="predictsprintpole", aliases=["predictsppole"])
 async def predictsprintpole(ctx, *, driver: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     if "sprint_quali" not in req:
-        return await ctx.send(f"ℹ️ **{meta['race_name']}** does not appear to have a sprint qualifying/shootout session scheduled.")
+        return await ctx.send(f"â„¹ï¸ **{meta['race_name']}** does not appear to have a sprint qualifying/shootout session scheduled.")
     if _prediction_category_locked(meta, "sprint_pole"):
         return await ctx.send(
-            f"🔒 Sprint pole predictions are locked for **{meta['race_name']}** "
+            f"ðŸ”’ Sprint pole predictions are locked for **{meta['race_name']}** "
             f"(locked at Sprint Qualifying/Shootout start: `{_prediction_category_lock_text(meta, 'sprint_pole')}`)."
         )
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_pole"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ Sprint pole pick saved for **{meta['race_name']}**: `{entry['sprint_pole']}`")
+    await ctx.send(f"âœ… Sprint pole pick saved for **{meta['race_name']}**: `{entry['sprint_pole']}`")
 
 @bot.command(name="predictpodium")
 async def predictpodium(ctx, *, picks: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "podium"):
         return await ctx.send(
-            f"🔒 Podium predictions are locked for **{meta['race_name']}** "
+            f"ðŸ”’ Podium predictions are locked for **{meta['race_name']}** "
             f"(locked at Race start: `{_prediction_category_lock_text(meta, 'podium')}`)."
         )
     podium = _split_podium_picks(picks)
     if not podium:
-        return await ctx.send("❌ Use format: `!predictpodium Driver 1 | Driver 2 | Driver 3`")
+        return await ctx.send("âŒ Use format: `!predictpodium Driver 1 | Driver 2 | Driver 3`")
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["podium"] = podium
     _save_state_quiet()
-    await ctx.send(f"✅ Podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
+    await ctx.send(f"âœ… Podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
 
 @bot.command(name="predictsprintpodium", aliases=["predictsppodium"])
 async def predictsprintpodium(ctx, *, picks: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     if "sprint" not in req:
-        return await ctx.send(f"ℹ️ **{meta['race_name']}** does not appear to have a sprint race scheduled.")
+        return await ctx.send(f"â„¹ï¸ **{meta['race_name']}** does not appear to have a sprint race scheduled.")
     if _prediction_category_locked(meta, "sprint_podium"):
         return await ctx.send(
-            f"🔒 Sprint podium predictions are locked for **{meta['race_name']}** "
+            f"ðŸ”’ Sprint podium predictions are locked for **{meta['race_name']}** "
             f"(locked at Sprint start: `{_prediction_category_lock_text(meta, 'sprint_podium')}`)."
         )
     podium = _split_podium_picks(picks)
     if not podium:
-        return await ctx.send("❌ Use format: `!predictsprintpodium Driver 1 | Driver 2 | Driver 3`")
+        return await ctx.send("âŒ Use format: `!predictsprintpodium Driver 1 | Driver 2 | Driver 3`")
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_podium"] = podium
     _save_state_quiet()
-    await ctx.send(f"✅ Sprint podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
+    await ctx.send(f"âœ… Sprint podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
 
 @bot.command(name="predictp10")
 async def predictp10(ctx, *, driver: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "p10"):
         return await ctx.send(
-            f"🔒 P10 predictions are locked for **{meta['race_name']}** "
+            f"ðŸ”’ P10 predictions are locked for **{meta['race_name']}** "
             f"(locked at Race start: `{_prediction_category_lock_text(meta, 'p10')}`)."
         )
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["p10"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ P10 pick saved for **{meta['race_name']}**: `{entry['p10']}`")
+    await ctx.send(f"âœ… P10 pick saved for **{meta['race_name']}**: `{entry['p10']}`")
 
 @bot.command(name="mypredictions")
 async def mypredictions(ctx):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
@@ -2647,7 +2953,7 @@ async def mypredictions(ctx):
     if sprint_podium_locked is not None:
         extra_lock_lines += f"- Sprint podium locked: `{sprint_podium_locked}`\n"
     await ctx.send(
-        f"📝 **Your predictions** for **{meta['race_name']}** (`{meta['key']}`)\n"
+        f"ðŸ“ **Your predictions** for **{meta['race_name']}** (`{meta['key']}`)\n"
         f"- Pole locked: `{pole_locked}`\n"
         + extra_lock_lines +
         f"- Podium locked: `{podium_locked}`\n"
@@ -2660,7 +2966,7 @@ async def predictions(ctx):
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     lines = [
-        f"📋 **Predictions** for **{meta['race_name']}** (`{meta['key']}`)",
+        f"ðŸ“‹ **Predictions** for **{meta['race_name']}** (`{meta['key']}`)",
         "- `!predictpole <driver>` (locks at Qualifying start)",
         "- `!predictpodium A | B | C` (locks at Race start)",
         "- `!predictp10 <driver>` (locks at Race start)",
@@ -2675,7 +2981,7 @@ async def predictions(ctx):
 @bot.command(name="predictionsboard", aliases=["predboard"])
 async def predictionsboard(ctx):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     rnd = _pred_round_obj(meta["key"])
     req = _prediction_session_requirements(meta)
@@ -2686,14 +2992,14 @@ async def predictionsboard(ctx):
         categories.append("sprint_podium")
     guild_entries = ((rnd.get("entries") or {}).get(str(ctx.guild.id)) or {})
     if not guild_entries:
-        return await ctx.send(f"ℹ️ No predictions submitted yet for **{meta['race_name']}**.")
+        return await ctx.send(f"â„¹ï¸ No predictions submitted yet for **{meta['race_name']}**.")
     lines = []
     for uid, entry in list(guild_entries.items())[:20]:
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
         filled = sum(1 for k in categories if entry.get(k))
-        lines.append(f"• {name} — {filled}/{len(categories)} picks")
-    await ctx.send(f"📋 **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines))
+        lines.append(f"â€¢ {name} â€” {filled}/{len(categories)} picks")
+    await ctx.send(f"ðŸ“‹ **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines))
 
 @bot.hybrid_command(name="predictionslock")
 @commands.has_permissions(administrator=True)
@@ -2702,7 +3008,7 @@ async def predictionslock(ctx):
     rnd = _pred_round_obj(meta["key"])
     rnd["locked"] = True
     _save_state_quiet()
-    await ctx.send(f"🔒 Predictions locked for **{meta['race_name']}** (`{meta['key']}`).")
+    await ctx.send(f"ðŸ”’ Predictions locked for **{meta['race_name']}** (`{meta['key']}`).")
 
 @bot.hybrid_command(name="predictionsunlock")
 @commands.has_permissions(administrator=True)
@@ -2711,13 +3017,13 @@ async def predictionsunlock(ctx):
     rnd = _pred_round_obj(meta["key"])
     rnd["locked"] = False
     _save_state_quiet()
-    await ctx.send(f"🔓 Predictions unlocked for **{meta['race_name']}** (`{meta['key']}`).")
+    await ctx.send(f"ðŸ”“ Predictions unlocked for **{meta['race_name']}** (`{meta['key']}`).")
 
 @bot.command(name="predictionsetresult")
 @commands.has_permissions(administrator=True)
 async def predictionsetresult(ctx, category: str, *, value: str):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     category = (category or "").lower().strip()
     category = {
         "sprintpole": "sprint_pole",
@@ -2737,17 +3043,17 @@ async def predictionsetresult(ctx, category: str, *, value: str):
     elif category == "podium":
         podium = _split_podium_picks(value)
         if not podium:
-            return await ctx.send("❌ Podium format: `!predictionsetresult podium Driver 1 | Driver 2 | Driver 3`")
+            return await ctx.send("âŒ Podium format: `!predictionsetresult podium Driver 1 | Driver 2 | Driver 3`")
         actual["podium"] = podium
     elif category == "sprint_pole":
         actual["sprint_pole"] = _normalize_driver_pick(value)
     elif category == "sprint_podium":
         podium = _split_podium_picks(value)
         if not podium:
-            return await ctx.send("❌ Sprint podium format: `!predictionsetresult sprint_podium Driver 1 | Driver 2 | Driver 3`")
+            return await ctx.send("âŒ Sprint podium format: `!predictionsetresult sprint_podium Driver 1 | Driver 2 | Driver 3`")
         actual["sprint_podium"] = podium
     else:
-        return await ctx.send("❌ Category must be `pole`, `podium`, `p10`, `sprint_pole`, or `sprint_podium`.")
+        return await ctx.send("âŒ Category must be `pole`, `podium`, `p10`, `sprint_pole`, or `sprint_podium`.")
     rnd["scored"] = False  # legacy field, kept for compatibility
     scored_map = _pred_scored_sessions_for_guild(rnd, ctx.guild.id)
     scored_map.pop(_prediction_category_session(category), None)
@@ -2759,13 +3065,13 @@ async def predictionsetresult(ctx, category: str, *, value: str):
     except Exception as e:
         logging.error(f"[Predict] auto score announce failed for {session_key}: {e}")
     if not auto_posted:
-        await ctx.send(f"✅ Saved `{category}` result for **{meta['race_name']}**.")
+        await ctx.send(f"âœ… Saved `{category}` result for **{meta['race_name']}**.")
 
 @bot.command(name="predictionscore")
 @commands.has_permissions(administrator=True)
 async def predictionscore(ctx, session: str = "auto"):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     meta = await _prediction_round_context()
     rnd = _pred_round_obj(meta["key"])
     req = _prediction_session_requirements(meta)
@@ -2783,7 +3089,7 @@ async def predictionscore(ctx, session: str = "auto"):
     }
     wanted = alias_map.get(wanted, wanted)
     if wanted not in {"auto", "all", "quali", "sprint_quali", "sprint", "race"}:
-        return await ctx.send("❌ Use `!predictionscore [auto|all|quali|sprint_quali|sprint|race]`")
+        return await ctx.send("âŒ Use `!predictionscore [auto|all|quali|sprint_quali|sprint|race]`")
 
     session_keys = list(req.keys()) if wanted in {"auto", "all"} else [wanted]
     did_any = False
@@ -2799,22 +3105,22 @@ async def predictionscore(ctx, session: str = "auto"):
         posted = await _announce_prediction_session_scores(ctx, meta, sk)
         did_any = did_any or posted
     if not did_any:
-        await ctx.send("ℹ️ No scoreable prediction sessions yet (missing actuals or already scored).")
+        await ctx.send("â„¹ï¸ No scoreable prediction sessions yet (missing actuals or already scored).")
 
 @bot.command(name="predictionleaderboard", aliases=["fantasypoints", "predictlb"])
 async def predictionleaderboard(ctx):
     if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
+        return await ctx.send("âŒ This must be used in a server.")
     totals = _pred_totals_for_guild(ctx.guild.id)
     if not totals:
-        return await ctx.send("ℹ️ No prediction points yet.")
+        return await ctx.send("â„¹ï¸ No prediction points yet.")
     rows = sorted(((int(v), uid) for uid, v in totals.items()), reverse=True)[:20]
     lines = []
     for rank_i, (pts, uid) in enumerate(rows, start=1):
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
-        lines.append(f"{rank_i:>2}. {name} — **{pts} pts**")
-    await ctx.send("🏆 **Prediction Leaderboard (Fantasy Points)**\n" + "\n".join(lines))
+        lines.append(f"{rank_i:>2}. {name} â€” **{pts} pts**")
+    await ctx.send("ðŸ† **Prediction Leaderboard (Fantasy Points)**\n" + "\n".join(lines))
 
 # ----------------------------
 # Reaction role handlers + periodic recovery
@@ -3049,7 +3355,7 @@ async def on_message(message: discord.Message):
                 if new_level > current_level:
                     # lightweight level-up ping
                     try:
-                        await message.channel.send(f"✨ {message.author.mention} leveled up to **Level {new_level}**!")
+                        await message.channel.send(f"âœ¨ {message.author.mention} leveled up to **Level {new_level}**!")
                     except Exception:
                         pass
 
@@ -3091,8 +3397,6 @@ RACE_LIVE_DEBUG: Dict[int, deque] = {}
 RACE_LIVE_POSTED_SIGS: Dict[int, set] = {}
 RACE_LIVE_POSTED_SIGS_ORDER: Dict[int, deque] = {}
 
-OPENF1_BASE = "https://api.openf1.org/v1"
-
 def _racelog(gid: int, msg: str) -> None:
     buf = RACE_LIVE_DEBUG.setdefault(gid, deque(maxlen=200))
     ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -3120,12 +3424,23 @@ def _race_sig_seen_or_add(gid: int, sig: str) -> bool:
 
 async def _openf1_get(http: aiohttp.ClientSession, endpoint: str, params: Dict[str, Any]) -> Any:
     url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
-    async with http.get(url, params=params, timeout=aiohttp.ClientTimeout(total=20)) as r:
-        if r.status in (401, 403):
-            text = await r.text()
-            raise RuntimeError(f"OpenF1 auth error {r.status}: {text[:200]}")
-        r.raise_for_status()
-        return await r.json()
+    for attempt in range(2):
+        force_refresh = bool(attempt == 1)
+        async with http.get(
+            url,
+            params=params,
+            headers=_openf1_auth_headers(force_refresh=force_refresh),
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as r:
+            if r.status in (401, 403):
+                if attempt == 0:
+                    await r.read()
+                    continue
+                text = await r.text()
+                raise RuntimeError(f"OpenF1 auth error {r.status}: {text[:200]}")
+            r.raise_for_status()
+            return await r.json()
+    raise RuntimeError("OpenF1 auth retry exhausted.")
 
 def _session_type_upper(s: Dict[str, Any]) -> str:
     return str(s.get("session_type") or s.get("session_name") or "").upper().strip()
@@ -3352,7 +3667,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
     poll_s = max(1.0, min(15.0, poll_s))
 
     _racelog(gid, f"race_live_loop started (session_key={session_key}, poll={poll_s}s)")
-    await thread.send(f"📡 Live follower attached. `session_key={session_key}`")
+    await thread.send(f"ðŸ“¡ Live follower attached. `session_key={session_key}`")
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         while RACE_LIVE_ENABLED.get(gid, False):
@@ -3370,7 +3685,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                     sig = f"{dt}|{msg}"
                     if _race_sig_seen_or_add(gid, sig):
                         continue
-                    await thread.send(f"🏁 {msg}")
+                    await thread.send(f"ðŸ {msg}")
 
                 await asyncio.sleep(poll_s)
 
@@ -3478,7 +3793,7 @@ async def racelivekill(ctx):
 
     tail = _racetail(gid, 20)
     logging.warning(f"[RaceLive][{gid}] KILL SWITCH. Tail:\n{tail}")
-    await ctx.send("🛑 **Race live killed.**\n```text\n" + tail[:1800] + "\n```")
+    await ctx.send("ðŸ›‘ **Race live killed.**\n```text\n" + tail[:1800] + "\n```")
 
 @bot.hybrid_command(name="racelivetail", aliases=["race_live_tail"])
 @commands.has_permissions(administrator=True)
@@ -3575,7 +3890,7 @@ async def racelivestart(ctx):
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         latest = await _openf1_get(http, "sessions", {"session_key": "latest"})
         if not latest:
-            return await ctx.send("❌ No OpenF1 sessions available right now.")
+            return await ctx.send("âŒ No OpenF1 sessions available right now.")
         session_key = int(latest[0].get("session_key"))
 
     round_meta = await current_or_next_round_meta()
@@ -3596,7 +3911,7 @@ async def racelivestart(ctx):
             _racelog(gid, f"FATAL {type(e).__name__}: {e}")
 
     RACE_LIVE_TASKS[gid] = asyncio.create_task(runner())
-    await ctx.send(f"✅ Started race live manually (session_key={session_key}).")
+    await ctx.send(f"âœ… Started race live manually (session_key={session_key}).")
 
 @bot.hybrid_command(name="racelivestop", aliases=["race_live_stop"])
 @commands.has_permissions(administrator=True)
@@ -3616,7 +3931,7 @@ async def racelivestop(ctx):
         _set_race_thread_weekend_state(stopped_round, gid, "past")
         RACE_LIVE_ROUND_KEYS.pop(gid, None)
 
-    await ctx.send("🛑 Race live stopped.")
+    await ctx.send("ðŸ›‘ Race live stopped.")
 
 # ============================================================
 # Race Test Harness (Fake Scenarios)
@@ -3658,20 +3973,20 @@ DEFAULT_RACE_SCENARIOS: Dict[str, Dict[str, Any]] = {
 }
 
 EVENT_STYLE = {
-    "SESSION_START": ("🟦", "**Session started**"),
-    "SESSION_END":   ("🏁", "**Session ended**"),
-    "GREEN":         ("🟢", "**GREEN**"),
-    "SC":            ("🟡", "**SAFETY CAR**"),
-    "VSC":           ("🟠", "**VSC**"),
-    "RED":           ("🔴", "**RED FLAG**"),
-    "YELLOW":         ("🟡", "**YELLOW**"),
-    "SEGMENT_START":  ("🟦", "**Segment started**"),
-    "SEGMENT_END":    ("⬛", "**Segment ended**"),
-    "PURPLE_SECTOR":  ("🟣", "**Purple sector**"),
-    "CHECKERED_FLAG": ("🏁", "**CHEQUERED FLAG**"),
-    "CLASSIFICATION_READY": ("📊", "**Classification ready**"),
-    "RESULTS_READY":  ("📊", "**Results ready**"),
-    "INFO":          ("ℹ️", "**Info**"),
+    "SESSION_START": ("ðŸŸ¦", "**Session started**"),
+    "SESSION_END":   ("ðŸ", "**Session ended**"),
+    "GREEN":         ("ðŸŸ¢", "**GREEN**"),
+    "SC":            ("ðŸŸ¡", "**SAFETY CAR**"),
+    "VSC":           ("ðŸŸ ", "**VSC**"),
+    "RED":           ("ðŸ”´", "**RED FLAG**"),
+    "YELLOW":         ("ðŸŸ¡", "**YELLOW**"),
+    "SEGMENT_START":  ("ðŸŸ¦", "**Segment started**"),
+    "SEGMENT_END":    ("â¬›", "**Segment ended**"),
+    "PURPLE_SECTOR":  ("ðŸŸ£", "**Purple sector**"),
+    "CHECKERED_FLAG": ("ðŸ", "**CHEQUERED FLAG**"),
+    "CLASSIFICATION_READY": ("ðŸ“Š", "**Classification ready**"),
+    "RESULTS_READY":  ("ðŸ“Š", "**Results ready**"),
+    "INFO":          ("â„¹ï¸", "**Info**"),
 }
 
 def _scenario_meta(scenario: Dict[str, Any]) -> Dict[str, Any]:
@@ -3712,11 +4027,11 @@ def _format_race_classification(scenario: Dict[str, Any]) -> str:
         reason = str(r.get("reason") or "").strip()
 
         if status == "DNF":
-            tail = f"DNF" + (f" — {reason}" if reason else "")
+            tail = f"DNF" + (f" â€” {reason}" if reason else "")
         else:
             tail = str(gap) if gap is not None else (status or "")
 
-        lines.append(f"{int(pos):>2}. {name} — {tail}" if pos is not None else f"- {name} — {tail}")
+        lines.append(f"{int(pos):>2}. {name} â€” {tail}" if pos is not None else f"- {name} â€” {tail}")
 
     if not lines:
         return "No classification data."
@@ -3737,16 +4052,16 @@ def _format_quali_classification(scenario: Dict[str, Any]) -> str:
         gap = str(r.get("gap") or "").strip()
         status = str(r.get("status") or "").upper().strip()
 
-        tail = best if best else "—"
+        tail = best if best else "â€”"
         if gap and gap != "0.000":
             tail += f" ({gap})"
         if status in ("POLE", "OUT"):
-            tail += f" — {status}"
+            tail += f" â€” {status}"
         note = str(r.get("note") or "").strip()
         if note:
-            tail += f" — {note}"
+            tail += f" â€” {note}"
 
-        lines.append(f"{int(pos):>2}. {name} — {tail}" if pos is not None else f"- {name} — {tail}")
+        lines.append(f"{int(pos):>2}. {name} â€” {tail}" if pos is not None else f"- {name} â€” {tail}")
 
     if not lines:
         return "No qualifying results data."
@@ -3822,7 +4137,7 @@ def _format_quali_knockouts(scenario: Dict[str, Any], knocked_in: str) -> str:
     knocked.sort(key=lambda x: x[0])
     lines = []
     for pos, name, note in knocked:
-        tail = f" — {note}" if note else ""
+        tail = f" â€” {note}" if note else ""
         lines.append(f"P{pos} {name}{tail}")
     return "\n".join(lines)
 
@@ -3848,7 +4163,7 @@ async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[disc
         if isinstance(ch, discord.ForumChannel):
             created = await ch.create_thread(
                 name=title,
-                content=f"🧪 Race test thread created by {bot.user.mention}",
+                content=f"ðŸ§ª Race test thread created by {bot.user.mention}",
                 auto_archive_duration=1440,
             )
             if isinstance(created, tuple) and len(created) >= 1:
@@ -3859,7 +4174,7 @@ async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[disc
 
     try:
         if isinstance(ch, discord.TextChannel):
-            msg = await ch.send(f"🧪 Race test thread: **{title}**")
+            msg = await ch.send(f"ðŸ§ª Race test thread: **{title}**")
             th = await msg.create_thread(name=title, auto_archive_duration=1440)
             return th
     except Exception as e:
@@ -3869,7 +4184,7 @@ async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[disc
 
 async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], event: Dict[str, Any], grid_map: Dict[str, str]) -> None:
     etype = (event.get("type") or "INFO").upper().strip()
-    emoji, label = EVENT_STYLE.get(etype, ("ℹ️", "**Info**"))
+    emoji, label = EVENT_STYLE.get(etype, ("â„¹ï¸", "**Info**"))
 
     scenario_session = _scenario_session(scenario)
     ev_session = str(event.get("session") or "").strip()
@@ -3884,7 +4199,7 @@ async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], eve
         sec_txt = f"S{sector}" if sector is not None else "sector"
         text = f"{emoji} {name} sets purple {sec_txt}{seg_txt}"
         if lap:
-            text += f" — {lap}"
+            text += f" â€” {lap}"
         await thread.send(text)
         return
 
@@ -3909,14 +4224,14 @@ async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], eve
         session_type = scenario_session
         if session_type == "RACE" and etype == "CLASSIFICATION_READY":
             body = _format_race_classification(scenario)
-            await thread.send(_wrap_spoiler("📊 Race Classification\n" + body))
+            await thread.send(_wrap_spoiler("ðŸ“Š Race Classification\n" + body))
         elif session_type in ("QUALI", "QUALIFYING") and etype == "RESULTS_READY":
             body = _format_quali_classification(scenario)
-            await thread.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
+            await thread.send(_wrap_spoiler("ðŸ“Š Qualifying Results\n" + body))
 
     if etype == "SEGMENT_END" and scenario_session in ("QUALI", "QUALIFYING") and segment in ("Q1", "Q2"):
         body = _format_quali_knockouts(scenario, segment)
-        await thread.send(_wrap_spoiler(f"🚫 {segment} Knockouts\n{body}"))
+        await thread.send(_wrap_spoiler(f"ðŸš« {segment} Knockouts\n{body}"))
 
 async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, speed: float = 1.0) -> None:
     scenarios = _load_race_scenarios()
@@ -3943,7 +4258,7 @@ async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, spee
         raise RuntimeError("Could not create or access the race forum/thread. Check RACE_FORUM_CHANNEL_ID and bot perms.")
 
     events_sorted = sorted(events, key=lambda e: float(e.get("t", 0)))
-    await thread.send(f"🧪 Starting scenario: **{scenario_name}**\nSpeed: **x{speed}**")
+    await thread.send(f"ðŸ§ª Starting scenario: **{scenario_name}**\nSpeed: **x{speed}**")
 
     last_t = float(events_sorted[0].get("t", 0))
     for ev in events_sorted:
@@ -3957,8 +4272,8 @@ async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, spee
         await _emit_race_event(thread, scenario, ev, grid_map)
 
     recap = _race_event_recap(events_sorted)
-    await thread.send("✅ Scenario complete.")
-    await thread.send("📦 **Session Recap**\n" + recap)
+    await thread.send("âœ… Scenario complete.")
+    await thread.send("ðŸ“¦ **Session Recap**\n" + recap)
 
 def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
     scenarios = _load_race_scenarios()
@@ -3978,7 +4293,7 @@ def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
 async def racetestlist(ctx):
     scenarios = _load_race_scenarios()
     names = sorted(scenarios.keys())
-    await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
+    await ctx.send("ðŸ§ª **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
 
 @bot.command(name="racetestinfo", aliases=["race_test_info"])
 @commands.has_permissions(administrator=True)
@@ -3986,7 +4301,7 @@ async def racetestinfo(ctx, scenario: str):
     try:
         name, sc = _resolve_scenario(scenario)
     except Exception as e:
-        await ctx.send(f"❌ {e}")
+        await ctx.send(f"âŒ {e}")
         return
 
     title = _scenario_title(sc, fallback=name)
@@ -3997,7 +4312,7 @@ async def racetestinfo(ctx, scenario: str):
     has_cls = bool((sc.get("classification") or {}).get("results"))
 
     await ctx.send(
-        "🧪 **Scenario info**\n"
+        "ðŸ§ª **Scenario info**\n"
         f"- **Key:** `{name}`\n"
         f"- **Title:** {title}\n"
         f"- **Session:** `{session_type}`\n"
@@ -4013,25 +4328,25 @@ async def racetestresults(ctx, scenario: str):
     try:
         name, sc = _resolve_scenario(scenario)
     except Exception as e:
-        await ctx.send(f"❌ {e}")
+        await ctx.send(f"âŒ {e}")
         return
 
     session_type = _scenario_session(sc)
     if session_type == "RACE":
         body = _format_race_classification(sc)
-        await ctx.send(_wrap_spoiler("📊 Race Classification\n" + body))
+        await ctx.send(_wrap_spoiler("ðŸ“Š Race Classification\n" + body))
     elif session_type in ("QUALI", "QUALIFYING"):
         body = _format_quali_classification(sc)
-        await ctx.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
+        await ctx.send(_wrap_spoiler("ðŸ“Š Qualifying Results\n" + body))
     else:
-        await ctx.send(f"ℹ️ Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
+        await ctx.send(f"â„¹ï¸ Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
 
 @bot.command(name="raceteststart", aliases=["race_test_start"])
 @commands.has_permissions(administrator=True)
 async def raceteststart(ctx, scenario: str = None, speed: float = None):
     guild = ctx.guild
     if not guild:
-        await ctx.send("❌ Must be run in a server.")
+        await ctx.send("âŒ Must be run in a server.")
         return
 
     scenario = (scenario or os.getenv("RACE_TEST_DEFAULT_SCENARIO") or "practice_short").strip()
@@ -4055,14 +4370,14 @@ async def raceteststart(ctx, scenario: str = None, speed: float = None):
         except Exception as e:
             logging.error(f"[RaceTest] Scenario '{scenario}' failed: {e}")
             try:
-                await ctx.send(f"❌ Race test failed: {e}")
+                await ctx.send(f"âŒ Race test failed: {e}")
             except Exception:
                 pass
 
     task = asyncio.create_task(runner())
     RACE_TEST_TASKS[guild.id] = task
 
-    await ctx.send(f"🧪 Starting race test: `{scenario}` (speed x{speed})")
+    await ctx.send(f"ðŸ§ª Starting race test: `{scenario}` (speed x{speed})")
 
 @bot.command(name="raceteststop", aliases=["race_test_stop"])
 @commands.has_permissions(administrator=True)
@@ -4073,13 +4388,14 @@ async def raceteststop(ctx):
     t = RACE_TEST_TASKS.get(guild.id)
     if t and not t.done():
         t.cancel()
-        await ctx.send("🛑 Race test stopped.")
+        await ctx.send("ðŸ›‘ Race test stopped.")
     else:
-        await ctx.send("ℹ️ No race test running.")
+        await ctx.send("â„¹ï¸ No race test running.")
 
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 if not bot_token:
     raise RuntimeError("DISCORD_BOT_TOKEN is missing. Put it in your .env file.")
 
 bot.run(bot_token)
+
 
