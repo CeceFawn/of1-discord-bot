@@ -1097,12 +1097,12 @@ async def _announce_prediction_session_scores(ctx, meta: Dict[str, Any], session
 
     label = _prediction_session_labels().get(session_key, session_key)
     if rows:
-        body = "\n".join(f"â€¢ {name} â€” **+{pts}** pts" for pts, name in rows)
+        body = "\n".join(f"• {name} — **+{pts}** pts" for pts, name in rows)
     else:
         body = "No predictions were submitted."
-    msg = f"ðŸ§® **{meta['race_name']} â€” {label} Prediction Points** (spoiler-safe)\n{body}"
+    msg = f"🧮 **{meta['race_name']} — {label} Prediction Points** (spoiler-safe)\n{body}"
     if len(msg) > 1900:
-        msg = msg[:1850] + "\nâ€¦ (truncated)"
+        msg = msg[:1850] + "\n… (truncated)"
     await ctx.send(msg)
     return True
 
@@ -1247,7 +1247,7 @@ def _quiz_learn_answer_variant(question_key: str, user_answer: str) -> bool:
         return False
 
 async def _quiz_process_reaction_override(payload: discord.RawReactionActionEvent) -> bool:
-    if str(payload.emoji) != "ðŸŸ¢":
+    if str(payload.emoji) != "🟢":
         return False
     pending = F1_QUIZ_PENDING_OVERRIDES.get(payload.message_id)
     if not pending:
@@ -1318,15 +1318,15 @@ async def _quiz_process_reaction_override(payload: discord.RawReactionActionEven
                 bot_reply = await channel.fetch_message(reply_id)
                 await bot_reply.edit(
                     content=(
-                        f"âœ… Correct, <@{user_id}>! (fixed) "
-                        f"({category.replace('_', ' ').title()} Â· {difficulty.title()}) "
+                        f"✅ Correct, <@{user_id}>! (fixed) "
+                        f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
                         f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
                     )
                 )
             else:
                 await channel.send(
-                    f"âœ… Correct, <@{user_id}>! (fixed) "
-                    f"({category.replace('_', ' ').title()} Â· {difficulty.title()}) "
+                    f"✅ Correct, <@{user_id}>! (fixed) "
+                    f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
                     f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
                 )
         except Exception as e:
@@ -1836,7 +1836,7 @@ async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
 
     try:
         await message.author.send(
-            f"ðŸš« You need **level {need}** to talk in **#{message.channel.name}**.\n"
+            f"🚫 You need **level {need}** to talk in **#{message.channel.name}**.\n"
             f"You're currently **level {user_level}**."
         )
     except Exception:
@@ -1889,9 +1889,9 @@ async def xpleaderboard(ctx, limit: int = 10):
         name = member.display_name if member else f"<@{uid}>"
         # Recompute level in case someone edited XP manually
         real_lvl = xp_level_from_total(xp)
-        lines.append(f"{i:>2}. {name} â€” **L{real_lvl}** ({xp} XP)")
+        lines.append(f"{i:>2}. {name} — **L{real_lvl}** ({xp} XP)")
 
-    await ctx.send("ðŸ† **XP Leaderboard**\n" + "\n".join(lines))
+    await ctx.send("\U0001F3C6 **XP Leaderboard**\n" + "\n".join(lines))
 
 @bot.hybrid_command(name="xpset")
 @commands.has_permissions(administrator=True)
@@ -1903,7 +1903,7 @@ async def xpset(ctx, member: discord.Member, xp: int):
     lvl = xp_level_from_total(xp)
     set_user_xp_level(XP_STATE, ctx.guild.id, member.id, xp=xp, level=lvl)
     _xp_mark_dirty()
-    await ctx.send(f"âœ… Set {member.display_name} to {xp} XP (L{lvl}).")
+    await ctx.send(f"✅ Set {member.display_name} to {xp} XP (L{lvl}).")
 
 @bot.hybrid_command(name="xpreset")
 @commands.has_permissions(administrator=True)
@@ -1917,7 +1917,7 @@ async def xpreset(ctx, member: discord.Member):
     rec["last_msg_ts"] = 0
     rec["messages"] = 0
     _xp_mark_dirty()
-    await ctx.send(f"âœ… Reset XP for {member.display_name}.")
+    await ctx.send(f"✅ Reset XP for {member.display_name}.")
 
 @bot.hybrid_command(name="xpaudit")
 @commands.has_permissions(administrator=True)
@@ -1944,14 +1944,14 @@ async def xpaudit(ctx, member: discord.Member = None):
     delta_vs_est = total_xp - est_from_awards
 
     body = (
-        f"ðŸ”Ž **XP Audit** for {member.mention}\n"
+        f"🔎 **XP Audit** for {member.mention}\n"
         f"- Level (stored/recomputed): **L{int(rec.get('level', 0) or 0)} / L{level}**\n"
         f"- Total XP: **{total_xp}**\n"
         f"- Progress in level: **{xp_in_level}/{xp_next}** (level calc = L{lvl_progress})\n"
         f"- Awarded message events (XP-state counter): **{messages_awarded}**\n"
         f"- Last XP-awarding message timestamp: `{last_seen_txt}`\n"
         f"- Current cooldown: **{cd}s**\n"
-        f"- Current gain range: **{mn}â€“{mx} XP** (avg ~ {avg_gain:.1f})\n"
+        f"- Current gain range: **{mn}–{mx} XP** (avg ~ {avg_gain:.1f})\n"
         f"- Estimated XP from awarded-message count at avg gain: **~{est_from_awards}**\n"
         f"- Delta vs estimate: **{delta_vs_est:+}**\n"
         "_Note: `messages` here is XP-awarding events after cooldown, not total Discord messages._"
@@ -1972,7 +1972,7 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
         return await ctx.send("âŒ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
     if (confirm or "").strip().upper() != "CONFIRM":
         return await ctx.send(
-            "âš ï¸ This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
+            "\u26A0\uFE0F This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
             "Run: `!xpbackfillhistory rebuild CONFIRM`"
         )
 
@@ -1982,14 +1982,14 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
         summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=skip_message_id)
         await status_msg.edit(
             content=(
-                "âœ… Silent XP backfill complete.\n"
+                "✅ Silent XP backfill complete.\n"
                 f"- Users updated: **{summary['users_updated']}**\n"
                 f"- Messages scanned: **{summary['messages_scanned']}**\n"
                 f"- Awarded XP events (after cooldown): **{summary['eligible_awards']}**\n"
                 f"- Channels scanned: **{summary['channels_scanned']}**\n"
                 f"- Channels skipped: **{summary['channels_skipped']}**\n"
                 f"- Cooldown used: **{summary['cooldown_seconds']}s**\n"
-                f"- XP gain range used: **{summary['xp_min_gain']}â€“{summary['xp_max_gain']}**\n"
+                f"- XP gain range used: **{summary['xp_min_gain']}–{summary['xp_max_gain']}**\n"
                 "_No level-up messages were posted during this rebuild._"
             )
         )
@@ -2011,7 +2011,7 @@ async def xpgate(ctx, channel: discord.TextChannel, level: int):
     CFG["xp_min_level_channels"] = mapping
     save_config(CFG)
 
-    await ctx.send(f"âœ… Set **#{channel.name}** minimum level to **{level}**.")
+    await ctx.send(f"✅ Set **#{channel.name}** minimum level to **{level}**.")
 
 @bot.hybrid_command(name="xpgateclear")
 @commands.has_permissions(administrator=True)
@@ -2027,7 +2027,7 @@ async def xpgateclear(ctx, channel: discord.TextChannel):
     CFG["xp_min_level_channels"] = mapping
     save_config(CFG)
 
-    await ctx.send(f"âœ… Cleared min-level gate for **#{channel.name}**.")
+    await ctx.send(f"✅ Cleared min-level gate for **#{channel.name}**.")
 
 # ----------------------------
 # Commands: config tools
@@ -2038,7 +2038,7 @@ async def configreload(ctx):
     """Reload config.json + state.json without restarting the bot."""
     reload_config_state()
     load_f1_static_data()
-    await ctx.send("âœ… Reloaded config.json, state.json, and F1 data files.")
+    await ctx.send("✅ Reloaded config.json, state.json, and F1 data files.")
 
 # ----------------------------
 # Commands: reaction role setup
@@ -2051,7 +2051,7 @@ async def setupnotifications(ctx):
         await ctx.send("âŒ No reaction_roles configured in config.json.")
         return
 
-    description = "ðŸ“° **Get notified!**\nReact to opt in to pingable news roles."
+    description = "📰 **Get notified!**\nReact to opt in to pingable news roles."
     for emoji, role in roles.items():
         description += f"\n{emoji} â†’ `{role}`"
 
@@ -2061,7 +2061,7 @@ async def setupnotifications(ctx):
     write_reaction_panel_state("notifications", ctx.channel.id, msg.id)
 
     logging.info(f"[Notification Roles] Setup complete (Message ID: {msg.id})")
-    await ctx.send(f"âœ… Notifications setup message created: `{msg.id}`")
+    await ctx.send(f"✅ Notifications setup message created: `{msg.id}`")
 
 @bot.hybrid_command(name="setupcolors", aliases=["setup_colors"])
 @commands.has_permissions(administrator=True)
@@ -2071,7 +2071,7 @@ async def setupcolors(ctx):
         await ctx.send("âŒ No color_roles configured in config.json.")
         return
 
-    description = "ðŸŽ¨ **Choose your name color!**\nReact with an emoji to get a matching role. Only one color can be active at a time."
+    description = "🎨 **Choose your name color!**\nReact with an emoji to get a matching role. Only one color can be active at a time."
     for emoji, role in roles.items():
         description += f"\n{emoji} â†’ `{role}`"
 
@@ -2081,7 +2081,7 @@ async def setupcolors(ctx):
     write_reaction_panel_state("colors", ctx.channel.id, msg.id)
 
     logging.info(f"[Color Roles] Setup complete (Message ID: {msg.id})")
-    await ctx.send(f"âœ… Colors setup message created: `{msg.id}`")
+    await ctx.send(f"✅ Colors setup message created: `{msg.id}`")
 
 @bot.hybrid_command(name="setupdrivers", aliases=["setup_drivers"])
 @commands.has_permissions(administrator=True)
@@ -2100,7 +2100,7 @@ async def setupdrivers(ctx):
         await ctx.send("âŒ No driver_emoji_names configured in config.json.")
         return
 
-    description = "ðŸŽ **Choose your favorite F1 driver!**\nReact to get a fan role:"
+    description = "\U0001F3CE\uFE0F **Choose your favorite F1 driver!**\nReact to get a fan role:"
     emoji_to_role: Dict[str, str] = {}
     missing = []
 
@@ -2114,7 +2114,7 @@ async def setupdrivers(ctx):
             missing.append(emoji_name)
 
     if missing:
-        await ctx.send("âš ï¸ Missing custom emojis: " + ", ".join(missing))
+        await ctx.send("\u26A0\uFE0F Missing custom emojis: " + ", ".join(missing))
 
     msg = await ctx.send(description)
     for emoji_str in emoji_to_role.keys():
@@ -2123,7 +2123,7 @@ async def setupdrivers(ctx):
     write_state_driver_map(channel_id=ctx.channel.id, message_id=msg.id, emoji_to_role=emoji_to_role)
 
     logging.info(f"[Driver Roles] Setup complete (Channel {ctx.channel.id}, Message {msg.id})")
-    await ctx.send(f"âœ… Driver roles message created and saved to state.json: `{msg.id}`")
+    await ctx.send(f"✅ Driver roles message created and saved to state.json: `{msg.id}`")
 
 # ----------------------------
 # Commands: instagram quick check
@@ -2133,7 +2133,7 @@ async def setupdrivers(ctx):
 async def instacheck(ctx, username: str = "of1.official"):
     post_url = await asyncio.to_thread(fetch_latest_instagram_post, username)
     if post_url:
-        await ctx.send(f"ðŸ“¸ Latest Instagram post from `{username}`:\n{post_url}")
+        await ctx.send(f"📸 Latest Instagram post from `{username}`:\n{post_url}")
     else:
         await ctx.send("âŒ Could not retrieve the latest Instagram post.")
 
@@ -2150,10 +2150,10 @@ async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
     try:
         msg = await channel.fetch_message(message_id)
         if msg.author != bot.user:
-            await ctx.send("âš ï¸ I can only edit my own messages.")
+            await ctx.send("\u26A0\uFE0F I can only edit my own messages.")
             return
         await msg.edit(content=new_text)
-        await ctx.send("âœ… Message updated.")
+        await ctx.send("✅ Message updated.")
     except Exception as e:
         await ctx.send(f"âŒ Failed to edit message: {e}")
 
@@ -2161,13 +2161,13 @@ async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
 @commands.has_permissions(administrator=True)
 async def botinfo(ctx):
     uptime = datetime.now() - bot.launch_time
-    await ctx.send(f"ðŸ›  **Bot Uptime:** {uptime}")
+    await ctx.send(f"🛠 **Bot Uptime:** {uptime}")
 
 @bot.command(name="serverlist")
 @commands.has_permissions(administrator=True)
 async def serverlist(ctx):
     guild_names = ", ".join(g.name for g in bot.guilds)
-    await ctx.send(f"ðŸ¤– Connected to: {guild_names}")
+    await ctx.send(f"🤖 Connected to: {guild_names}")
 
 @bot.command(name="logrecent")
 @commands.has_permissions(administrator=True)
@@ -2347,7 +2347,7 @@ async def commands_dm_list(ctx):
         for chunk in chunks:
             await ctx.author.send(chunk)
         if ctx.guild is not None:
-            await ctx.send("ðŸ“¬ Sent your command list to your DMs.")
+            await ctx.send("📬 Sent your command list to your DMs.")
     except Exception:
         await ctx.send("âŒ I couldn't DM you. Check your privacy settings and try again.")
 
@@ -2400,9 +2400,9 @@ async def quiz(ctx, *filters: str):
         "points": points,
     }
     await ctx.send(
-        "ðŸ§  **F1 Quiz Time!**\n"
+        "🧠 **F1 Quiz Time!**\n"
         f"{q['q']}\n"
-        f"Category: **{category.replace('_', ' ').title()}** Â· Difficulty: **{difficulty.title()}** Â· Worth: **{points}** point{'s' if points != 1 else ''}\n"
+        f"Category: **{category.replace('_', ' ').title()}** · Difficulty: **{difficulty.title()}** · Worth: **{points}** point{'s' if points != 1 else ''}\n"
         "Reply with `!quizanswer <answer>` within 2 minutes."
     )
 
@@ -2412,7 +2412,7 @@ async def quizanswer(ctx, *, answer: str):
         return await ctx.send("âŒ This must be used in a server.")
     active = F1_QUIZ_ACTIVE.get(ctx.guild.id)
     if not active:
-        return await ctx.send("â„¹ï¸ No active quiz question. Start one with `!quiz`.")
+        return await ctx.send("\u2139\uFE0F No active quiz question. Start one with `!quiz`.")
     if time.time() > float(active.get("expires_at", 0)):
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
         return await ctx.send("âŒ› That quiz question expired. Start a new one with `!quiz`.")
@@ -2430,14 +2430,14 @@ async def quizanswer(ctx, *, answer: str):
         _quiz_remove_pending_overrides(ctx.guild.id, str(active.get("question_key") or ""))
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
         return await ctx.send(
-            f"âœ… Correct, {ctx.author.mention}! "
-            f"({category.replace('_', ' ').title()} Â· {difficulty.title()}) "
+            f"✅ Correct, {ctx.author.mention}! "
+            f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
             f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
         )
 
     wrong_reply = await ctx.send(
         "âŒ Not quite. Try again while the question is still open. "
-        "(Admins can react ðŸŸ¢ to your `!quizanswer` message to mark a valid alternate wording as correct.)"
+        "(Admins can react 🟢 to your `!quizanswer` message to mark a valid alternate wording as correct.)"
     )
     try:
         F1_QUIZ_PENDING_OVERRIDES[ctx.message.id] = {
@@ -2463,14 +2463,14 @@ async def quizscore(ctx):
         return await ctx.send("âŒ This must be used in a server.")
     scores = _quiz_scores_for_guild(ctx.guild.id)
     if not scores:
-        return await ctx.send("â„¹ï¸ No quiz scores yet.")
+        return await ctx.send("\u2139\uFE0F No quiz scores yet.")
     rows = sorted(((int(v), uid) for uid, v in scores.items()), reverse=True)[:20]
     lines = []
     for i, (pts, uid) in enumerate(rows, start=1):
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
-        lines.append(f"{i:>2}. {name} â€” **{pts}**")
-    await ctx.send("ðŸ§  **F1 Quiz Leaderboard**\n" + "\n".join(lines))
+        lines.append(f"{i:>2}. {name} — **{pts}**")
+    await ctx.send("🧠 **F1 Quiz Leaderboard**\n" + "\n".join(lines))
 
 # ----------------------------
 # Standings updater
@@ -2653,14 +2653,14 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     created = []
 
     if which in ("drivers", "both"):
-        msg = await ctx.send("ðŸ **F1 Driver Standings (Current Season)**\nLoading...")
+        msg = await ctx.send("\U0001F3C1 **F1 Driver Standings (Current Season)**\nLoading...")
         set_env_value("DRIVER_STANDINGS_MESSAGE_ID", str(msg.id))
-        created.append(f"âœ… Drivers message: `{msg.id}`")
+        created.append(f"✅ Drivers message: `{msg.id}`")
 
     if which in ("constructors", "both"):
-        msg = await ctx.send("ðŸ **F1 Constructor Standings (Current Season)**\nLoading...")
+        msg = await ctx.send("\U0001F3C1 **F1 Constructor Standings (Current Season)**\nLoading...")
         set_env_value("CONSTRUCTOR_STANDINGS_MESSAGE_ID", str(msg.id))
-        created.append(f"âœ… Constructors message: `{msg.id}`")
+        created.append(f"✅ Constructors message: `{msg.id}`")
 
     reload_config_state()
     if "standings" not in STATE:
@@ -2674,10 +2674,10 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     ensure_standings_task_running()
 
     await ctx.send(
-        "ðŸ“Œ Standings configured.\n"
+        "📌 Standings configured.\n"
         + "\n".join(created)
         + f"\nâ± Refresh: {refresh_minutes} min\n"
-        "â„¹ï¸ IDs saved to `.env` so it continues after restart."
+        "\u2139\uFE0F IDs saved to `.env` so it continues after restart."
     )
 
 # ----------------------------
@@ -2693,7 +2693,7 @@ async def schedule(ctx, count: int = 8):
         return await ctx.send("âŒ Could not fetch the F1 schedule right now.")
 
     if not items:
-        return await ctx.send("â„¹ï¸ No upcoming sessions found.")
+        return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
 
     tz = _f1_tz()
     tz_name = _f1_tz_name() if tz != timezone.utc else "UTC"
@@ -2704,9 +2704,9 @@ async def schedule(ctx, count: int = 8):
         mins = int((delta.total_seconds() % 3600) // 60)
         countdown = f"in {hrs}h {mins}m" if delta.total_seconds() > 0 else "started"
         lines.append(
-            f"â€¢ **{item['race_name']}** â€” {item['session_label']} at `{_fmt_dt_local(item['dt'], tz)}` ({countdown})"
+            f"• **{item['race_name']}** — {item['session_label']} at `{_fmt_dt_local(item['dt'], tz)}` ({countdown})"
         )
-    await ctx.send(f"ðŸ“… **Upcoming F1 Sessions** ({tz_name})\n" + "\n".join(lines))
+    await ctx.send(f"📅 **Upcoming F1 Sessions** ({tz_name})\n" + "\n".join(lines))
 
 @bot.command(name="nextsession", aliases=["nextf1"])
 async def nextsession(ctx):
@@ -2716,15 +2716,15 @@ async def nextsession(ctx):
         logging.error(f"[F1] nextsession failed: {e}")
         return await ctx.send("âŒ Could not fetch the next session right now.")
     if not items:
-        return await ctx.send("â„¹ï¸ No upcoming sessions found.")
+        return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
     item = items[0]
     delta = item["dt"] - datetime.now(timezone.utc)
     total_minutes = max(0, int(delta.total_seconds() // 60))
     days, rem = divmod(total_minutes, 1440)
     hrs, mins = divmod(rem, 60)
     await ctx.send(
-        f"â­ï¸ **Next F1 session:** **{item['race_name']} â€” {item['session_label']}**\n"
-        f"ðŸ•’ `{_fmt_dt_local(item['dt'])}` ({_f1_tz_name()})\n"
+        f"⏭️ **Next F1 session:** **{item['race_name']} — {item['session_label']}**\n"
+        f"🕒 `{_fmt_dt_local(item['dt'])}` ({_f1_tz_name()})\n"
         f"â³ In **{days}d {hrs}h {mins}m**"
     )
 
@@ -2806,9 +2806,9 @@ async def f1_reminder_loop():
                         continue
                     if delta_m <= lead and delta_m >= max(0, lead - 1):
                         msg = (
-                            f"â° **F1 Reminder**: **{item['race_name']} â€” {item['session_label']}** starts "
+                            f"â° **F1 Reminder**: **{item['race_name']} ? {item['session_label']}** starts "
                             f"{'now' if delta_m == 0 else f'in about {delta_m}m'}.\n"
-                            f"ðŸ•’ `{_fmt_dt_local(dt)}` ({_f1_tz_name()})"
+                            f"🕒 `{_fmt_dt_local(dt)}` ({_f1_tz_name()})"
                         )
                         try:
                             await channel.send(msg)
@@ -2837,17 +2837,17 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
         CFG["f1_reminders_enabled"] = True
         CFG["f1_reminders_channel_id"] = int(channel.id)
         save_config(CFG)
-        return await ctx.send(f"âœ… F1 reminders enabled in {channel.mention}.")
+        return await ctx.send(f"✅ F1 reminders enabled in {channel.mention}.")
     if mode in {"off", "disable"}:
         reload_config_state()
         CFG["f1_reminders_enabled"] = False
         save_config(CFG)
-        return await ctx.send("âœ… F1 reminders disabled.")
+        return await ctx.send("✅ F1 reminders disabled.")
 
     cfg = _f1_reminder_cfg()
     ch_txt = f"<#{cfg['channel_id']}>" if cfg["channel_id"] else "(not set)"
     await ctx.send(
-        "â„¹ï¸ **F1 reminders status**\n"
+        "\u2139\uFE0F **F1 reminders status**\n"
         f"- Enabled: `{cfg['enabled']}`\n"
         f"- Channel: {ch_txt}\n"
         f"- Lead minutes: `{', '.join(str(x) for x in cfg['leads'])}`"
@@ -2872,7 +2872,7 @@ async def f1reminderleads(ctx, *, minutes: str):
     reload_config_state()
     CFG["f1_reminder_leads_minutes"] = leads
     save_config(CFG)
-    await ctx.send(f"âœ… F1 reminder leads set to: `{', '.join(str(x) for x in leads)}` minutes.")
+    await ctx.send(f"✅ F1 reminder leads set to: `{', '.join(str(x) for x in leads)}` minutes.")
 
 @bot.command(name="circuit")
 async def circuit(ctx, *, name: str):
@@ -2883,7 +2883,7 @@ async def circuit(ctx, *, name: str):
     if race_distance is None and info.get("length_km") and info.get("laps"):
         race_distance = round(float(info["length_km"]) * int(info["laps"]), 3)
     await ctx.send(
-        f"ðŸŽï¸ **{key.title()}**\n"
+        f"\U0001F3CE\uFE0F **{key.title()}**\n"
         f"- Location: {info.get('location', 'Unknown')}, {info.get('country', 'Unknown')}\n"
         f"- Corners: **{info.get('corners', '?')}**\n"
         f"- Lap length: **{info.get('length_km', '?')} km**\n"
@@ -2962,14 +2962,14 @@ async def _prediction_round_context() -> Dict[str, Any]:
 def _pred_entry_summary(entry: Dict[str, Any]) -> str:
     podium = entry.get("podium") or []
     sprint_podium = entry.get("sprint_podium") or []
-    podium_txt = " | ".join(str(x) for x in podium) if isinstance(podium, list) and podium else "â€”"
-    sprint_podium_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "â€”"
+    podium_txt = " | ".join(str(x) for x in podium) if isinstance(podium, list) and podium else "—"
+    sprint_podium_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "—"
     return (
-        f"- Pole: `{entry.get('pole') or 'â€”'}`\n"
-        f"- Sprint Pole: `{entry.get('sprint_pole') or 'â€”'}`\n"
+        f"- Pole: `{entry.get('pole') or '—'}`\n"
+        f"- Sprint Pole: `{entry.get('sprint_pole') or '—'}`\n"
         f"- Podium: `{podium_txt}`\n"
         f"- Sprint Podium: `{sprint_podium_txt}`\n"
-        f"- P10: `{entry.get('p10') or 'â€”'}`"
+        f"- P10: `{entry.get('p10') or '—'}`"
     )
 
 @bot.command(name="predictpole")
@@ -2979,13 +2979,13 @@ async def predictpole(ctx, *, driver: str):
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "pole"):
         return await ctx.send(
-            f"ðŸ”’ Pole predictions are locked for **{meta['race_name']}** "
+            f"🔒 Pole predictions are locked for **{meta['race_name']}** "
             f"(locked at Qualifying start: `{_prediction_category_lock_text(meta, 'pole')}`)."
         )
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["pole"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"âœ… Pole pick saved for **{meta['race_name']}**: `{entry['pole']}`")
+    await ctx.send(f"✅ Pole pick saved for **{meta['race_name']}**: `{entry['pole']}`")
 
 @bot.command(name="predictsprintpole", aliases=["predictsppole"])
 async def predictsprintpole(ctx, *, driver: str):
@@ -2994,16 +2994,16 @@ async def predictsprintpole(ctx, *, driver: str):
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     if "sprint_quali" not in req:
-        return await ctx.send(f"â„¹ï¸ **{meta['race_name']}** does not appear to have a sprint qualifying/shootout session scheduled.")
+        return await ctx.send(f"\u2139\uFE0F **{meta['race_name']}** does not appear to have a sprint qualifying/shootout session scheduled.")
     if _prediction_category_locked(meta, "sprint_pole"):
         return await ctx.send(
-            f"ðŸ”’ Sprint pole predictions are locked for **{meta['race_name']}** "
+            f"🔒 Sprint pole predictions are locked for **{meta['race_name']}** "
             f"(locked at Sprint Qualifying/Shootout start: `{_prediction_category_lock_text(meta, 'sprint_pole')}`)."
         )
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_pole"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"âœ… Sprint pole pick saved for **{meta['race_name']}**: `{entry['sprint_pole']}`")
+    await ctx.send(f"✅ Sprint pole pick saved for **{meta['race_name']}**: `{entry['sprint_pole']}`")
 
 @bot.command(name="predictpodium")
 async def predictpodium(ctx, *, picks: str):
@@ -3012,7 +3012,7 @@ async def predictpodium(ctx, *, picks: str):
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "podium"):
         return await ctx.send(
-            f"ðŸ”’ Podium predictions are locked for **{meta['race_name']}** "
+            f"🔒 Podium predictions are locked for **{meta['race_name']}** "
             f"(locked at Race start: `{_prediction_category_lock_text(meta, 'podium')}`)."
         )
     podium = _split_podium_picks(picks)
@@ -3021,7 +3021,7 @@ async def predictpodium(ctx, *, picks: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["podium"] = podium
     _save_state_quiet()
-    await ctx.send(f"âœ… Podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
+    await ctx.send(f"✅ Podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
 
 @bot.command(name="predictsprintpodium", aliases=["predictsppodium"])
 async def predictsprintpodium(ctx, *, picks: str):
@@ -3030,10 +3030,10 @@ async def predictsprintpodium(ctx, *, picks: str):
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     if "sprint" not in req:
-        return await ctx.send(f"â„¹ï¸ **{meta['race_name']}** does not appear to have a sprint race scheduled.")
+        return await ctx.send(f"\u2139\uFE0F **{meta['race_name']}** does not appear to have a sprint race scheduled.")
     if _prediction_category_locked(meta, "sprint_podium"):
         return await ctx.send(
-            f"ðŸ”’ Sprint podium predictions are locked for **{meta['race_name']}** "
+            f"🔒 Sprint podium predictions are locked for **{meta['race_name']}** "
             f"(locked at Sprint start: `{_prediction_category_lock_text(meta, 'sprint_podium')}`)."
         )
     podium = _split_podium_picks(picks)
@@ -3042,7 +3042,7 @@ async def predictsprintpodium(ctx, *, picks: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_podium"] = podium
     _save_state_quiet()
-    await ctx.send(f"âœ… Sprint podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
+    await ctx.send(f"✅ Sprint podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
 
 @bot.command(name="predictp10")
 async def predictp10(ctx, *, driver: str):
@@ -3051,13 +3051,13 @@ async def predictp10(ctx, *, driver: str):
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "p10"):
         return await ctx.send(
-            f"ðŸ”’ P10 predictions are locked for **{meta['race_name']}** "
+            f"🔒 P10 predictions are locked for **{meta['race_name']}** "
             f"(locked at Race start: `{_prediction_category_lock_text(meta, 'p10')}`)."
         )
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["p10"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"âœ… P10 pick saved for **{meta['race_name']}**: `{entry['p10']}`")
+    await ctx.send(f"✅ P10 pick saved for **{meta['race_name']}**: `{entry['p10']}`")
 
 @bot.command(name="mypredictions")
 async def mypredictions(ctx):
@@ -3077,7 +3077,7 @@ async def mypredictions(ctx):
     if sprint_podium_locked is not None:
         extra_lock_lines += f"- Sprint podium locked: `{sprint_podium_locked}`\n"
     await ctx.send(
-        f"ðŸ“ **Your predictions** for **{meta['race_name']}** (`{meta['key']}`)\n"
+        f"\U0001F4DD **Your predictions** for **{meta['race_name']}** (`{meta['key']}`)\n"
         f"- Pole locked: `{pole_locked}`\n"
         + extra_lock_lines +
         f"- Podium locked: `{podium_locked}`\n"
@@ -3090,7 +3090,7 @@ async def predictions(ctx):
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     lines = [
-        f"ðŸ“‹ **Predictions** for **{meta['race_name']}** (`{meta['key']}`)",
+        f"📋 **Predictions** for **{meta['race_name']}** (`{meta['key']}`)",
         "- `!predictpole <driver>` (locks at Qualifying start)",
         "- `!predictpodium A | B | C` (locks at Race start)",
         "- `!predictp10 <driver>` (locks at Race start)",
@@ -3116,14 +3116,14 @@ async def predictionsboard(ctx):
         categories.append("sprint_podium")
     guild_entries = ((rnd.get("entries") or {}).get(str(ctx.guild.id)) or {})
     if not guild_entries:
-        return await ctx.send(f"â„¹ï¸ No predictions submitted yet for **{meta['race_name']}**.")
+        return await ctx.send(f"\u2139\uFE0F No predictions submitted yet for **{meta['race_name']}**.")
     lines = []
     for uid, entry in list(guild_entries.items())[:20]:
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
         filled = sum(1 for k in categories if entry.get(k))
-        lines.append(f"â€¢ {name} â€” {filled}/{len(categories)} picks")
-    await ctx.send(f"ðŸ“‹ **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines))
+        lines.append(f"• {name} — {filled}/{len(categories)} picks")
+    await ctx.send(f"📋 **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines))
 
 @bot.hybrid_command(name="predictionslock")
 @commands.has_permissions(administrator=True)
@@ -3132,7 +3132,7 @@ async def predictionslock(ctx):
     rnd = _pred_round_obj(meta["key"])
     rnd["locked"] = True
     _save_state_quiet()
-    await ctx.send(f"ðŸ”’ Predictions locked for **{meta['race_name']}** (`{meta['key']}`).")
+    await ctx.send(f"🔒 Predictions locked for **{meta['race_name']}** (`{meta['key']}`).")
 
 @bot.hybrid_command(name="predictionsunlock")
 @commands.has_permissions(administrator=True)
@@ -3141,7 +3141,7 @@ async def predictionsunlock(ctx):
     rnd = _pred_round_obj(meta["key"])
     rnd["locked"] = False
     _save_state_quiet()
-    await ctx.send(f"ðŸ”“ Predictions unlocked for **{meta['race_name']}** (`{meta['key']}`).")
+    await ctx.send(f"🔓 Predictions unlocked for **{meta['race_name']}** (`{meta['key']}`).")
 
 @bot.command(name="predictionsetresult")
 @commands.has_permissions(administrator=True)
@@ -3189,7 +3189,7 @@ async def predictionsetresult(ctx, category: str, *, value: str):
     except Exception as e:
         logging.error(f"[Predict] auto score announce failed for {session_key}: {e}")
     if not auto_posted:
-        await ctx.send(f"âœ… Saved `{category}` result for **{meta['race_name']}**.")
+        await ctx.send(f"✅ Saved `{category}` result for **{meta['race_name']}**.")
 
 @bot.command(name="predictionscore")
 @commands.has_permissions(administrator=True)
@@ -3229,7 +3229,7 @@ async def predictionscore(ctx, session: str = "auto"):
         posted = await _announce_prediction_session_scores(ctx, meta, sk)
         did_any = did_any or posted
     if not did_any:
-        await ctx.send("â„¹ï¸ No scoreable prediction sessions yet (missing actuals or already scored).")
+        await ctx.send("\u2139\uFE0F No scoreable prediction sessions yet (missing actuals or already scored).")
 
 @bot.command(name="predictionleaderboard", aliases=["fantasypoints", "predictlb"])
 async def predictionleaderboard(ctx):
@@ -3237,14 +3237,14 @@ async def predictionleaderboard(ctx):
         return await ctx.send("âŒ This must be used in a server.")
     totals = _pred_totals_for_guild(ctx.guild.id)
     if not totals:
-        return await ctx.send("â„¹ï¸ No prediction points yet.")
+        return await ctx.send("\u2139\uFE0F No prediction points yet.")
     rows = sorted(((int(v), uid) for uid, v in totals.items()), reverse=True)[:20]
     lines = []
     for rank_i, (pts, uid) in enumerate(rows, start=1):
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
-        lines.append(f"{rank_i:>2}. {name} â€” **{pts} pts**")
-    await ctx.send("ðŸ† **Prediction Leaderboard (Fantasy Points)**\n" + "\n".join(lines))
+        lines.append(f"{rank_i:>2}. {name} — **{pts} pts**")
+    await ctx.send("\U0001F3C6 **Prediction Leaderboard (Fantasy Points)**\n" + "\n".join(lines))
 
 # ----------------------------
 # Reaction role handlers + periodic recovery
@@ -3479,7 +3479,7 @@ async def on_message(message: discord.Message):
                 if new_level > current_level:
                     # lightweight level-up ping
                     try:
-                        await message.channel.send(f"âœ¨ {message.author.mention} leveled up to **Level {new_level}**!")
+                        await message.channel.send(f"✨ {message.author.mention} leveled up to **Level {new_level}**!")
                     except Exception:
                         pass
 
@@ -3813,7 +3813,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
     poll_s = max(1.0, min(15.0, poll_s))
 
     _racelog(gid, f"race_live_loop started (session_key={session_key}, poll={poll_s}s)")
-    await thread.send(f"ðŸ“¡ Live follower attached. `session_key={session_key}`")
+    await thread.send(f"📡 Live follower attached. `session_key={session_key}`")
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         while RACE_LIVE_ENABLED.get(gid, False):
@@ -3831,7 +3831,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                     sig = f"{dt}|{msg}"
                     if _race_sig_seen_or_add(gid, sig):
                         continue
-                    await thread.send(f"ðŸ {msg}")
+                    await thread.send(f"\U0001F3C1 {msg}")
 
                 await asyncio.sleep(poll_s)
 
@@ -3939,7 +3939,7 @@ async def racelivekill(ctx):
 
     tail = _racetail(gid, 20)
     logging.warning(f"[RaceLive][{gid}] KILL SWITCH. Tail:\n{tail}")
-    await ctx.send("ðŸ›‘ **Race live killed.**\n```text\n" + tail[:1800] + "\n```")
+    await ctx.send("🛑 **Race live killed.**\n```text\n" + tail[:1800] + "\n```")
 
 @bot.hybrid_command(name="racelivetail", aliases=["race_live_tail"])
 @commands.has_permissions(administrator=True)
@@ -4057,7 +4057,7 @@ async def racelivestart(ctx):
             _racelog(gid, f"FATAL {type(e).__name__}: {e}")
 
     RACE_LIVE_TASKS[gid] = asyncio.create_task(runner())
-    await ctx.send(f"âœ… Started race live manually (session_key={session_key}).")
+    await ctx.send(f"✅ Started race live manually (session_key={session_key}).")
 
 @bot.hybrid_command(name="racelivestop", aliases=["race_live_stop"])
 @commands.has_permissions(administrator=True)
@@ -4077,7 +4077,7 @@ async def racelivestop(ctx):
         _set_race_thread_weekend_state(stopped_round, gid, "past")
         RACE_LIVE_ROUND_KEYS.pop(gid, None)
 
-    await ctx.send("ðŸ›‘ Race live stopped.")
+    await ctx.send("🛑 Race live stopped.")
 
 # ============================================================
 # Race Test Harness (Fake Scenarios)
@@ -4119,20 +4119,20 @@ DEFAULT_RACE_SCENARIOS: Dict[str, Dict[str, Any]] = {
 }
 
 EVENT_STYLE = {
-    "SESSION_START": ("ðŸŸ¦", "**Session started**"),
-    "SESSION_END":   ("ðŸ", "**Session ended**"),
-    "GREEN":         ("ðŸŸ¢", "**GREEN**"),
-    "SC":            ("ðŸŸ¡", "**SAFETY CAR**"),
-    "VSC":           ("ðŸŸ ", "**VSC**"),
-    "RED":           ("ðŸ”´", "**RED FLAG**"),
-    "YELLOW":         ("ðŸŸ¡", "**YELLOW**"),
-    "SEGMENT_START":  ("ðŸŸ¦", "**Segment started**"),
+    "SESSION_START": ("🟦", "**Session started**"),
+    "SESSION_END":   ("\U0001F3C1", "**Session ended**"),
+    "GREEN":         ("🟢", "**GREEN**"),
+    "SC":            ("🟡", "**SAFETY CAR**"),
+    "VSC":           ("🟠", "**VSC**"),
+    "RED":           ("🔴", "**RED FLAG**"),
+    "YELLOW":         ("🟡", "**YELLOW**"),
+    "SEGMENT_START":  ("🟦", "**Segment started**"),
     "SEGMENT_END":    ("â¬›", "**Segment ended**"),
-    "PURPLE_SECTOR":  ("ðŸŸ£", "**Purple sector**"),
-    "CHECKERED_FLAG": ("ðŸ", "**CHEQUERED FLAG**"),
-    "CLASSIFICATION_READY": ("ðŸ“Š", "**Classification ready**"),
-    "RESULTS_READY":  ("ðŸ“Š", "**Results ready**"),
-    "INFO":          ("â„¹ï¸", "**Info**"),
+    "PURPLE_SECTOR":  ("🟣", "**Purple sector**"),
+    "CHECKERED_FLAG": ("\U0001F3C1", "**CHEQUERED FLAG**"),
+    "CLASSIFICATION_READY": ("📊", "**Classification ready**"),
+    "RESULTS_READY":  ("📊", "**Results ready**"),
+    "INFO":          ("\u2139\uFE0F", "**Info**"),
 }
 
 def _scenario_meta(scenario: Dict[str, Any]) -> Dict[str, Any]:
@@ -4173,11 +4173,11 @@ def _format_race_classification(scenario: Dict[str, Any]) -> str:
         reason = str(r.get("reason") or "").strip()
 
         if status == "DNF":
-            tail = f"DNF" + (f" â€” {reason}" if reason else "")
+            tail = f"DNF" + (f" — {reason}" if reason else "")
         else:
             tail = str(gap) if gap is not None else (status or "")
 
-        lines.append(f"{int(pos):>2}. {name} â€” {tail}" if pos is not None else f"- {name} â€” {tail}")
+        lines.append(f"{int(pos):>2}. {name} — {tail}" if pos is not None else f"- {name} — {tail}")
 
     if not lines:
         return "No classification data."
@@ -4198,16 +4198,16 @@ def _format_quali_classification(scenario: Dict[str, Any]) -> str:
         gap = str(r.get("gap") or "").strip()
         status = str(r.get("status") or "").upper().strip()
 
-        tail = best if best else "â€”"
+        tail = best if best else "—"
         if gap and gap != "0.000":
             tail += f" ({gap})"
         if status in ("POLE", "OUT"):
-            tail += f" â€” {status}"
+            tail += f" — {status}"
         note = str(r.get("note") or "").strip()
         if note:
-            tail += f" â€” {note}"
+            tail += f" — {note}"
 
-        lines.append(f"{int(pos):>2}. {name} â€” {tail}" if pos is not None else f"- {name} â€” {tail}")
+        lines.append(f"{int(pos):>2}. {name} — {tail}" if pos is not None else f"- {name} — {tail}")
 
     if not lines:
         return "No qualifying results data."
@@ -4283,7 +4283,7 @@ def _format_quali_knockouts(scenario: Dict[str, Any], knocked_in: str) -> str:
     knocked.sort(key=lambda x: x[0])
     lines = []
     for pos, name, note in knocked:
-        tail = f" â€” {note}" if note else ""
+        tail = f" — {note}" if note else ""
         lines.append(f"P{pos} {name}{tail}")
     return "\n".join(lines)
 
@@ -4309,7 +4309,7 @@ async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[disc
         if isinstance(ch, discord.ForumChannel):
             created = await ch.create_thread(
                 name=title,
-                content=f"ðŸ§ª Race test thread created by {bot.user.mention}",
+                content=f"🧪 Race test thread created by {bot.user.mention}",
                 auto_archive_duration=1440,
             )
             if isinstance(created, tuple) and len(created) >= 1:
@@ -4320,7 +4320,7 @@ async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[disc
 
     try:
         if isinstance(ch, discord.TextChannel):
-            msg = await ch.send(f"ðŸ§ª Race test thread: **{title}**")
+            msg = await ch.send(f"🧪 Race test thread: **{title}**")
             th = await msg.create_thread(name=title, auto_archive_duration=1440)
             return th
     except Exception as e:
@@ -4330,7 +4330,7 @@ async def _ensure_test_thread(guild: discord.Guild, title: str) -> Optional[disc
 
 async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], event: Dict[str, Any], grid_map: Dict[str, str]) -> None:
     etype = (event.get("type") or "INFO").upper().strip()
-    emoji, label = EVENT_STYLE.get(etype, ("â„¹ï¸", "**Info**"))
+    emoji, label = EVENT_STYLE.get(etype, ("\u2139\uFE0F", "**Info**"))
 
     scenario_session = _scenario_session(scenario)
     ev_session = str(event.get("session") or "").strip()
@@ -4345,7 +4345,7 @@ async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], eve
         sec_txt = f"S{sector}" if sector is not None else "sector"
         text = f"{emoji} {name} sets purple {sec_txt}{seg_txt}"
         if lap:
-            text += f" â€” {lap}"
+            text += f" — {lap}"
         await thread.send(text)
         return
 
@@ -4370,14 +4370,14 @@ async def _emit_race_event(thread: discord.Thread, scenario: Dict[str, Any], eve
         session_type = scenario_session
         if session_type == "RACE" and etype == "CLASSIFICATION_READY":
             body = _format_race_classification(scenario)
-            await thread.send(_wrap_spoiler("ðŸ“Š Race Classification\n" + body))
+            await thread.send(_wrap_spoiler("📊 Race Classification\n" + body))
         elif session_type in ("QUALI", "QUALIFYING") and etype == "RESULTS_READY":
             body = _format_quali_classification(scenario)
-            await thread.send(_wrap_spoiler("ðŸ“Š Qualifying Results\n" + body))
+            await thread.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
 
     if etype == "SEGMENT_END" and scenario_session in ("QUALI", "QUALIFYING") and segment in ("Q1", "Q2"):
         body = _format_quali_knockouts(scenario, segment)
-        await thread.send(_wrap_spoiler(f"ðŸš« {segment} Knockouts\n{body}"))
+        await thread.send(_wrap_spoiler(f"🚫 {segment} Knockouts\n{body}"))
 
 async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, speed: float = 1.0) -> None:
     scenarios = _load_race_scenarios()
@@ -4404,7 +4404,7 @@ async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, spee
         raise RuntimeError("Could not create or access the race forum/thread. Check RACE_FORUM_CHANNEL_ID and bot perms.")
 
     events_sorted = sorted(events, key=lambda e: float(e.get("t", 0)))
-    await thread.send(f"ðŸ§ª Starting scenario: **{scenario_name}**\nSpeed: **x{speed}**")
+    await thread.send(f"🧪 Starting scenario: **{scenario_name}**\nSpeed: **x{speed}**")
 
     last_t = float(events_sorted[0].get("t", 0))
     for ev in events_sorted:
@@ -4418,8 +4418,8 @@ async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, spee
         await _emit_race_event(thread, scenario, ev, grid_map)
 
     recap = _race_event_recap(events_sorted)
-    await thread.send("âœ… Scenario complete.")
-    await thread.send("ðŸ“¦ **Session Recap**\n" + recap)
+    await thread.send("✅ Scenario complete.")
+    await thread.send("📦 **Session Recap**\n" + recap)
 
 def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
     scenarios = _load_race_scenarios()
@@ -4439,7 +4439,7 @@ def _resolve_scenario(scenario_name: str) -> Tuple[str, Dict[str, Any]]:
 async def racetestlist(ctx):
     scenarios = _load_race_scenarios()
     names = sorted(scenarios.keys())
-    await ctx.send("ðŸ§ª **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
+    await ctx.send("🧪 **Race test scenarios:**\n" + "\n".join(f"- `{n}`" for n in names))
 
 @bot.command(name="racetestinfo", aliases=["race_test_info"])
 @commands.has_permissions(administrator=True)
@@ -4458,7 +4458,7 @@ async def racetestinfo(ctx, scenario: str):
     has_cls = bool((sc.get("classification") or {}).get("results"))
 
     await ctx.send(
-        "ðŸ§ª **Scenario info**\n"
+        "🧪 **Scenario info**\n"
         f"- **Key:** `{name}`\n"
         f"- **Title:** {title}\n"
         f"- **Session:** `{session_type}`\n"
@@ -4480,12 +4480,12 @@ async def racetestresults(ctx, scenario: str):
     session_type = _scenario_session(sc)
     if session_type == "RACE":
         body = _format_race_classification(sc)
-        await ctx.send(_wrap_spoiler("ðŸ“Š Race Classification\n" + body))
+        await ctx.send(_wrap_spoiler("📊 Race Classification\n" + body))
     elif session_type in ("QUALI", "QUALIFYING"):
         body = _format_quali_classification(sc)
-        await ctx.send(_wrap_spoiler("ðŸ“Š Qualifying Results\n" + body))
+        await ctx.send(_wrap_spoiler("📊 Qualifying Results\n" + body))
     else:
-        await ctx.send(f"â„¹ï¸ Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
+        await ctx.send(f"\u2139\uFE0F Scenario `{name}` has unknown session type `{session_type}`; no formatter yet.")
 
 @bot.command(name="raceteststart", aliases=["race_test_start"])
 @commands.has_permissions(administrator=True)
@@ -4523,7 +4523,7 @@ async def raceteststart(ctx, scenario: str = None, speed: float = None):
     task = asyncio.create_task(runner())
     RACE_TEST_TASKS[guild.id] = task
 
-    await ctx.send(f"ðŸ§ª Starting race test: `{scenario}` (speed x{speed})")
+    await ctx.send(f"🧪 Starting race test: `{scenario}` (speed x{speed})")
 
 @bot.command(name="raceteststop", aliases=["race_test_stop"])
 @commands.has_permissions(administrator=True)
@@ -4534,14 +4534,13 @@ async def raceteststop(ctx):
     t = RACE_TEST_TASKS.get(guild.id)
     if t and not t.done():
         t.cancel()
-        await ctx.send("ðŸ›‘ Race test stopped.")
+        await ctx.send("🛑 Race test stopped.")
     else:
-        await ctx.send("â„¹ï¸ No race test running.")
+        await ctx.send("\u2139\uFE0F No race test running.")
 
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 if not bot_token:
     raise RuntimeError("DISCORD_BOT_TOKEN is missing. Put it in your .env file.")
 
 bot.run(bot_token)
-
 
