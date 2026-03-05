@@ -394,6 +394,50 @@ def _get_json_any(urls: List[str], label: str = "api") -> Dict[str, Any]:
 
 _OPENF1_TOKEN_CACHE: Dict[str, Any] = {"token": "", "expires_at": 0.0, "fetched_at": 0.0}
 _OPENF1_TOKEN_LOCK = threading.RLock()
+_OPENF1_TRACE_LOCK = threading.RLock()
+_OPENF1_TRACE: Dict[str, Any] = {"window_start": time.time(), "rows": {}}
+
+
+def _openf1_trace_record(caller: str, endpoint: str, status_code: int, latency_ms: int) -> None:
+    now_ts = time.time()
+    with _OPENF1_TRACE_LOCK:
+        rows = _OPENF1_TRACE.setdefault("rows", {})
+        key = f"{caller}|{endpoint}|{status_code}"
+        row = rows.get(key)
+        if not isinstance(row, dict):
+            row = {"count": 0, "lat_ms_sum": 0}
+            rows[key] = row
+        row["count"] = int(row.get("count", 0) or 0) + 1
+        row["lat_ms_sum"] = int(row.get("lat_ms_sum", 0) or 0) + int(max(0, latency_ms))
+
+        window_start = float(_OPENF1_TRACE.get("window_start", now_ts) or now_ts)
+        if (now_ts - window_start) < 60.0:
+            return
+
+        total_calls = 0
+        total_429 = 0
+        summary_rows = []
+        for raw_key, stats in rows.items():
+            try:
+                c, e, s = str(raw_key).split("|", 2)
+            except Exception:
+                continue
+            cnt = int((stats or {}).get("count", 0) or 0)
+            lat_sum = int((stats or {}).get("lat_ms_sum", 0) or 0)
+            avg_ms = int(lat_sum / cnt) if cnt > 0 else 0
+            total_calls += cnt
+            if s == "429":
+                total_429 += cnt
+            summary_rows.append((cnt, c, e, s, avg_ms))
+
+        summary_rows.sort(reverse=True)
+        top = summary_rows[:8]
+        top_txt = ", ".join([f"{c}:{e}:{s} x{cnt} avg{avg}ms" for cnt, c, e, s, avg in top]) or "none"
+        level_fn = logging.warning if total_429 > 0 else logging.info
+        level_fn(f"[OpenF1Trace] 60s total={total_calls} 429s={total_429} top={top_txt}")
+
+        _OPENF1_TRACE["window_start"] = now_ts
+        _OPENF1_TRACE["rows"] = {}
 
 
 def _json_path_get(obj: Any, path: str) -> Any:
@@ -511,11 +555,19 @@ def _openf1_auth_headers(force_refresh: bool = False) -> Dict[str, str]:
     return headers
 
 
-def _openf1_get_json(endpoint: str, params: Optional[Dict[str, Any]] = None, timeout: int = 20) -> Any:
+def _openf1_get_json(
+    endpoint: str,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = 20,
+    caller: str = "unknown",
+) -> Any:
     url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
+    t0 = time.time()
     r = requests.get(url, params=params or {}, timeout=timeout, headers=_openf1_auth_headers())
     if r.status_code in (401, 403):
         r = requests.get(url, params=params or {}, timeout=timeout, headers=_openf1_auth_headers(force_refresh=True))
+    latency_ms = int((time.time() - t0) * 1000)
+    _openf1_trace_record(caller=str(caller or "unknown"), endpoint=str(endpoint or ""), status_code=int(r.status_code), latency_ms=latency_ms)
     r.raise_for_status()
     return r.json()
 
@@ -721,7 +773,7 @@ async def fetch_current_season_schedule(force: bool = False) -> List[Dict[str, A
     year = datetime.now(timezone.utc).year
     races: List[Dict[str, Any]] = []
     try:
-        sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year})
+        sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year}, 20, "schedule_fetch")
         if isinstance(sessions, list) and sessions:
             races = _normalize_schedule_from_openf1(sessions, year=year)
     except Exception as e:
@@ -1253,7 +1305,7 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     years = [now.year, now.year - 1]
     for year in years:
         try:
-            sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year, "session_type": "Race"})
+            sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year, "session_type": "Race"}, 20, "standings_candidate_sessions")
         except Exception:
             continue
         if not isinstance(sessions, list):
@@ -1279,14 +1331,14 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
-            rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key})
+            rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
         except Exception:
             continue
         if not isinstance(rows, list) or not rows:
             continue
         meta_map: Dict[int, Dict[str, Any]] = {}
         try:
-            drivers = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key})
+            drivers = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta")
             if isinstance(drivers, list):
                 for d in drivers:
                     if not isinstance(d, dict):
@@ -1332,7 +1384,7 @@ async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, 
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
-            rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key})
+            rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key}, 20, "standings_teams")
         except Exception:
             continue
         if not isinstance(rows, list) or not rows:
@@ -3425,16 +3477,29 @@ def _race_sig_seen_or_add(gid: int, sig: str) -> bool:
         sigs.discard(old)
     return False
 
-async def _openf1_get(http: aiohttp.ClientSession, endpoint: str, params: Dict[str, Any]) -> Any:
+async def _openf1_get(
+    http: aiohttp.ClientSession,
+    endpoint: str,
+    params: Dict[str, Any],
+    caller: str = "race_live",
+) -> Any:
     url = f"{OPENF1_BASE}/{endpoint.lstrip('/')}"
     for attempt in range(2):
         force_refresh = bool(attempt == 1)
+        t0 = time.time()
         async with http.get(
             url,
             params=params,
             headers=_openf1_auth_headers(force_refresh=force_refresh),
             timeout=aiohttp.ClientTimeout(total=20),
         ) as r:
+            latency_ms = int((time.time() - t0) * 1000)
+            _openf1_trace_record(
+                caller=str(caller or "race_live"),
+                endpoint=str(endpoint or ""),
+                status_code=int(r.status),
+                latency_ms=latency_ms,
+            )
             if r.status in (401, 403):
                 if attempt == 0:
                     await r.read()
@@ -3627,7 +3692,7 @@ async def _ensure_live_thread(
     return created
 
 async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optional[tuple[datetime, datetime, Dict[str, Any], list]]:
-    latest = await _openf1_get(http, "sessions", {"session_key": "latest"})
+    latest = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="race_supervisor_latest")
     if not latest:
         return None
 
@@ -3635,7 +3700,7 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     if not meeting_key:
         return None
 
-    all_sessions = await _openf1_get(http, "sessions", {"meeting_key": meeting_key})
+    all_sessions = await _openf1_get(http, "sessions", {"meeting_key": meeting_key}, caller="race_supervisor_meeting_sessions")
     if not all_sessions:
         return None
 
@@ -3677,7 +3742,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
             _loop_tick("race_live")
             try:
                 _racelog(gid, "poll race_control")
-                rc = await _openf1_get(http, "race_control", {"session_key": session_key})
+                rc = await _openf1_get(http, "race_control", {"session_key": session_key}, caller="race_live_race_control")
                 _racelog(gid, f"race_control items={len(rc)}")
 
                 for item in rc[-30:]:
@@ -3891,7 +3956,7 @@ async def racelivestart(ctx):
         t.cancel()
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
-        latest = await _openf1_get(http, "sessions", {"session_key": "latest"})
+        latest = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="racelivestart_latest")
         if not latest:
             return await ctx.send("âŒ No OpenF1 sessions available right now.")
         session_key = int(latest[0].get("session_key"))
