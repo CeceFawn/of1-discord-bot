@@ -15,3 +15,6 @@ runtime.db-wal
 deploy_status.json
 venv/
 .venv/
+
+*.lock
+bot.log.*
