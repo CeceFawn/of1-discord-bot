@@ -737,21 +737,32 @@ def _openf1_is_f1_session(session: Dict[str, Any]) -> bool:
             "session_type",
         )
     ).lower()
+    meta_hay = " ".join(
+        str(session.get(k) or "")
+        for k in ("category", "series", "series_name", "meeting_name", "meeting_official_name")
+    ).lower()
 
-    # Hard excludes first to avoid accidentally following feeder/support series.
-    non_f1_markers = (
-        "formula 2", "formula2", "f2",
-        "formula 3", "formula3", "f3",
-        "formula e", "fe",
-        "f1 academy",
-        "porsche supercup",
-        "gp2", "gp3",
+    # Hard excludes with word boundaries to avoid false positives (e.g. "free practice" matching "fe").
+    non_f1_pattern = re.compile(
+        r"\b("
+        r"formula\s*2|f2|gp2|"
+        r"formula\s*3|f3|gp3|"
+        r"formula\s*e|fe|"
+        r"f1\s*academy|"
+        r"porsche\s+supercup"
+        r")\b"
     )
-    if any(m in hay for m in non_f1_markers):
+    if non_f1_pattern.search(hay):
         return False
 
-    f1_markers = ("formula 1", "f1")
-    return any(m in hay for m in f1_markers)
+    if re.search(r"\b(formula\s*1|f1)\b", hay):
+        return True
+
+    # Some endpoints can omit series/meeting labels; don't hard-fail unknown metadata.
+    if not meta_hay.strip():
+        return True
+
+    return False
 
 def _openf1_is_weekend_session(session: Dict[str, Any]) -> bool:
     st = _openf1_session_type(session).upper().strip()
