@@ -3602,10 +3602,10 @@ def _race_live_delay_seconds() -> float:
         v = float(bucket.get("delay_seconds", 0.0) or 0.0)
     except Exception:
         v = 0.0
-    return max(0.0, min(30.0, v))
+    return max(0.0, min(60.0, v))
 
 def _set_race_live_delay_seconds(seconds: float) -> float:
-    v = max(0.0, min(30.0, float(seconds)))
+    v = max(0.0, min(60.0, float(seconds)))
     bucket = _state_bucket("race_live")
     bucket["delay_seconds"] = v
     _save_state_quiet()
@@ -3645,7 +3645,7 @@ def _race_control_emoji_for_message(msg: str) -> str:
         return "🔴"
     if "green flag" in t or "green light" in t or t.startswith("green"):
         return "🟢"
-    if "chequered flag" in t or "checkered flag" in t or "session ended" in t:
+    if "CHEQUERED FLAG" in t or "checkered flag" in t or "session ended" in t:
         return "🏁"
     return "ℹ️"
 
@@ -4777,7 +4777,7 @@ EVENT_STYLE = {
     "SEGMENT_START":  ("🟦", "**Segment started**"),
     "SEGMENT_END":    ("⬛", "**Segment ended**"),
     "PURPLE_SECTOR":  ("🟣", "**Purple sector**"),
-    "CHECKERED_FLAG": ("\U0001F3C1", "**CHEQUERED FLAG**"),
+    "CHECKERED_FLAG": ("🏁", "**CHEQUERED FLAG**"),
     "CLASSIFICATION_READY": ("📊", "**Classification ready**"),
     "RESULTS_READY":  ("📊", "**Results ready**"),
     "INFO":          ("\u2139\uFE0F", "**Info**"),
