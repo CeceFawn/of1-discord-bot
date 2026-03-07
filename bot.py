@@ -1866,7 +1866,7 @@ async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
 async def rank(ctx, member: discord.Member = None):
     member = member or ctx.author
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
 
     rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
     total_xp = int(rec.get("xp", 0) or 0)
@@ -1891,7 +1891,7 @@ async def rank(ctx, member: discord.Member = None):
 async def xpleaderboard(ctx, limit: int = 10):
     """Top XP users in this server."""
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     limit = max(3, min(20, int(limit)))
 
     rows = get_top_users_by_xp(XP_STATE, ctx.guild.id, limit=limit)
@@ -1913,7 +1913,7 @@ async def xpleaderboard(ctx, limit: int = 10):
 async def xpset(ctx, member: discord.Member, xp: int):
     """Admin: set a user's XP."""
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     xp = max(0, int(xp))
     lvl = xp_level_from_total(xp)
     set_user_xp_level(XP_STATE, ctx.guild.id, member.id, xp=xp, level=lvl)
@@ -1925,7 +1925,7 @@ async def xpset(ctx, member: discord.Member, xp: int):
 async def xpreset(ctx, member: discord.Member):
     """Admin: reset a user's XP."""
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
     rec["xp"] = 0
     rec["level"] = 0
@@ -1941,7 +1941,7 @@ async def xpaudit(ctx, member: discord.Member = None):
     Admin: inspect a user's XP state and current tuning assumptions.
     """
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     member = member or ctx.author
 
     rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
@@ -1981,17 +1981,17 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
     Usage: !xpbackfillhistory rebuild CONFIRM
     """
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     mode = (mode or "").lower().strip()
     if mode != "rebuild":
-        return await ctx.send("âŒ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
+        return await ctx.send("❌ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
     if (confirm or "").strip().upper() != "CONFIRM":
         return await ctx.send(
             "\u26A0\uFE0F This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
             "Run: `!xpbackfillhistory rebuild CONFIRM`"
         )
 
-    status_msg = await ctx.send("â³ Starting silent XP backfill (history rebuild). This may take a while...")
+    status_msg = await ctx.send("⏳ Starting silent XP backfill (history rebuild). This may take a while...")
     try:
         skip_message_id = ctx.message.id if getattr(ctx, "message", None) is not None else None
         summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=skip_message_id)
@@ -2010,14 +2010,14 @@ async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
         )
     except Exception as e:
         logging.error(f"[XP] Backfill failed for guild {ctx.guild.id}: {e}")
-        await status_msg.edit(content=f"âŒ XP backfill failed: {e}")
+        await status_msg.edit(content=f"❌ XP backfill failed: {e}")
 
 @bot.hybrid_command(name="xpgate")
 @commands.has_permissions(administrator=True)
 async def xpgate(ctx, channel: discord.TextChannel, level: int):
     """Admin: require a minimum level to talk in a channel (auto-delete)."""
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     level = max(0, min(500, int(level)))
 
     reload_config_state()
@@ -2033,7 +2033,7 @@ async def xpgate(ctx, channel: discord.TextChannel, level: int):
 async def xpgateclear(ctx, channel: discord.TextChannel):
     """Admin: remove channel min-level gate."""
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
 
     reload_config_state()
     mapping = cfg_xp_min_level_channels()
@@ -2063,12 +2063,12 @@ async def configreload(ctx):
 async def setupnotifications(ctx):
     roles = cfg_reaction_roles()
     if not roles:
-        await ctx.send("âŒ No reaction_roles configured in config.json.")
+        await ctx.send("❌ No reaction_roles configured in config.json.")
         return
 
     description = "📰 **Get notified!**\nReact to opt in to pingable news roles."
     for emoji, role in roles.items():
-        description += f"\n{emoji} â†’ `{role}`"
+        description += f"\n{emoji} → `{role}`"
 
     msg = await ctx.send(description)
     for emoji in roles.keys():
@@ -2083,12 +2083,12 @@ async def setupnotifications(ctx):
 async def setupcolors(ctx):
     roles = cfg_color_roles()
     if not roles:
-        await ctx.send("âŒ No color_roles configured in config.json.")
+        await ctx.send("❌ No color_roles configured in config.json.")
         return
 
     description = "🎨 **Choose your name color!**\nReact with an emoji to get a matching role. Only one color can be active at a time."
     for emoji, role in roles.items():
-        description += f"\n{emoji} â†’ `{role}`"
+        description += f"\n{emoji} → `{role}`"
 
     msg = await ctx.send(description)
     for emoji in roles.keys():
@@ -2107,12 +2107,12 @@ async def setupdrivers(ctx):
     """
     guild = ctx.guild
     if guild is None:
-        await ctx.send("âŒ This must be run in a server.")
+        await ctx.send("❌ This must be run in a server.")
         return
 
     emoji_name_map = cfg_driver_emoji_names()
     if not emoji_name_map:
-        await ctx.send("âŒ No driver_emoji_names configured in config.json.")
+        await ctx.send("❌ No driver_emoji_names configured in config.json.")
         return
 
     description = "\U0001F3CE\uFE0F **Choose your favorite F1 driver!**\nReact to get a fan role:"
@@ -2124,7 +2124,7 @@ async def setupdrivers(ctx):
         if emoji_obj:
             emoji_str = str(emoji_obj)  # "<:Name:123>"
             emoji_to_role[emoji_str] = role_name
-            description += f"\n{emoji_obj} â†’ `{role_name}`"
+            description += f"\n{emoji_obj} → `{role_name}`"
         else:
             missing.append(emoji_name)
 
@@ -2150,7 +2150,7 @@ async def instacheck(ctx, username: str = "of1.official"):
     if post_url:
         await ctx.send(f"📸 Latest Instagram post from `{username}`:\n{post_url}")
     else:
-        await ctx.send("âŒ Could not retrieve the latest Instagram post.")
+        await ctx.send("❌ Could not retrieve the latest Instagram post.")
 
 # ----------------------------
 # Utility commands
@@ -2160,7 +2160,7 @@ async def instacheck(ctx, username: str = "of1.official"):
 async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
     channel = bot.get_channel(channel_id)
     if not channel:
-        await ctx.send("âŒ Could not find that channel.")
+        await ctx.send("❌ Could not find that channel.")
         return
     try:
         msg = await channel.fetch_message(message_id)
@@ -2170,7 +2170,7 @@ async def editmsg(ctx, channel_id: int, message_id: int, *, new_text: str):
         await msg.edit(content=new_text)
         await ctx.send("✅ Message updated.")
     except Exception as e:
-        await ctx.send(f"âŒ Failed to edit message: {e}")
+        await ctx.send(f"❌ Failed to edit message: {e}")
 
 @bot.command(name="botinfo")
 @commands.has_permissions(administrator=True)
@@ -2194,7 +2194,7 @@ async def logrecent(ctx, lines: int = 10):
         text = "".join(all_lines[-lines:])
         await ctx.send(f"```\n{text[:1900]}\n```")
     except Exception as e:
-        await ctx.send(f"âŒ Could not read log: {e}")
+        await ctx.send(f"❌ Could not read log: {e}")
 
 @bot.command(name="ping")
 async def ping(ctx):
@@ -2213,7 +2213,7 @@ async def help(ctx):
     if visible:
         await ctx.send("**Available Commands:**\n" + "\n".join(visible))
     else:
-        await ctx.send("âŒ You don't have access to any commands.")
+        await ctx.send("❌ You don't have access to any commands.")
 
 def _command_examples(prefix: str) -> Dict[str, str]:
     p = prefix or "!"
@@ -2354,7 +2354,7 @@ async def commands_dm_list(ctx):
             continue
 
     if not visible:
-        return await ctx.send("âŒ You don't have access to any commands.")
+        return await ctx.send("❌ You don't have access to any commands.")
 
     chunks: List[str] = []
     current = "**Available Commands (You Have Access To)**\n"
@@ -2374,14 +2374,14 @@ async def commands_dm_list(ctx):
         if ctx.guild is not None:
             await ctx.send("📬 Sent your command list to your DMs.")
     except Exception:
-        await ctx.send("âŒ I couldn't DM you. Check your privacy settings and try again.")
+        await ctx.send("❌ I couldn't DM you. Check your privacy settings and try again.")
 
 @bot.command(name="quiz", aliases=["f1quiz"])
 async def quiz(ctx, *filters: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     if not F1_QUIZ_QUESTIONS:
-        return await ctx.send("âŒ No quiz questions configured.")
+        return await ctx.send("❌ No quiz questions configured.")
     difficulty_filters: set[str] = set()
     category_filters: set[str] = set()
     known_difficulties = set(QUIZ_DIFFICULTY_POINTS.keys())
@@ -2402,14 +2402,14 @@ async def quiz(ctx, *filters: str):
 
     if unknown_filters:
         return await ctx.send(
-            "âŒ Unknown quiz filter(s): "
+            "❌ Unknown quiz filter(s): "
             + ", ".join(f"`{x}`" for x in unknown_filters)
             + "\\nUse difficulty (`easy`, `medium`, `hard`, `expert`) and/or categories like `rules`, `circuits`, `strategy`, `bot_xp`, `weekend_format`."
         )
 
     q = _quiz_pick_question(ctx.guild.id, difficulty_filters, category_filters)
     if q is None:
-        return await ctx.send("âŒ No quiz questions match those filters.")
+        return await ctx.send("❌ No quiz questions match those filters.")
     difficulty = str(q.get("difficulty") or "easy").lower().strip()
     category = _quiz_category_for_question(q)
     points = _quiz_points_for_question(q)
@@ -2434,13 +2434,13 @@ async def quiz(ctx, *filters: str):
 @bot.command(name="quizanswer")
 async def quizanswer(ctx, *, answer: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     active = F1_QUIZ_ACTIVE.get(ctx.guild.id)
     if not active:
         return await ctx.send("\u2139\uFE0F No active quiz question. Start one with `!quiz`.")
     if time.time() > float(active.get("expires_at", 0)):
         F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
-        return await ctx.send("âŒ› That quiz question expired. Start a new one with `!quiz`.")
+        return await ctx.send("⌛ That quiz question expired. Start a new one with `!quiz`.")
 
     guess = _clean_text_key(answer)
     answers = active.get("answers") or []
@@ -2461,7 +2461,7 @@ async def quizanswer(ctx, *, answer: str):
         )
 
     wrong_reply = await ctx.send(
-        "âŒ Not quite. Try again while the question is still open. "
+        "❌ Not quite. Try again while the question is still open. "
         "(Admins can react 🟢 to your `!quizanswer` message to mark a valid alternate wording as correct.)"
     )
     try:
@@ -2485,7 +2485,7 @@ async def quizanswer(ctx, *, answer: str):
 @bot.command(name="quizscore", aliases=["quizleaderboard"])
 async def quizscore(ctx):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     scores = _quiz_scores_for_guild(ctx.guild.id)
     if not scores:
         return await ctx.send("\u2139\uFE0F No quiz scores yet.")
@@ -2672,7 +2672,7 @@ async def runtime_status_loop():
 async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     which = which.lower().strip()
     if which not in ("drivers", "constructors", "both"):
-        await ctx.send("âŒ Use: `drivers`, `constructors`, or `both`.")
+        await ctx.send("❌ Use: `drivers`, `constructors`, or `both`.")
         return
 
     refresh_minutes = max(1, min(120, int(refresh_minutes)))
@@ -2705,7 +2705,7 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
     await ctx.send(
         "📌 Standings configured.\n"
         + "\n".join(created)
-        + f"\nâ± Refresh: {refresh_minutes} min\n"
+        + f"\n⏱ Refresh: {refresh_minutes} min\n"
         "\u2139\uFE0F IDs saved to `.env` so it continues after restart."
     )
 
@@ -2719,7 +2719,7 @@ async def schedule(ctx, count: int = 8):
         items = await upcoming_f1_sessions(limit=count)
     except Exception as e:
         logging.error(f"[F1] schedule failed: {e}")
-        return await ctx.send("âŒ Could not fetch the F1 schedule right now.")
+        return await ctx.send("❌ Could not fetch the F1 schedule right now.")
 
     if not items:
         return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
@@ -2743,7 +2743,7 @@ async def nextsession(ctx):
         items = await upcoming_f1_sessions(limit=1)
     except Exception as e:
         logging.error(f"[F1] nextsession failed: {e}")
-        return await ctx.send("âŒ Could not fetch the next session right now.")
+        return await ctx.send("❌ Could not fetch the next session right now.")
     if not items:
         return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
     item = items[0]
@@ -2754,7 +2754,7 @@ async def nextsession(ctx):
     await ctx.send(
         f"⏭️ **Next F1 session:** **{item['race_name']} — {item['session_label']}**\n"
         f"🕒 `{_fmt_dt_local(item['dt'])}` ({_f1_tz_name()})\n"
-        f"â³ In **{days}d {hrs}h {mins}m**"
+        f"⏳ In **{days}d {hrs}h {mins}m**"
     )
 
 def _f1_reminder_cfg() -> Dict[str, Any]:
@@ -2861,7 +2861,7 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
         if channel is None:
             channel = ctx.channel if isinstance(ctx.channel, discord.TextChannel) else None
         if channel is None:
-            return await ctx.send("âŒ Provide a text channel, e.g. `!f1reminders on #channel`.")
+            return await ctx.send("❌ Provide a text channel, e.g. `!f1reminders on #channel`.")
         reload_config_state()
         CFG["f1_reminders_enabled"] = True
         CFG["f1_reminders_channel_id"] = int(channel.id)
@@ -2887,7 +2887,7 @@ async def f1reminders(ctx, mode: str = "status", channel: discord.TextChannel = 
 async def f1reminderleads(ctx, *, minutes: str):
     raw = str(minutes or "").strip()
     if not raw:
-        return await ctx.send("âŒ Usage: `!f1reminderleads 1440 60 15` or `/f1reminderleads minutes:\"1440 60 15\"`")
+        return await ctx.send("❌ Usage: `!f1reminderleads 1440 60 15` or `/f1reminderleads minutes:\"1440 60 15\"`")
     parts = [p for p in re.split(r"[,\s]+", raw) if p]
     parsed: List[int] = []
     for p in parts:
@@ -2896,7 +2896,7 @@ async def f1reminderleads(ctx, *, minutes: str):
         except Exception:
             continue
     if not parsed:
-        return await ctx.send("âŒ No valid minute values found. Example: `1440 60 15`")
+        return await ctx.send("❌ No valid minute values found. Example: `1440 60 15`")
     leads = sorted({max(1, min(10080, int(m))) for m in parsed}, reverse=True)
     reload_config_state()
     CFG["f1_reminder_leads_minutes"] = leads
@@ -2907,7 +2907,7 @@ async def f1reminderleads(ctx, *, minutes: str):
 async def circuit(ctx, *, name: str):
     key, info = _circuit_lookup(name)
     if not info:
-        return await ctx.send("âŒ Circuit not found in local data. Try a GP/city/circuit name (e.g. `!circuit spa`).")
+        return await ctx.send("❌ Circuit not found in local data. Try a GP/city/circuit name (e.g. `!circuit spa`).")
     race_distance = info.get("race_distance_km")
     if race_distance is None and info.get("length_km") and info.get("laps"):
         race_distance = round(float(info["length_km"]) * int(info["laps"]), 3)
@@ -3004,7 +3004,7 @@ def _pred_entry_summary(entry: Dict[str, Any]) -> str:
 @bot.command(name="predictpole")
 async def predictpole(ctx, *, driver: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "pole"):
         return await ctx.send(
@@ -3019,7 +3019,7 @@ async def predictpole(ctx, *, driver: str):
 @bot.command(name="predictsprintpole", aliases=["predictsppole"])
 async def predictsprintpole(ctx, *, driver: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     if "sprint_quali" not in req:
@@ -3037,7 +3037,7 @@ async def predictsprintpole(ctx, *, driver: str):
 @bot.command(name="predictpodium")
 async def predictpodium(ctx, *, picks: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "podium"):
         return await ctx.send(
@@ -3046,7 +3046,7 @@ async def predictpodium(ctx, *, picks: str):
         )
     podium = _split_podium_picks(picks)
     if not podium:
-        return await ctx.send("âŒ Use format: `!predictpodium Driver 1 | Driver 2 | Driver 3`")
+        return await ctx.send("❌ Use format: `!predictpodium Driver 1 | Driver 2 | Driver 3`")
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["podium"] = podium
     _save_state_quiet()
@@ -3055,7 +3055,7 @@ async def predictpodium(ctx, *, picks: str):
 @bot.command(name="predictsprintpodium", aliases=["predictsppodium"])
 async def predictsprintpodium(ctx, *, picks: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     if "sprint" not in req:
@@ -3067,7 +3067,7 @@ async def predictsprintpodium(ctx, *, picks: str):
         )
     podium = _split_podium_picks(picks)
     if not podium:
-        return await ctx.send("âŒ Use format: `!predictsprintpodium Driver 1 | Driver 2 | Driver 3`")
+        return await ctx.send("❌ Use format: `!predictsprintpodium Driver 1 | Driver 2 | Driver 3`")
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_podium"] = podium
     _save_state_quiet()
@@ -3076,7 +3076,7 @@ async def predictsprintpodium(ctx, *, picks: str):
 @bot.command(name="predictp10")
 async def predictp10(ctx, *, driver: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     if _prediction_category_locked(meta, "p10"):
         return await ctx.send(
@@ -3091,7 +3091,7 @@ async def predictp10(ctx, *, driver: str):
 @bot.command(name="mypredictions")
 async def mypredictions(ctx):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
@@ -3134,7 +3134,7 @@ async def predictions(ctx):
 @bot.command(name="predictionsboard", aliases=["predboard"])
 async def predictionsboard(ctx):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     rnd = _pred_round_obj(meta["key"])
     req = _prediction_session_requirements(meta)
@@ -3176,7 +3176,7 @@ async def predictionsunlock(ctx):
 @commands.has_permissions(administrator=True)
 async def predictionsetresult(ctx, category: str, *, value: str):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     category = (category or "").lower().strip()
     category = {
         "sprintpole": "sprint_pole",
@@ -3196,17 +3196,17 @@ async def predictionsetresult(ctx, category: str, *, value: str):
     elif category == "podium":
         podium = _split_podium_picks(value)
         if not podium:
-            return await ctx.send("âŒ Podium format: `!predictionsetresult podium Driver 1 | Driver 2 | Driver 3`")
+            return await ctx.send("❌ Podium format: `!predictionsetresult podium Driver 1 | Driver 2 | Driver 3`")
         actual["podium"] = podium
     elif category == "sprint_pole":
         actual["sprint_pole"] = _normalize_driver_pick(value)
     elif category == "sprint_podium":
         podium = _split_podium_picks(value)
         if not podium:
-            return await ctx.send("âŒ Sprint podium format: `!predictionsetresult sprint_podium Driver 1 | Driver 2 | Driver 3`")
+            return await ctx.send("❌ Sprint podium format: `!predictionsetresult sprint_podium Driver 1 | Driver 2 | Driver 3`")
         actual["sprint_podium"] = podium
     else:
-        return await ctx.send("âŒ Category must be `pole`, `podium`, `p10`, `sprint_pole`, or `sprint_podium`.")
+        return await ctx.send("❌ Category must be `pole`, `podium`, `p10`, `sprint_pole`, or `sprint_podium`.")
     rnd["scored"] = False  # legacy field, kept for compatibility
     scored_map = _pred_scored_sessions_for_guild(rnd, ctx.guild.id)
     scored_map.pop(_prediction_category_session(category), None)
@@ -3224,7 +3224,7 @@ async def predictionsetresult(ctx, category: str, *, value: str):
 @commands.has_permissions(administrator=True)
 async def predictionscore(ctx, session: str = "auto"):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     meta = await _prediction_round_context()
     rnd = _pred_round_obj(meta["key"])
     req = _prediction_session_requirements(meta)
@@ -3242,7 +3242,7 @@ async def predictionscore(ctx, session: str = "auto"):
     }
     wanted = alias_map.get(wanted, wanted)
     if wanted not in {"auto", "all", "quali", "sprint_quali", "sprint", "race"}:
-        return await ctx.send("âŒ Use `!predictionscore [auto|all|quali|sprint_quali|sprint|race]`")
+        return await ctx.send("❌ Use `!predictionscore [auto|all|quali|sprint_quali|sprint|race]`")
 
     session_keys = list(req.keys()) if wanted in {"auto", "all"} else [wanted]
     did_any = False
@@ -3263,7 +3263,7 @@ async def predictionscore(ctx, session: str = "auto"):
 @bot.command(name="predictionleaderboard", aliases=["fantasypoints", "predictlb"])
 async def predictionleaderboard(ctx):
     if ctx.guild is None:
-        return await ctx.send("âŒ This must be used in a server.")
+        return await ctx.send("❌ This must be used in a server.")
     totals = _pred_totals_for_guild(ctx.guild.id)
     if not totals:
         return await ctx.send("\u2139\uFE0F No prediction points yet.")
@@ -3912,6 +3912,72 @@ async def _fetch_saved_race_thread(guild: discord.Guild, round_key: str) -> Opti
     _clear_race_thread_record(round_key, guild.id)
     return None
 
+def _normalize_race_name_key(value: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    return re.sub(r"\s+", " ", s)
+
+async def _fetch_fallback_race_thread_for_guild(
+    guild: discord.Guild,
+    preferred_race_name: str,
+) -> Optional[Tuple[str, discord.Thread]]:
+    root = _race_threads_root()
+    rounds = root.get("rounds") or {}
+    if not isinstance(rounds, dict):
+        return None
+
+    gid = str(guild.id)
+    preferred_key = _normalize_race_name_key(preferred_race_name)
+    candidates: List[Tuple[int, str, Dict[str, Any]]] = []
+
+    for rk, robj in rounds.items():
+        if not isinstance(robj, dict):
+            continue
+        guilds = robj.get("guilds") or {}
+        if not isinstance(guilds, dict):
+            continue
+        rec = guilds.get(gid)
+        if not isinstance(rec, dict):
+            continue
+        weekend_state = str(rec.get("weekend_state") or "").lower()
+        if weekend_state == "past":
+            continue
+
+        race_name = str(robj.get("race_name") or "")
+        race_key = _normalize_race_name_key(race_name)
+        score = 0
+        if preferred_key and race_key:
+            if preferred_key == race_key:
+                score += 200
+            elif preferred_key in race_key or race_key in preferred_key:
+                score += 120
+        if weekend_state == "queued":
+            score += 40
+        elif weekend_state == "active":
+            score += 20
+        try:
+            created_at = str(rec.get("created_at") or "")
+            if created_at:
+                score += int(_parse_iso(created_at).timestamp() // 86400)
+        except Exception:
+            pass
+        candidates.append((score, str(rk), rec))
+
+    for _, round_key, rec in sorted(candidates, key=lambda x: x[0], reverse=True):
+        thread_id = int(rec.get("thread_id") or 0)
+        if not thread_id:
+            continue
+        th = guild.get_thread(thread_id)
+        if isinstance(th, discord.Thread):
+            return round_key, th
+        try:
+            fetched = await guild.fetch_channel(thread_id)
+            if isinstance(fetched, discord.Thread):
+                return round_key, fetched
+        except Exception:
+            _clear_race_thread_record(round_key, guild.id)
+            continue
+    return None
+
 async def _get_forum_channel_live(guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
     forum_id = os.getenv("RACE_FORUM_CHANNEL_ID")
     if not forum_id:
@@ -3969,6 +4035,23 @@ async def _ensure_live_thread(
     if existing is not None:
         _set_race_thread_weekend_state(round_key, guild.id, "active")
         return existing
+
+    fallback = await _fetch_fallback_race_thread_for_guild(guild, race_name)
+    if fallback is not None:
+        fallback_round_key, fallback_thread = fallback
+        if fallback_round_key != round_key:
+            fallback_rec = _race_thread_record(fallback_round_key, guild.id) or {}
+            source = str(fallback_rec.get("source") or "manual")
+            _clear_race_thread_record(fallback_round_key, guild.id)
+            _save_race_thread_record(
+                round_key=round_key,
+                race_name=race_name,
+                guild_id=guild.id,
+                thread=fallback_thread,
+                source=source,
+            )
+        _set_race_thread_weekend_state(round_key, guild.id, "active")
+        return fallback_thread
 
     created = await _create_race_thread(
         guild=guild,
