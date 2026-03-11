@@ -79,7 +79,7 @@ def _read_deploy_status() -> dict:
 
 def _set_last_action(action: str, ok: bool, output: str):
     with _LAST_ACTION_LOCK:
-        _LAST_ACTION["ts"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        _LAST_ACTION["ts"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         _LAST_ACTION["action"] = action
         _LAST_ACTION["ok"] = ok
         _LAST_ACTION["output"] = output[-8000:]  # cap output size
@@ -366,7 +366,7 @@ def _render(body: str, flash: str = ""):
     except Exception:
         bot_name = None
 
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return render_template_string(
         BASE_TEMPLATE,
         body=body,
@@ -727,7 +727,7 @@ def _deploy_worker(target: str = "bot"):
     try:
         def checkpoint(step: str, ok: bool | None = None, detail: str = "") -> None:
             payload = {
-                "ts": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "action": f"deploy_{target}",
                 "step": str(step),
                 "ok": ok,

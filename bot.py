@@ -670,8 +670,8 @@ def _record_alert(
             guild_id=int(guild_id or 0),
             user_id=int(user_id or 0),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"[Alert] Failed to insert alert: {e}")
 
 def _clean_text_key(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
@@ -1469,8 +1469,8 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
                     except Exception:
                         continue
                     meta_map[n] = d
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"[Standings] Failed to fetch driver metadata: {e}")
 
         out: List[Dict[str, Any]] = []
         for r in rows:
@@ -1538,7 +1538,7 @@ async def fetch_driver_standings_text(limit: int = 20) -> str:
         lines = []
         for r in rows[: max(1, int(limit))]:
             lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts ({r.get('team', 'Unknown')})")
-        updated = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
 
@@ -1548,7 +1548,7 @@ async def fetch_constructor_standings_text(limit: int = 10) -> str:
         lines = []
         for r in rows[: max(1, int(limit))]:
             lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
-        updated = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Constructor Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
 # Discord setup
@@ -2522,8 +2522,8 @@ async def quizanswer(ctx, *, answer: str):
             "resolved": False,
             "created_at": time.time(),
         }
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"[Quiz] Failed to register pending override for message {ctx.message.id}: {e}")
 
 @bot.command(name="quizscore", aliases=["quizleaderboard"])
 async def quizscore(ctx):
@@ -3541,13 +3541,14 @@ async def on_message(message: discord.Message):
                 mn, mx = xp_gain_range()
                 gain = random.randint(mn, mx)
 
-                new_xp = add_user_xp(XP_STATE, gid, uid, gain)
-                new_level = xp_level_from_total(new_xp)
+                async with XP_SAVE_LOCK:
+                    new_xp = add_user_xp(XP_STATE, gid, uid, gain)
+                    new_level = xp_level_from_total(new_xp)
 
-                # store message meta + level
-                update_user_message_meta(XP_STATE, gid, uid)
-                set_user_xp_level(XP_STATE, gid, uid, xp=new_xp, level=new_level)
-                _xp_mark_dirty()
+                    # store message meta + level
+                    update_user_message_meta(XP_STATE, gid, uid)
+                    set_user_xp_level(XP_STATE, gid, uid, xp=new_xp, level=new_level)
+                    _xp_mark_dirty()
 
                 if new_level > current_level:
                     # lightweight level-up ping
@@ -3673,6 +3674,8 @@ def _race_control_should_post(msg: str) -> bool:
         "checkered flag",
         "session ended",
         "safety car",
+        "virtual safety car",
+        "vsc",
         "incident",
         "collision",
         "crash",
@@ -3747,7 +3750,7 @@ def _extract_quali_segment(msg: str) -> Optional[str]:
 
 def _racelog(gid: int, msg: str) -> None:
     buf = RACE_LIVE_DEBUG.setdefault(gid, deque(maxlen=200))
-    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     line = f"{ts} {msg}"
     buf.append(line)
     logging.info(f"[RaceLive][{gid}] {msg}")
@@ -3826,11 +3829,6 @@ async def _post_quali_boundary_summary(
     segment: str,
     driver_map: Dict[str, str],
 ) -> None:
-    positions = await _openf1_latest_positions(http, session_key)
-    if not positions:
-        return
-
-    ordered = sorted(positions.items(), key=lambda kv: kv[1])
     seg = str(segment or "").upper().strip()
     if seg not in {"Q1", "Q2", "Q3", "SQ1", "SQ2", "SQ3"}:
         return
@@ -3838,22 +3836,51 @@ async def _post_quali_boundary_summary(
     is_sprint_quali = session_kind == "SPRINT_QUALI"
     cutoff_title = "Sprint Qualifying" if is_sprint_quali else "Qualifying"
 
+    # Expected number of classified drivers for each segment boundary
+    if seg in {"Q1", "SQ1"}:
+        expected_total = 22
+    elif seg in {"Q2", "SQ2"}:
+        expected_total = 16
+    else:
+        expected_total = 10
+
     def _name(num: str) -> str:
         return driver_map.get(num, f"#{num}")
 
+    # Poll until positions stop changing — meaning all drivers on flying laps
+    # have completed them and no more lap times are being updated.
+    ordered: List[Tuple[str, int]] = []
+    prev_snapshot: Optional[List[Tuple[str, int]]] = None
+    stable_count = 0
+    for _ in range(40):  # up to ~120s at 3s intervals
+        positions = await _openf1_latest_positions(http, session_key)
+        if positions and len(positions) >= expected_total:
+            ordered = sorted(positions.items(), key=lambda kv: kv[1])
+            if ordered == prev_snapshot:
+                stable_count += 1
+                if stable_count >= 2:  # unchanged for 2 consecutive polls (~6s)
+                    break
+            else:
+                stable_count = 0
+                prev_snapshot = ordered
+        await asyncio.sleep(3)
+
+    if not ordered:
+        return
+
     if seg in {"Q1", "SQ1"}:
-        knocked = [(num, pos) for num, pos in ordered if pos >= 16]
+        knocked = [(num, pos) for num, pos in ordered if pos >= 17]
         if not knocked:
             return
-        body = "\n".join(f"P{pos} {_name(num)}" for num, pos in knocked[:5])
+        body = "\n".join(f"P{pos} {_name(num)}" for num, pos in knocked[:6])
         await thread.send(_wrap_spoiler(f"🚫 {cutoff_title} {seg} Knockouts\n{body}"))
         return
 
     if seg in {"Q2", "SQ2"}:
-        knocked = [(num, pos) for num, pos in ordered if 11 <= pos <= 15]
+        knocked = [(num, pos) for num, pos in ordered if 11 <= pos <= 16]
         if not knocked:
             return
-        body = "\n".join(f"P{pos} {_name(num)}" for num, pos in knocked[:5])
+        body = "\n".join(f"P{pos} {_name(num)}" for num, pos in knocked[:6])
         await thread.send(_wrap_spoiler(f"🚫 {cutoff_title} {seg} Knockouts\n{body}"))
         return
 
@@ -4262,6 +4289,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
         driver_map = await _openf1_driver_name_map(http, session_key)
         posted_segment_summaries: set[str] = set()
         posted_final_summary = False
+        current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
         while RACE_LIVE_ENABLED.get(gid, False):
             _loop_tick("race_live")
             try:
@@ -4297,8 +4325,12 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
 
                     if session_kind in {"QUALI", "SPRINT_QUALI"}:
                         seg = _extract_quali_segment(msg)
+                        # Keep current_quali_seg up to date whenever a segment is mentioned
+                        if seg:
+                            current_quali_seg = seg
+                        # Fall back to the tracked segment (not always Q3) when session ends
                         if not seg and session_end:
-                            seg = "SQ3" if session_kind == "SPRINT_QUALI" else "Q3"
+                            seg = current_quali_seg
                         if seg:
                             looks_boundary = (
                                 ("END" in upper_msg)
@@ -4310,6 +4342,9 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                             key = f"{seg}:{'end' if looks_boundary else 'other'}"
                             if looks_boundary and key not in posted_segment_summaries:
                                 posted_segment_summaries.add(key)
+                                # Advance tracker to next segment after posting boundary
+                                _seg_next = {"Q1": "Q2", "Q2": "Q3", "Q3": "Q3", "SQ1": "SQ2", "SQ2": "SQ3", "SQ3": "SQ3"}
+                                current_quali_seg = _seg_next.get(seg, seg)
                                 try:
                                     await _post_quali_boundary_summary(
                                         thread=thread,
@@ -4321,6 +4356,16 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                                     )
                                 except Exception as e:
                                     _racelog(gid, f"quali summary failed for {seg}: {e}")
+
+                        # Post track limit / lap time deletion messages during qualifying
+                        lower_msg = msg.lower()
+                        is_track_deletion = any(p in lower_msg for p in ("track limits", "lap time deleted", "time deleted", "lap deleted"))
+                        if is_track_deletion and not _race_control_should_post(msg):
+                            delay_s = _race_live_delay_seconds()
+                            if delay_s > 0:
+                                await asyncio.sleep(delay_s)
+                            await thread.send(f"🚫 {msg}")
+                            RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
 
                         if session_end:
                             stop_requested = True
@@ -4430,6 +4475,10 @@ async def race_supervisor_loop():
                             _racelog(gid, "Supervisor stopping live loop (manual hold active)")
                             RACE_LIVE_ENABLED[gid] = False
                             task.cancel()
+                            try:
+                                await task
+                            except (asyncio.CancelledError, Exception):
+                                pass
                             continue
 
                         if should_follow and (not held) and (not running):
@@ -4461,6 +4510,10 @@ async def race_supervisor_loop():
                             _racelog(gid, "Supervisor stopping live loop (session inactive/out-of-scope)")
                             RACE_LIVE_ENABLED[gid] = False
                             task.cancel()
+                            try:
+                                await task
+                            except (asyncio.CancelledError, Exception):
+                                pass
                             stopped_round = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
                             if stopped_round:
                                 _set_race_thread_weekend_state(stopped_round, gid, "past")
@@ -4495,6 +4548,10 @@ async def racelivekill(ctx):
     t = RACE_LIVE_TASKS.get(gid)
     if t and not t.done():
         t.cancel()
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):
+            pass
     stopped_round = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
     if stopped_round:
         _set_race_thread_weekend_state(stopped_round, gid, "past")
@@ -4668,6 +4725,10 @@ async def racelivestart(ctx):
     if t and not t.done():
         RACE_LIVE_ENABLED[gid] = False
         t.cancel()
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         latest = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="racelivestart_latest")
@@ -4717,6 +4778,10 @@ async def racelivestop(ctx):
     t = RACE_LIVE_TASKS.get(gid)
     if t and not t.done():
         t.cancel()
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):
+            pass
     stopped_round = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
     if stopped_round:
         _set_race_thread_weekend_state(stopped_round, gid, "past")
@@ -5056,7 +5121,6 @@ async def _run_race_test_scenario(guild: discord.Guild, scenario_name: str, spee
 
     last_t = float(events_sorted[0].get("t", 0))
     for ev in events_sorted:
-        await asyncio.sleep(0)
         cur_t = float(ev.get("t", last_t))
         dt = max(0.0, cur_t - last_t)
         last_t = cur_t
@@ -5140,7 +5204,7 @@ async def racetestresults(ctx, scenario: str):
 async def raceteststart(ctx, scenario: str = None, speed: float = None):
     guild = ctx.guild
     if not guild:
-        await ctx.send("\u274C Must be run in a server.")
+        await ctx.send("❌ Must be run in a server.")
         return
 
     scenario = (scenario or os.getenv("RACE_TEST_DEFAULT_SCENARIO") or "practice_short").strip()
@@ -5155,6 +5219,10 @@ async def raceteststart(ctx, scenario: str = None, speed: float = None):
     existing = RACE_TEST_TASKS.get(guild.id)
     if existing and not existing.done():
         existing.cancel()
+        try:
+            await existing
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def runner():
         try:
@@ -5182,9 +5250,13 @@ async def raceteststop(ctx):
     t = RACE_TEST_TASKS.get(guild.id)
     if t and not t.done():
         t.cancel()
-        await ctx.send("\U0001F6D1 Race test stopped.")
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):
+            pass
+        await ctx.send("🛑 Race test stopped.")
     else:
-        await ctx.send("\u2139\uFE0F No race test running.")
+        await ctx.send("ℹ️ No race test running.")
 
 def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
     y = int(year)
@@ -5348,6 +5420,10 @@ async def racereplay(ctx, year: int, round_num: int, speed: float = 10.0):
     existing = RACE_TEST_TASKS.get(guild.id)
     if existing and not existing.done():
         existing.cancel()
+        try:
+            await existing
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def runner():
         try:
