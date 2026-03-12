@@ -34,7 +34,7 @@ from runtime_store import (
 )
 
 import io
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont # type: ignore
 
 _RANK_FONT_CACHE: Optional[Tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, ImageFont.FreeTypeFont | ImageFont.ImageFont, ImageFont.FreeTypeFont | ImageFont.ImageFont]] = None
 _RANK_TEMPLATE_CACHE: Dict[str, Image.Image] = {}
@@ -1629,7 +1629,7 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
-async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]:
+async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
@@ -1688,38 +1688,59 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
         return out[: max(1, int(limit))]
     return []
 
-async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, Any]]:
+async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, Any]]:
+    # championship_teams.team_name is null for several teams in OpenF1 (including
+    # top teams), so we rebuild constructor standings from championship_drivers +
+    # drivers endpoints instead, grouping by team_name and summing points.
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
-            rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key}, 20, "standings_teams")
-        except requests.HTTPError as e:
-            code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
-            if code == 404:
-                _openf1_set_endpoint_cooldown("championship_teams", 900)
-                break
-            continue
+            driver_pts_rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
+            driver_meta_rows = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta_teams")
         except Exception:
             continue
-        if not isinstance(rows, list) or not rows:
+        if not isinstance(driver_pts_rows, list) or not isinstance(driver_meta_rows, list):
             continue
-        out: List[Dict[str, Any]] = []
-        for r in rows:
+
+        # Build driver_number -> team_name from the drivers endpoint
+        team_map: Dict[int, str] = {}
+        for d in driver_meta_rows:
+            if not isinstance(d, dict):
+                continue
+            try:
+                num = int(d.get("driver_number"))
+            except Exception:
+                continue
+            name = str(d.get("team_name") or "").strip()
+            if name:
+                team_map[num] = name
+
+        # Sum points per team
+        team_points: Dict[str, float] = {}
+        for r in driver_pts_rows:
             if not isinstance(r, dict):
                 continue
-            out.append(
-                {
-                    "position": int(r.get("position_current", r.get("position", 0)) or 0),
-                    "points": int(r.get("points_current", r.get("points", 0)) or 0),
-                    "name": str(r.get("team_name") or "Unknown").strip() or "Unknown",
-                }
-            )
-        out = [x for x in out if int(x.get("position", 0) or 0) > 0]
-        out.sort(key=lambda x: int(x.get("position", 999) or 999))
+            try:
+                num = int(r.get("driver_number"))
+            except Exception:
+                continue
+            pts = float(r.get("points_current") or 0)
+            team = team_map.get(num, "")
+            if team:
+                team_points[team] = team_points.get(team, 0.0) + pts
+
+        if not team_points:
+            continue
+
+        sorted_teams = sorted(team_points.items(), key=lambda x: x[1], reverse=True)
+        out = [
+            {"position": i + 1, "points": int(pts), "name": team}
+            for i, (team, pts) in enumerate(sorted_teams)
+        ]
         return out[: max(1, int(limit))]
     return []
 
-async def fetch_driver_standings_text(limit: int = 20) -> str:
+async def fetch_driver_standings_text(limit: int = 22) -> str:
     rows = await _openf1_driver_standings_rows(limit=limit)
     if rows:
         lines = []
@@ -1729,7 +1750,7 @@ async def fetch_driver_standings_text(limit: int = 20) -> str:
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
 
-async def fetch_constructor_standings_text(limit: int = 10) -> str:
+async def fetch_constructor_standings_text(limit: int = 11) -> str:
     rows = await _openf1_constructor_standings_rows(limit=limit)
     if rows:
         lines = []
@@ -4111,18 +4132,18 @@ async def _post_quali_boundary_summary(
     def _name(num: str) -> str:
         return driver_map.get(num, f"#{num}")
 
-    # Poll until positions stop changing — meaning all drivers on flying laps
-    # have completed them and no more lap times are being updated.
+    # Poll until positions stop changing for 20 consecutive polls (~60s),
+    # ensuring all drivers on flying laps have completed them.
     ordered: List[Tuple[str, int]] = []
     prev_snapshot: Optional[List[Tuple[str, int]]] = None
     stable_count = 0
-    for _ in range(40):  # up to ~120s at 3s intervals
+    for _ in range(100):  # up to ~300s at 3s intervals
         positions = await _openf1_latest_positions(http, session_key)
         if positions and len(positions) >= expected_total:
             ordered = sorted(positions.items(), key=lambda kv: kv[1])
             if ordered == prev_snapshot:
                 stable_count += 1
-                if stable_count >= 2:  # unchanged for 2 consecutive polls (~6s)
+                if stable_count >= 20:  # unchanged for 20 consecutive polls (~60s)
                     break
             else:
                 stable_count = 0
@@ -4170,15 +4191,25 @@ async def _post_race_or_sprint_final_summary(
         title = "Race Final Classification (Top 10)"
 
     rows: List[Tuple[str, int]] = []
-    # Wait briefly for stable final ordering after checkered/session-end.
-    for _ in range(60):  # up to ~180s at 3s interval
+    prev_snapshot: Optional[List[Tuple[str, int]]] = None
+    stable_count = 0
+    # Wait until all top-N positions are filled AND the order has stopped changing
+    # for 20 consecutive polls (~60s), so late finishers are accounted for.
+    for _ in range(100):  # up to ~300s at 3s intervals
         positions = await _openf1_latest_positions(http, session_key)
         if positions:
             ordered = sorted(positions.items(), key=lambda kv: kv[1])
-            rows = [(num, pos) for num, pos in ordered if 1 <= pos <= top_n]
-            pos_set = {pos for _num, pos in rows}
+            snapshot = [(num, pos) for num, pos in ordered if 1 <= pos <= top_n]
+            pos_set = {pos for _num, pos in snapshot}
             if len(pos_set) >= top_n:
-                break
+                rows = snapshot
+                if snapshot == prev_snapshot:
+                    stable_count += 1
+                    if stable_count >= 20:  # unchanged for 20 consecutive polls (~60s)
+                        break
+                else:
+                    stable_count = 0
+                    prev_snapshot = snapshot
         await asyncio.sleep(3)
 
     if not rows:
@@ -4549,6 +4580,10 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
         f"Live follower attached: thread={thread.mention} session_key={session_key} session={session_kind or session_type or 'UNKNOWN'}",
     )
 
+    # Only process race_control messages that arrive after this loop starts,
+    # so that reconnects or late-starts don't replay the entire session history.
+    loop_start_dt = datetime.now(timezone.utc).isoformat()
+
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         driver_map = await _openf1_driver_name_map(http, session_key)
         posted_segment_summaries: set[str] = set()
@@ -4564,11 +4599,16 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                 _racelog(gid, f"race_control items={len(rc)}")
 
                 stop_requested = False
-                for item in rc[-30:]:
+                for item in rc:
                     msg = str(item.get("message") or "").strip()
                     if not msg:
                         continue
                     dt = str(item.get("date") or "")
+                    # Skip messages that predate this loop session (prevents
+                    # replaying history on reconnect and catches all new messages,
+                    # not just the last 30).
+                    if dt and dt < loop_start_dt:
+                        continue
                     sig = f"{dt}|{msg}"
                     if _race_sig_seen_or_add(gid, sig):
                         continue
@@ -4578,6 +4618,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                         ("CHECKERED" in upper_msg)
                         or ("CHEQUERED" in upper_msg)
                         or ("SESSION END" in upper_msg)
+                        or ("SESSION FINISHED" in upper_msg)
                     )
 
                     if _race_control_should_post(msg):
@@ -4982,7 +5023,7 @@ async def racethread_slash(
         round_meta = await current_or_next_round_meta()
         round_key = str(round_meta.get("key") or "unknown-round")
         race_name = str(round_meta.get("race_name") or "F1").strip() or "F1"
-        title = f"{race_name} - Race Thread"
+        title = f"{race_name}"
         post_text = (message or "").strip() or f"Race thread for **{race_name}**."
 
         upload_file: Optional[discord.File] = None
