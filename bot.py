@@ -1689,54 +1689,72 @@ async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]
     return []
 
 async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, Any]]:
-    # championship_teams.team_name is null for several teams in OpenF1 (including
-    # top teams), so we rebuild constructor standings from championship_drivers +
-    # drivers endpoints instead, grouping by team_name and summing points.
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
-            driver_pts_rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
-            driver_meta_rows = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta_teams")
+            rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key}, 20, "standings_teams")
+        except requests.HTTPError as e:
+            code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
+            if code == 404:
+                _openf1_set_endpoint_cooldown("championship_teams", 900)
+                break
+            continue
         except Exception:
             continue
-        if not isinstance(driver_pts_rows, list) or not isinstance(driver_meta_rows, list):
+        if not isinstance(rows, list) or not rows:
             continue
 
-        # Build driver_number -> team_name from the drivers endpoint
-        team_map: Dict[int, str] = {}
-        for d in driver_meta_rows:
-            if not isinstance(d, dict):
-                continue
-            try:
-                num = int(d.get("driver_number"))
-            except Exception:
-                continue
-            name = str(d.get("team_name") or "").strip()
-            if name:
-                team_map[num] = name
+        # championship_teams.team_name is null for some teams; build a fallback
+        # name map from the drivers endpoint (team_name is reliable there).
+        fallback_names: Dict[int, str] = {}  # position -> team_name from drivers
+        try:
+            driver_meta = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta_teams")
+            if isinstance(driver_meta, list):
+                # Build a set of unique team names from drivers data
+                driver_pts = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers_for_teams")
+                if isinstance(driver_pts, list):
+                    # Map driver_number -> team_name
+                    num_to_team: Dict[int, str] = {}
+                    for d in driver_meta:
+                        if not isinstance(d, dict):
+                            continue
+                        try:
+                            n = int(d.get("driver_number"))
+                        except Exception:
+                            continue
+                        tn = str(d.get("team_name") or "").strip()
+                        if tn:
+                            num_to_team[n] = tn
+                    # Map team points total -> team_name
+                    team_pts_map: Dict[str, float] = {}
+                    for r in driver_pts:
+                        if not isinstance(r, dict):
+                            continue
+                        try:
+                            n = int(r.get("driver_number"))
+                        except Exception:
+                            continue
+                        tn = num_to_team.get(n, "")
+                        if tn:
+                            team_pts_map[tn] = team_pts_map.get(tn, 0.0) + float(r.get("points_current") or 0)
+                    # Sort teams by points to match championship_teams position order
+                    sorted_by_pts = sorted(team_pts_map.items(), key=lambda x: x[1], reverse=True)
+                    fallback_names = {i + 1: name for i, (name, _) in enumerate(sorted_by_pts)}
+        except Exception:
+            pass  # fallback lookup is best-effort
 
-        # Sum points per team
-        team_points: Dict[str, float] = {}
-        for r in driver_pts_rows:
+        out: List[Dict[str, Any]] = []
+        for r in rows:
             if not isinstance(r, dict):
                 continue
-            try:
-                num = int(r.get("driver_number"))
-            except Exception:
-                continue
-            pts = float(r.get("points_current") or 0)
-            team = team_map.get(num, "")
-            if team:
-                team_points[team] = team_points.get(team, 0.0) + pts
-
-        if not team_points:
-            continue
-
-        sorted_teams = sorted(team_points.items(), key=lambda x: x[1], reverse=True)
-        out = [
-            {"position": i + 1, "points": int(pts), "name": team}
-            for i, (team, pts) in enumerate(sorted_teams)
-        ]
+            pos = int(r.get("position_current", r.get("position", 0)) or 0)
+            pts = int(r.get("points_current", r.get("points", 0)) or 0)
+            name = str(r.get("team_name") or "").strip()
+            if not name:
+                name = fallback_names.get(pos, "Unknown")
+            out.append({"position": pos, "points": pts, "name": name})
+        out = [x for x in out if int(x.get("position", 0) or 0) > 0]
+        out.sort(key=lambda x: int(x.get("position", 999) or 999))
         return out[: max(1, int(limit))]
     return []
 
