@@ -1629,7 +1629,7 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
-async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]:
+async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
@@ -1637,9 +1637,8 @@ async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]
         except requests.HTTPError as e:
             code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
             if code == 404:
-                if session_key != "latest":
-                    _openf1_set_endpoint_cooldown("championship_drivers", 900)
-                    break
+                _openf1_set_endpoint_cooldown("championship_drivers", 900)
+                break
             continue
         except Exception:
             continue
@@ -1689,7 +1688,7 @@ async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]
         return out[: max(1, int(limit))]
     return []
 
-async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, Any]]:
+async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
@@ -1697,80 +1696,38 @@ async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, 
         except requests.HTTPError as e:
             code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
             if code == 404:
-                if session_key != "latest":
-                    _openf1_set_endpoint_cooldown("championship_teams", 900)
-                    break
+                _openf1_set_endpoint_cooldown("championship_teams", 900)
+                break
             continue
         except Exception:
             continue
         if not isinstance(rows, list) or not rows:
             continue
-
-        # championship_teams.team_name is null for some teams; build a fallback
-        # name map from the drivers endpoint (team_name is reliable there).
-        fallback_names: Dict[int, str] = {}  # position -> team_name from drivers
-        try:
-            driver_meta = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta_teams")
-            if isinstance(driver_meta, list):
-                # Build a set of unique team names from drivers data
-                driver_pts = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers_for_teams")
-                if isinstance(driver_pts, list):
-                    # Map driver_number -> team_name
-                    num_to_team: Dict[int, str] = {}
-                    for d in driver_meta:
-                        if not isinstance(d, dict):
-                            continue
-                        try:
-                            n = int(d.get("driver_number"))
-                        except Exception:
-                            continue
-                        tn = str(d.get("team_name") or "").strip()
-                        if tn:
-                            num_to_team[n] = tn
-                    # Map team points total -> team_name
-                    team_pts_map: Dict[str, float] = {}
-                    for r in driver_pts:
-                        if not isinstance(r, dict):
-                            continue
-                        try:
-                            n = int(r.get("driver_number"))
-                        except Exception:
-                            continue
-                        tn = num_to_team.get(n, "")
-                        if tn:
-                            team_pts_map[tn] = team_pts_map.get(tn, 0.0) + float(r.get("points_current") or 0)
-                    # Sort teams by points to match championship_teams position order
-                    sorted_by_pts = sorted(team_pts_map.items(), key=lambda x: x[1], reverse=True)
-                    fallback_names = {i + 1: name for i, (name, _) in enumerate(sorted_by_pts)}
-        except Exception:
-            pass  # fallback lookup is best-effort
-
         out: List[Dict[str, Any]] = []
         for r in rows:
             if not isinstance(r, dict):
                 continue
-            pos = int(r.get("position_current", r.get("position", 0)) or 0)
-            pts = int(r.get("points_current", r.get("points", 0)) or 0)
-            name = str(r.get("team_name") or "").strip()
-            if not name:
-                name = fallback_names.get(pos, "Unknown")
-            out.append({"position": pos, "points": pts, "name": name})
+            out.append({
+                "position": int(r.get("position_current", r.get("position", 0)) or 0),
+                "points": int(r.get("points_current", r.get("points", 0)) or 0),
+                "name": str(r.get("team_name") or "Unknown").strip() or "Unknown",
+            })
         out = [x for x in out if int(x.get("position", 0) or 0) > 0]
         out.sort(key=lambda x: int(x.get("position", 999) or 999))
         return out[: max(1, int(limit))]
     return []
 
-async def fetch_driver_standings_text(limit: int = 22) -> str:
+async def fetch_driver_standings_text(limit: int = 20) -> str:
     rows = await _openf1_driver_standings_rows(limit=limit)
     if rows:
         lines = []
         for r in rows[: max(1, int(limit))]:
-            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
+            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts ({r.get('team', 'Unknown')})")
         updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
 
-async def fetch_constructor_standings_text(limit: int = 11) -> str:
+async def fetch_constructor_standings_text(limit: int = 10) -> str:
     rows = await _openf1_constructor_standings_rows(limit=limit)
     if rows:
         lines = []
@@ -1779,6 +1736,7 @@ async def fetch_constructor_standings_text(limit: int = 11) -> str:
         updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Constructor Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
+
 # Discord setup
 # ----------------------------
 intents = discord.Intents.default()
