@@ -38,6 +38,17 @@ from PIL import Image, ImageDraw, ImageFont
 
 _RANK_FONT_CACHE: Optional[Tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, ImageFont.FreeTypeFont | ImageFont.ImageFont, ImageFont.FreeTypeFont | ImageFont.ImageFont]] = None
 _RANK_TEMPLATE_CACHE: Dict[str, Image.Image] = {}
+_RANK_COCKPIT_CACHE: Optional[Image.Image] = None
+
+# Maps user-facing background key → asset path.
+# Add new entries here as you create more background PNGs.
+_RANK_BACKGROUNDS: Dict[str, str] = {
+    "default": "assets/rank_template.png",
+}
+
+def rank_available_backgrounds() -> List[str]:
+    """Return background keys that have an existing asset file."""
+    return [k for k, path in _RANK_BACKGROUNDS.items() if os.path.exists(path)]
 
 def _rank_fonts():
     global _RANK_FONT_CACHE
@@ -57,17 +68,35 @@ def _rank_fonts():
         )
     return _RANK_FONT_CACHE
 
-def _rank_template_base(template_path: str | None, w: int, h: int) -> Image.Image:
-    if not template_path:
+def _rank_bg_image(bg_key: str | None, w: int, h: int) -> Image.Image:
+    """Load and cache a background image by key. Falls back to solid color."""
+    path = _RANK_BACKGROUNDS.get(bg_key or "default") if bg_key else None
+    if not path:
+        path = _RANK_BACKGROUNDS.get("default")
+    if not path or not os.path.exists(path):
         return Image.new("RGBA", (w, h), (24, 26, 32, 255))
-    cached = _RANK_TEMPLATE_CACHE.get(template_path)
+    cached = _RANK_TEMPLATE_CACHE.get(path)
     if cached is None:
         try:
-            cached = Image.open(template_path).convert("RGBA").resize((w, h), Image.LANCZOS)
-            _RANK_TEMPLATE_CACHE[template_path] = cached
+            cached = Image.open(path).convert("RGBA").resize((w, h), Image.LANCZOS)
+            _RANK_TEMPLATE_CACHE[path] = cached
         except Exception:
             return Image.new("RGBA", (w, h), (24, 26, 32, 255))
     return cached.copy()
+
+def _rank_cockpit_overlay(w: int, h: int) -> Optional[Image.Image]:
+    """Load and cache the cockpit overlay PNG. Returns None if file missing."""
+    global _RANK_COCKPIT_CACHE
+    if _RANK_COCKPIT_CACHE is not None:
+        return _RANK_COCKPIT_CACHE.copy()
+    path = "assets/rank_template_cockpit.png"
+    if not os.path.exists(path):
+        return None
+    try:
+        _RANK_COCKPIT_CACHE = Image.open(path).convert("RGBA").resize((w, h), Image.LANCZOS)
+        return _RANK_COCKPIT_CACHE.copy()
+    except Exception:
+        return None
 
 # ----------------------------
 # Rank card builder
@@ -113,48 +142,47 @@ async def build_rank_card_png(
     xp: int,
     xp_next: int,
     title: str = "Rookie",
-    template_path: str | None = None,
+    template_path: str | None = None,  # kept for backwards compat, ignored if bg_key set
+    bg_key: str | None = None,
 ) -> bytes:
     """
-    Returns PNG bytes for a rank card with the user's avatar embedded.
+    Returns PNG bytes for a rank card.
+    Layer order: background → avatar (circle, left) → cockpit overlay → text/XP bar.
     """
     W, H = 900, 260
 
-    # 1) Background (template image OR solid color)
-    base = _rank_template_base(template_path, W, H)
+    # 1) Background
+    base = _rank_bg_image(bg_key, W, H)
 
-    draw = ImageDraw.Draw(base)
-
-    # 2) Avatar
+    # 2) Avatar — circle-cropped, positioned left (behind cockpit viewport)
     avatar = await fetch_avatar_image(member, size=256)
     avatar = circle_crop(avatar, 170)
     base.paste(avatar, (35, 45), avatar)
 
-    # Optional: avatar ring
-    ring = Image.new("RGBA", (170, 170), (0, 0, 0, 0))
-    rd = ImageDraw.Draw(ring)
-    rd.ellipse((0, 0, 169, 169), outline=(120, 200, 255, 255), width=6)
-    base.paste(ring, (35, 45), ring)
+    # 3) Cockpit overlay — composited on top with full alpha transparency support
+    cockpit = _rank_cockpit_overlay(W, H)
+    if cockpit is not None:
+        base.alpha_composite(cockpit)
 
-    # 3) Fonts
-    # Put a .ttf in your project folder (recommended) like fonts/Inter-SemiBold.ttf
-    # Fallback: PIL default (looks meh)
+    draw = ImageDraw.Draw(base)
+
+    # 4) Fonts
     font_name, font_small, font_tiny = _rank_fonts()
 
-    # 4) Text
+    # 5) Text
     username = member.display_name
     draw.text((230, 45), username, font=font_name, fill=(240, 240, 245, 255))
     draw.text((230, 95), f"Title: {title}", font=font_small, fill=(180, 185, 195, 255))
     draw.text((730, 45), f"LVL {level}", font=font_name, fill=(120, 200, 255, 255))
 
-    # 5) XP bar + numbers
+    # 6) XP bar + numbers
     pct = 0.0 if xp_next <= 0 else (xp / xp_next)
     bar_x, bar_y, bar_w, bar_h = 230, 150, 635, 26
     draw_progress_bar(draw, bar_x, bar_y, bar_w, bar_h, pct)
 
     draw.text((230, 185), f"XP: {xp} / {xp_next}", font=font_tiny, fill=(180, 185, 195, 255))
 
-    # 6) Export to bytes
+    # 7) Export to bytes
     out = io.BytesIO()
     base.save(out, format="PNG")
     return out.getvalue()
@@ -171,6 +199,7 @@ from xp_storage import (
     update_user_message_meta,
     is_on_cooldown,
     get_top_users_by_xp,
+    set_user_card_prefs,
 )
 
 # ----------------------------
@@ -676,6 +705,73 @@ def _record_alert(
 def _clean_text_key(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
+# --- Driver name resolution ---
+_DRIVER_ACRONYMS: Dict[str, str] = {
+    "ver": "verstappen", "nor": "norris", "lec": "leclerc",
+    "pia": "piastri", "sai": "sainz", "ham": "hamilton",
+    "rus": "russell", "per": "perez", "alo": "alonso",
+    "str": "stroll", "gas": "gasly", "oco": "ocon",
+    "hul": "hulkenberg", "mag": "magnussen", "tsu": "tsunoda",
+    "law": "lawson", "col": "colapinto", "bea": "bearman",
+    "ant": "antonelli", "had": "hadjar", "bor": "bortoleto",
+    "doo": "doohan",
+}
+
+_DRIVER_ALIASES: Dict[str, str] = {
+    # full names
+    "max verstappen": "verstappen", "lando norris": "norris",
+    "charles leclerc": "leclerc", "oscar piastri": "piastri",
+    "carlos sainz": "sainz", "lewis hamilton": "hamilton",
+    "george russell": "russell", "sergio perez": "perez",
+    "fernando alonso": "alonso", "lance stroll": "stroll",
+    "pierre gasly": "gasly", "esteban ocon": "ocon",
+    "nico hulkenberg": "hulkenberg", "kevin magnussen": "magnussen",
+    "yuki tsunoda": "tsunoda", "liam lawson": "lawson",
+    "franco colapinto": "colapinto", "oliver bearman": "bearman",
+    "kimi antonelli": "antonelli", "isack hadjar": "hadjar",
+    "gabriel bortoleto": "bortoleto", "jack doohan": "doohan",
+    # broadcast format "F Lastname"
+    "m verstappen": "verstappen", "l norris": "norris",
+    "c leclerc": "leclerc", "o piastri": "piastri",
+    "c sainz": "sainz", "l hamilton": "hamilton",
+    "g russell": "russell", "s perez": "perez",
+    "f alonso": "alonso", "l stroll": "stroll",
+    "p gasly": "gasly", "e ocon": "ocon",
+    "n hulkenberg": "hulkenberg", "k magnussen": "magnussen",
+    "y tsunoda": "tsunoda", "l lawson": "lawson",
+    "f colapinto": "colapinto", "o bearman": "bearman",
+    "k antonelli": "antonelli", "i hadjar": "hadjar",
+    "g bortoleto": "bortoleto", "j doohan": "doohan",
+    # common nicknames / alternates
+    "checo": "perez", "checo perez": "perez",
+    "hulk": "hulkenberg", "kmag": "magnussen",
+    "sainz jr": "sainz", "sainz jr.": "sainz",
+}
+
+def _resolve_driver_key(s: str) -> str:
+    """Normalize any driver name input to a canonical last-name key for comparison."""
+    if not s:
+        return ""
+    key = _clean_text_key(s)
+    if not key:
+        return ""
+    # Exact acronym match (e.g. "ver")
+    if key in _DRIVER_ACRONYMS:
+        return _DRIVER_ACRONYMS[key]
+    # Full alias match
+    if key in _DRIVER_ALIASES:
+        return _DRIVER_ALIASES[key]
+    # Try extracting last word as last name (handles "Max Verstappen" → "verstappen")
+    parts = key.split()
+    if len(parts) > 1:
+        last = parts[-1]
+        if last in _DRIVER_ACRONYMS:
+            return _DRIVER_ACRONYMS[last]
+        if last in _DRIVER_ALIASES:
+            return _DRIVER_ALIASES[last]
+        return last
+    return key
+
 def _parse_dt_utc(date_s: str | None, time_s: str | None) -> Optional[datetime]:
     if not date_s:
         return None
@@ -1004,7 +1100,7 @@ def _prediction_lock_dt(meta: Dict[str, Any], category: str) -> Optional[datetim
                 if str(s.get("type")) == target:
                     return s.get("dt")
         return meta.get("race_dt")
-    if category == "sprint_podium":
+    if category in {"sprint_podium", "sprint_p8"}:
         for s in sessions:
             if str(s.get("type")) == "Sprint":
                 return s.get("dt")
@@ -1038,7 +1134,7 @@ def _prediction_session_requirements(meta: Dict[str, Any]) -> Dict[str, List[str
     if "SprintShootout" in session_types or "SprintQualifying" in session_types:
         req["sprint_quali"] = ["sprint_pole"]
     if "Sprint" in session_types:
-        req["sprint"] = ["sprint_podium"]
+        req["sprint"] = ["sprint_podium", "sprint_p8"]
     if "Race" in session_types or meta.get("race_dt") is not None:
         req["race"] = ["podium", "p10"]
     return req
@@ -1057,7 +1153,7 @@ def _prediction_category_session(category: str) -> str:
         return "quali"
     if c == "sprint_pole":
         return "sprint_quali"
-    if c == "sprint_podium":
+    if c in {"sprint_podium", "sprint_p8"}:
         return "sprint"
     if c in {"podium", "p10"}:
         return "race"
@@ -1070,6 +1166,7 @@ def _prediction_category_display(category: str) -> str:
         "podium": "Podium",
         "sprint_podium": "Sprint Podium",
         "p10": "P10",
+        "sprint_p8": "Sprint P8",
     }.get(category, category)
 
 def _pred_scored_sessions_for_guild(round_obj: Dict[str, Any], guild_id: int) -> Dict[str, bool]:
@@ -1081,25 +1178,27 @@ def _pred_scored_sessions_for_guild(round_obj: Dict[str, Any], guild_id: int) ->
 
 def _score_prediction_category(entry: Dict[str, Any], actual: Dict[str, Any], category: str) -> int:
     category = (category or "").lower().strip()
-    if category in {"pole", "p10", "sprint_pole"}:
-        pred_key = _clean_text_key(str(entry.get(category) or ""))
-        actual_key = _clean_text_key(str(actual.get(category) or ""))
+    if category in {"pole", "p10", "sprint_pole", "sprint_p8"}:
+        pred_key = _resolve_driver_key(str(entry.get(category) or ""))
+        actual_key = _resolve_driver_key(str(actual.get(category) or ""))
         if not pred_key or not actual_key:
             return 0
         if pred_key == actual_key:
-            return 3 if category != "sprint_pole" else 2
+            if category == "sprint_pole":
+                return 2
+            return 3  # pole, p10, sprint_p8 all worth 3
         return 0
     if category in {"podium", "sprint_podium"}:
         pred = entry.get(category) or []
         act = actual.get(category) or []
         if not (isinstance(pred, list) and isinstance(act, list) and len(act) >= 3):
             return 0
-        act_keys = [_clean_text_key(str(x)) for x in act[:3]]
+        act_keys = [_resolve_driver_key(str(x)) for x in act[:3]]
         exact_points = 5 if category == "podium" else 3
         in_points = 2 if category == "podium" else 1
         pts = 0
         for idx, p in enumerate(pred[:3]):
-            pk = _clean_text_key(str(p))
+            pk = _resolve_driver_key(str(p))
             if not pk:
                 continue
             if idx < len(act_keys) and pk == act_keys[idx]:
@@ -1111,7 +1210,7 @@ def _score_prediction_category(entry: Dict[str, Any], actual: Dict[str, Any], ca
 
 def _score_prediction_session(entry: Dict[str, Any], actual: Dict[str, Any], session_key: str) -> int:
     pts = 0
-    for cat in {"quali": ["pole"], "sprint_quali": ["sprint_pole"], "sprint": ["sprint_podium"], "race": ["podium", "p10"]}.get(session_key, []):
+    for cat in {"quali": ["pole"], "sprint_quali": ["sprint_pole"], "sprint": ["sprint_podium", "sprint_p8"], "race": ["podium", "p10"]}.get(session_key, []):
         pts += _score_prediction_category(entry, actual, cat)
     return pts
 
@@ -1130,23 +1229,37 @@ def _prediction_actuals_ready_for_session(meta: Dict[str, Any], round_obj: Dict[
                 return False
     return True
 
-async def _announce_prediction_session_scores(ctx, meta: Dict[str, Any], session_key: str) -> bool:
-    if ctx.guild is None:
-        return False
-    rnd = _pred_round_obj(meta["key"])
-    scored_map = _pred_scored_sessions_for_guild(rnd, ctx.guild.id)
+
+
+async def _announce_prediction_scores_to_channel(
+    channel,
+    guild: discord.Guild,
+    round_key: str,
+    session_key: str,
+) -> bool:
+    """Core scoring function. Posts results to any channel/thread. No ctx needed."""
+    meta = await _prediction_round_context()
+    # If round_key doesn't match current round, load from state directly
+    rnd = _pred_round_obj(round_key)
+    race_name = rnd.get("race_name") or round_key
+    scored_map = _pred_scored_sessions_for_guild(rnd, guild.id)
     if scored_map.get(session_key):
         return False
-    if not _prediction_actuals_ready_for_session(meta, rnd, session_key):
+    if not _prediction_actuals_ready_for_session(meta if meta["key"] == round_key else {"key": round_key, "sessions": []}, rnd, session_key):
         return False
 
-    guild_entries = ((rnd.get("entries") or {}).get(str(ctx.guild.id)) or {})
-    totals = _pred_totals_for_guild(ctx.guild.id)
+    guild_entries = ((rnd.get("entries") or {}).get(str(guild.id)) or {})
+    totals = _pred_totals_for_guild(guild.id)
+    # Also track per-round scores for !prstats
+    round_scores = rnd.setdefault("round_scores", {}).setdefault(str(guild.id), {})
     rows: List[Tuple[int, str]] = []
     for uid, entry in guild_entries.items():
         pts = _score_prediction_session(entry, rnd.get("actual") or {}, session_key)
         totals[str(uid)] = int(totals.get(str(uid), 0) or 0) + pts
-        member = ctx.guild.get_member(int(uid))
+        # Accumulate per-round total
+        prev_round = int(round_scores.get(str(uid), 0) or 0)
+        round_scores[str(uid)] = prev_round + pts
+        member = guild.get_member(int(uid))
         name = member.display_name if member else uid
         rows.append((pts, name))
     rows.sort(key=lambda x: (x[0], x[1].lower()), reverse=True)
@@ -1158,11 +1271,110 @@ async def _announce_prediction_session_scores(ctx, meta: Dict[str, Any], session
         body = "\n".join(f"• {name} — **+{pts}** pts" for pts, name in rows)
     else:
         body = "No predictions were submitted."
-    msg = f"🧮 **{meta['race_name']} — {label} Prediction Points** (spoiler-safe)\n{body}"
+    msg = f"🧮 **{race_name} — {label} Prediction Points**\n{body}"
     if len(msg) > 1900:
         msg = msg[:1850] + "\n… (truncated)"
-    await ctx.send(msg)
+    await channel.send(msg)
     return True
+
+async def _announce_prediction_session_scores(ctx, meta: Dict[str, Any], session_key: str) -> bool:
+    if ctx.guild is None:
+        return False
+    return await _announce_prediction_scores_to_channel(ctx.channel, ctx.guild, meta["key"], session_key)
+
+async def _fetch_and_set_prediction_actuals_from_openf1(
+    round_key: str,
+    session_kind: str,
+    openf1_session_key: int,
+    driver_map: Dict[str, str],
+) -> bool:
+    """Fetch final positions from OpenF1 and set prediction actuals for the round. Returns True if actuals were set."""
+    async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
+        try:
+            positions = await _openf1_latest_positions(http, openf1_session_key)
+        except Exception as e:
+            logging.warning(f"[Predict] Failed to fetch positions for autoscore: {e}")
+            return False
+
+    if not positions:
+        return False
+
+    ordered = sorted(positions.items(), key=lambda kv: kv[1])
+
+    def _driver_last_name(num: str) -> str:
+        label = driver_map.get(num, "")
+        return _resolve_driver_key(label) if label else ""
+
+    rnd = _pred_round_obj(round_key)
+    actual = rnd.setdefault("actual", {})
+    changed = False
+
+    if session_kind in {"QUALI", "SPRINT_QUALI"}:
+        p1 = next((num for num, pos in ordered if pos == 1), None)
+        if p1:
+            key = "sprint_pole" if session_kind == "SPRINT_QUALI" else "pole"
+            name = _driver_last_name(p1)
+            if name and not actual.get(key):
+                actual[key] = name
+                changed = True
+
+    elif session_kind == "SPRINT":
+        top3 = [num for num, pos in ordered if 1 <= pos <= 3]
+        p8 = next((num for num, pos in ordered if pos == 8), None)
+        if len(top3) == 3 and not actual.get("sprint_podium"):
+            actual["sprint_podium"] = [_driver_last_name(n) for n in top3]
+            changed = True
+        if p8 and not actual.get("sprint_p8"):
+            name = _driver_last_name(p8)
+            if name:
+                actual["sprint_p8"] = name
+                changed = True
+
+    elif session_kind == "RACE":
+        top3 = [num for num, pos in ordered if 1 <= pos <= 3]
+        p10 = next((num for num, pos in ordered if pos == 10), None)
+        if len(top3) == 3 and not actual.get("podium"):
+            actual["podium"] = [_driver_last_name(n) for n in top3]
+            changed = True
+        if p10 and not actual.get("p10"):
+            name = _driver_last_name(p10)
+            if name:
+                actual["p10"] = name
+                changed = True
+
+    if changed:
+        rnd["scored"] = False
+        _save_state_quiet()
+    return changed
+
+async def _delayed_prediction_autoscore(
+    guild: discord.Guild,
+    thread: discord.Thread,
+    round_key: str,
+    session_kind: str,
+    openf1_session_key: int,
+    driver_map: Dict[str, str],
+    delay_minutes: int = 30,
+) -> None:
+    """Wait delay_minutes after session end, fetch final results from OpenF1, then score predictions."""
+    _racelog(guild.id, f"[Predict] Delayed autoscore scheduled in {delay_minutes}m for {session_kind} session {openf1_session_key}")
+    await asyncio.sleep(delay_minutes * 60)
+    try:
+        changed = await _fetch_and_set_prediction_actuals_from_openf1(
+            round_key, session_kind, openf1_session_key, driver_map
+        )
+        if not changed:
+            _racelog(guild.id, "[Predict] Autoscore: no new actuals set (already set or fetch failed)")
+
+        session_map = {"QUALI": "quali", "SPRINT_QUALI": "sprint_quali", "SPRINT": "sprint", "RACE": "race"}
+        pred_session = session_map.get(session_kind)
+        if pred_session:
+            posted = await _announce_prediction_scores_to_channel(thread, guild, round_key, pred_session)
+            _racelog(guild.id, f"[Predict] Autoscore posted={posted} for {pred_session}")
+        else:
+            _racelog(guild.id, f"[Predict] Autoscore: unknown session kind {session_kind}")
+    except Exception as e:
+        logging.error(f"[Predict] Delayed autoscore failed for guild {guild.id}: {e}")
 
 def _normalize_driver_pick(s: str) -> str:
     s = " ".join((s or "").replace("|", " ").split())
@@ -1174,31 +1386,6 @@ def _split_podium_picks(raw: str) -> Optional[List[str]]:
         return None
     return [_normalize_driver_pick(p) for p in parts]
 
-def _score_prediction(entry: Dict[str, Any], actual: Dict[str, Any]) -> int:
-    points = 0
-    pred_pole = _clean_text_key(str(entry.get("pole") or ""))
-    actual_pole = _clean_text_key(str(actual.get("pole") or ""))
-    if pred_pole and actual_pole and pred_pole == actual_pole:
-        points += 3
-
-    pred_podium = entry.get("podium") or []
-    actual_podium = actual.get("podium") or []
-    if isinstance(pred_podium, list) and isinstance(actual_podium, list) and len(actual_podium) >= 3:
-        actual_keys = [_clean_text_key(str(x)) for x in actual_podium[:3]]
-        for idx, pred in enumerate(pred_podium[:3]):
-            pk = _clean_text_key(str(pred))
-            if not pk:
-                continue
-            if idx < len(actual_keys) and pk == actual_keys[idx]:
-                points += 5
-            elif pk in actual_keys:
-                points += 2
-
-    pred_p10 = _clean_text_key(str(entry.get("p10") or ""))
-    actual_p10 = _clean_text_key(str(actual.get("p10") or ""))
-    if pred_p10 and actual_p10 and pred_p10 == actual_p10:
-        points += 3
-    return points
 
 def _quiz_scores_root() -> Dict[str, Any]:
     root = _state_bucket("quiz_scores")
@@ -1743,131 +1930,6 @@ def cfg_xp_min_level_channels() -> Dict[str, int]:
             continue
     return out
 
-def _xp_backfill_gain_for_message(msg_id: int, mn: int, mx: int) -> int:
-    # Deterministic gain so reruns are stable and don't drift due to random().
-    if mx <= mn:
-        return mn
-    span = (mx - mn) + 1
-    return mn + (int(msg_id) % span)
-
-async def _iter_xp_backfill_channels(guild: discord.Guild) -> List[discord.abc.Messageable]:
-    channels: List[discord.abc.Messageable] = []
-    channels.extend(guild.text_channels)
-    # Include active threads (private/public/news/forum) that are currently visible.
-    try:
-        channels.extend(list(guild.threads))
-    except Exception:
-        pass
-    # De-duplicate by channel id while preserving order.
-    seen: set[int] = set()
-    out: List[discord.abc.Messageable] = []
-    for ch in channels:
-        cid = getattr(ch, "id", None)
-        if cid is None or cid in seen:
-            continue
-        seen.add(cid)
-        out.append(ch)
-    return out
-
-async def _xp_rebuild_guild_from_history(guild: discord.Guild, *, skip_message_id: Optional[int] = None) -> Dict[str, int]:
-    """
-    Rebuild this guild's XP state from message history using current cooldown/gain settings.
-    Silent: no level-up announcements, direct state mutation only.
-    """
-    gid = str(guild.id)
-    mn, mx = xp_gain_range()
-    cooldown = xp_cooldown_seconds()
-
-    # Collect all accessible messages first in chronological order across channels.
-    history_rows: List[Tuple[int, int]] = []  # (unix_ts, user_id)
-    scanned_messages = 0
-    scanned_channels = 0
-    skipped_channels = 0
-
-    me = guild.me
-    channels = await _iter_xp_backfill_channels(guild)
-    for ch in channels:
-        try:
-            if me is not None:
-                perms = ch.permissions_for(me)  # type: ignore[attr-defined]
-                if not (getattr(perms, "view_channel", False) and getattr(perms, "read_message_history", False)):
-                    skipped_channels += 1
-                    continue
-        except Exception:
-            pass
-
-        try:
-            async for message in ch.history(limit=None, oldest_first=True):  # type: ignore[attr-defined]
-                scanned_messages += 1
-                if skip_message_id and int(message.id) == int(skip_message_id):
-                    continue
-                if message.guild is None or message.guild.id != guild.id:
-                    continue
-                if getattr(message.author, "bot", False):
-                    continue
-                if not isinstance(message.author, discord.Member):
-                    # fetches may return User in some thread/history contexts; still usable if it has id
-                    if not hasattr(message.author, "id"):
-                        continue
-                ts = int(message.created_at.replace(tzinfo=timezone.utc).timestamp())
-                history_rows.append((ts, int(message.author.id)))
-        except discord.Forbidden:
-            skipped_channels += 1
-            continue
-        except Exception as e:
-            logging.warning(f"[XP] Backfill channel {getattr(ch, 'id', '?')} scan error: {e}")
-            skipped_channels += 1
-            continue
-        scanned_channels += 1
-
-    history_rows.sort(key=lambda x: x[0])
-
-    # Build fresh guild XP users map.
-    guild_users: Dict[str, Dict[str, Any]] = {}
-    awarded_messages = 0
-    for ts, uid in history_rows:
-        uid_s = str(uid)
-        rec = guild_users.get(uid_s)
-        if not isinstance(rec, dict):
-            rec = {
-                "xp": 0,
-                "level": 0,
-                "last_msg_ts": 0,
-                "messages": 0,
-                "card": {"bg_url": None, "accent": None, "tagline": None},
-            }
-            guild_users[uid_s] = rec
-
-        last_ts = int(rec.get("last_msg_ts", 0) or 0)
-        if (ts - last_ts) < max(0, cooldown):
-            continue
-
-        gain = _xp_backfill_gain_for_message(uid ^ ts, mn, mx)
-        new_xp = int(rec.get("xp", 0) or 0) + gain
-        rec["xp"] = new_xp
-        rec["level"] = xp_level_from_total(new_xp)
-        rec["last_msg_ts"] = ts
-        rec["messages"] = int(rec.get("messages", 0) or 0) + 1
-        awarded_messages += 1
-
-    XP_STATE.setdefault("guilds", {})
-    XP_STATE["guilds"][gid] = {"users": guild_users}
-    _xp_mark_dirty()
-    # Flush immediately so a restart won't lose the rebuild.
-    await asyncio.to_thread(save_xp_state, XP_STATE)
-    global XP_DIRTY
-    XP_DIRTY = False
-
-    return {
-        "channels_scanned": scanned_channels,
-        "channels_skipped": skipped_channels,
-        "messages_scanned": scanned_messages,
-        "eligible_awards": awarded_messages,
-        "users_updated": len(guild_users),
-        "cooldown_seconds": cooldown,
-        "xp_min_gain": mn,
-        "xp_max_gain": mx,
-    }
 
 async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
     """
@@ -1915,7 +1977,7 @@ async def rank(ctx, member: discord.Member = None):
     total_xp = int(rec.get("xp", 0) or 0)
     level, xp, xp_next = xp_progress_to_next(total_xp)
     title = "Rookie" if level < 5 else "Regular" if level < 15 else "Veteran"
-    template_path = "assets/rank_template.png" if os.path.exists("assets/rank_template.png") else None
+    bg_key = (rec.get("card") or {}).get("bg_url") or "default"
 
     png_bytes = await build_rank_card_png(
         member=member,
@@ -1923,11 +1985,39 @@ async def rank(ctx, member: discord.Member = None):
         xp=xp,
         xp_next=xp_next,
         title=title,
-        template_path=template_path,
+        bg_key=bg_key,
     )
 
     file = discord.File(io.BytesIO(png_bytes), filename="rank.png")
     await ctx.send(file=file)
+
+@bot.command(name="setbg")
+async def setbg(ctx, name: str = None):
+    """Set your rank card background. Use !cardbgs to see available options."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    available = rank_available_backgrounds()
+    if not name:
+        return await ctx.send(
+            f"Available backgrounds: {', '.join(f'`{k}`' for k in available)}\n"
+            f"Usage: `!setbg <name>`"
+        )
+    name = name.strip().lower()
+    if name not in available:
+        return await ctx.send(
+            f"❌ `{name}` isn't available. Choose from: {', '.join(f'`{k}`' for k in available)}"
+        )
+    set_user_card_prefs(XP_STATE, ctx.guild.id, ctx.author.id, bg_url=name)
+    _xp_mark_dirty()
+    await ctx.send(f"✅ Background set to **{name}**. Use `!rank` to see your updated card.")
+
+@bot.command(name="cardbgs", aliases=["backgrounds", "rankbgs"])
+async def cardbgs(ctx):
+    """List available rank card backgrounds."""
+    available = rank_available_backgrounds()
+    if not available:
+        return await ctx.send("ℹ️ No backgrounds available yet.")
+    await ctx.send("🎨 **Available rank card backgrounds:**\n" + "\n".join(f"• `{k}`" for k in available))
 
 
 @bot.command(name="xpleaderboard", aliases=["xptop"])
@@ -2015,45 +2105,6 @@ async def xpaudit(ctx, member: discord.Member = None):
         "_Note: `messages` here is XP-awarding events after cooldown, not total Discord messages._"
     )
     await ctx.send(body)
-
-@bot.hybrid_command(name="xpbackfillhistory")
-@commands.has_permissions(administrator=True)
-async def xpbackfillhistory(ctx, mode: str = "rebuild", confirm: str = ""):
-    """
-    TEMP ADMIN TOOL: rebuild guild XP from existing message history without level-up spam.
-    Usage: !xpbackfillhistory rebuild CONFIRM
-    """
-    if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
-    mode = (mode or "").lower().strip()
-    if mode != "rebuild":
-        return await ctx.send("❌ Only `rebuild` mode is supported right now. Use: `!xpbackfillhistory rebuild CONFIRM`")
-    if (confirm or "").strip().upper() != "CONFIRM":
-        return await ctx.send(
-            "\u26A0\uFE0F This rebuilds XP for the **entire server** from message history and replaces current XP records for this guild.\n"
-            "Run: `!xpbackfillhistory rebuild CONFIRM`"
-        )
-
-    status_msg = await ctx.send("⏳ Starting silent XP backfill (history rebuild). This may take a while...")
-    try:
-        skip_message_id = ctx.message.id if getattr(ctx, "message", None) is not None else None
-        summary = await _xp_rebuild_guild_from_history(ctx.guild, skip_message_id=skip_message_id)
-        await status_msg.edit(
-            content=(
-                "✅ Silent XP backfill complete.\n"
-                f"- Users updated: **{summary['users_updated']}**\n"
-                f"- Messages scanned: **{summary['messages_scanned']}**\n"
-                f"- Awarded XP events (after cooldown): **{summary['eligible_awards']}**\n"
-                f"- Channels scanned: **{summary['channels_scanned']}**\n"
-                f"- Channels skipped: **{summary['channels_skipped']}**\n"
-                f"- Cooldown used: **{summary['cooldown_seconds']}s**\n"
-                f"- XP gain range used: **{summary['xp_min_gain']}–{summary['xp_max_gain']}**\n"
-                "_No level-up messages were posted during this rebuild._"
-            )
-        )
-    except Exception as e:
-        logging.error(f"[XP] Backfill failed for guild {ctx.guild.id}: {e}")
-        await status_msg.edit(content=f"❌ XP backfill failed: {e}")
 
 @bot.hybrid_command(name="xpgate")
 @commands.has_permissions(administrator=True)
@@ -2877,7 +2928,7 @@ async def f1_reminder_loop():
                     delta_m = int((dt - now).total_seconds() // 60)
                     if delta_m < 0:
                         continue
-                    if delta_m <= lead and delta_m >= max(0, lead - 1):
+                    if delta_m <= lead:
                         msg = (
                             f"⏰ **F1 Reminder**: **{item['race_name']} — {item['session_label']}** starts "
                             f"{'now' if delta_m == 0 else f'in about {delta_m}m'}.\n"
@@ -3032,18 +3083,23 @@ async def _prediction_round_context() -> Dict[str, Any]:
         rnd["race_name"] = meta.get("race_name")
     return meta
 
-def _pred_entry_summary(entry: Dict[str, Any]) -> str:
+def _pred_entry_summary(entry: Dict[str, Any], req: Optional[Dict[str, Any]] = None) -> str:
+    req = req or {}
     podium = entry.get("podium") or []
     sprint_podium = entry.get("sprint_podium") or []
     podium_txt = " | ".join(str(x) for x in podium) if isinstance(podium, list) and podium else "—"
     sprint_podium_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "—"
-    return (
-        f"- Pole: `{entry.get('pole') or '—'}`\n"
-        f"- Sprint Pole: `{entry.get('sprint_pole') or '—'}`\n"
-        f"- Podium: `{podium_txt}`\n"
-        f"- Sprint Podium: `{sprint_podium_txt}`\n"
-        f"- P10: `{entry.get('p10') or '—'}`"
-    )
+    lines = [
+        f"- Pole: `{entry.get('pole') or '—'}`",
+        f"- Podium: `{podium_txt}`",
+        f"- P10: `{entry.get('p10') or '—'}`",
+    ]
+    if "sprint_quali" in req:
+        lines.append(f"- Sprint Pole: `{entry.get('sprint_pole') or '—'}`")
+    if "sprint" in req:
+        lines.append(f"- Sprint Podium: `{sprint_podium_txt}`")
+        lines.append(f"- Sprint P8: `{entry.get('sprint_p8') or '—'}`")
+    return "\n".join(lines)
 
 @bot.command(name="predictpole")
 async def predictpole(ctx, *, driver: str):
@@ -3132,6 +3188,42 @@ async def predictp10(ctx, *, driver: str):
     _save_state_quiet()
     await ctx.send(f"✅ P10 pick saved for **{meta['race_name']}**: `{entry['p10']}`")
 
+@bot.command(name="predictsprintp8", aliases=["predictspp8"])
+async def predictsprintp8(ctx, *, driver: str):
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    meta = await _prediction_round_context()
+    req = _prediction_session_requirements(meta)
+    if "sprint" not in req:
+        return await ctx.send(f"ℹ️ **{meta['race_name']}** does not appear to have a sprint race scheduled.")
+    if _prediction_category_locked(meta, "sprint_p8"):
+        return await ctx.send(
+            f"🔒 Sprint P8 predictions are locked for **{meta['race_name']}** "
+            f"(locked at Sprint start: `{_prediction_category_lock_text(meta, 'sprint_p8')}`)."
+        )
+    entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
+    entry["sprint_p8"] = _normalize_driver_pick(driver)
+    _save_state_quiet()
+    await ctx.send(f"✅ Sprint P8 pick saved for **{meta['race_name']}**: `{entry['sprint_p8']}`")
+
+def _lock_status_text(meta: Dict[str, Any], category: str) -> str:
+    """Return a human-friendly lock status string for a prediction category."""
+    if _prediction_category_locked(meta, category):
+        return "🔒 Locked"
+    lock_dt = _prediction_lock_dt(meta, category)
+    if lock_dt is None:
+        return "⏳ Open"
+    now = datetime.now(timezone.utc)
+    remaining = lock_dt - now
+    total_seconds = int(remaining.total_seconds())
+    if total_seconds <= 0:
+        return "🔒 Locked"
+    hours, rem = divmod(total_seconds, 3600)
+    minutes = rem // 60
+    if hours > 0:
+        return f"⏳ Open — locks in {hours}h {minutes}m"
+    return f"⏳ Open — locks in {minutes}m"
+
 @bot.command(name="mypredictions")
 async def mypredictions(ctx):
     if ctx.guild is None:
@@ -3139,24 +3231,20 @@ async def mypredictions(ctx):
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
-    pole_locked = _prediction_category_locked(meta, "pole")
-    sprint_pole_locked = _prediction_category_locked(meta, "sprint_pole") if "sprint_quali" in req else None
-    podium_locked = _prediction_category_locked(meta, "podium")
-    sprint_podium_locked = _prediction_category_locked(meta, "sprint_podium") if "sprint" in req else None
-    p10_locked = _prediction_category_locked(meta, "p10")
-    extra_lock_lines = ""
-    if sprint_pole_locked is not None:
-        extra_lock_lines += f"- Sprint pole locked: `{sprint_pole_locked}`\n"
-    if sprint_podium_locked is not None:
-        extra_lock_lines += f"- Sprint podium locked: `{sprint_podium_locked}`\n"
-    await ctx.send(
-        f"\U0001F4DD **Your predictions** for **{meta['race_name']}** (`{meta['key']}`)\n"
-        f"- Pole locked: `{pole_locked}`\n"
-        + extra_lock_lines +
-        f"- Podium locked: `{podium_locked}`\n"
-        f"- P10 locked: `{p10_locked}`\n"
-        + _pred_entry_summary(entry)
-    )
+    lines = [f"📝 **Your predictions** for **{meta['race_name']}** (`{meta['key']}`)"]
+    lines.append(f"**Pole** {_lock_status_text(meta, 'pole')}: `{entry.get('pole') or '—'}`")
+    podium = entry.get("podium") or []
+    podium_txt = " | ".join(str(x) for x in podium) if isinstance(podium, list) and podium else "—"
+    lines.append(f"**Podium** {_lock_status_text(meta, 'podium')}: `{podium_txt}`")
+    lines.append(f"**P10** {_lock_status_text(meta, 'p10')}: `{entry.get('p10') or '—'}`")
+    if "sprint_quali" in req:
+        lines.append(f"**Sprint Pole** {_lock_status_text(meta, 'sprint_pole')}: `{entry.get('sprint_pole') or '—'}`")
+    if "sprint" in req:
+        sprint_podium = entry.get("sprint_podium") or []
+        sp_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "—"
+        lines.append(f"**Sprint Podium** {_lock_status_text(meta, 'sprint_podium')}: `{sp_txt}`")
+        lines.append(f"**Sprint P8** {_lock_status_text(meta, 'sprint_p8')}: `{entry.get('sprint_p8') or '—'}`")
+    await ctx.send("\n".join(lines))
 
 @bot.command(name="predictions", aliases=["predicthelp"])
 async def predictions(ctx):
@@ -3164,15 +3252,18 @@ async def predictions(ctx):
     req = _prediction_session_requirements(meta)
     lines = [
         f"📋 **Predictions** for **{meta['race_name']}** (`{meta['key']}`)",
-        "- `!predictpole <driver>` (locks at Qualifying start)",
-        "- `!predictpodium A | B | C` (locks at Race start)",
-        "- `!predictp10 <driver>` (locks at Race start)",
+        f"- `!predictpole <driver>` ({_lock_status_text(meta, 'pole')})",
+        f"- `!predictpodium A | B | C` ({_lock_status_text(meta, 'podium')})",
+        f"- `!predictp10 <driver>` ({_lock_status_text(meta, 'p10')})",
     ]
     if "sprint_quali" in req:
-        lines.append("- `!predictsprintpole <driver>` (locks at Sprint Qualifying/Shootout start)")
+        lines.append(f"- `!predictsprintpole <driver>` ({_lock_status_text(meta, 'sprint_pole')})")
     if "sprint" in req:
-        lines.append("- `!predictsprintpodium A | B | C` (locks at Sprint start)")
-    lines.append("- `!mypredictions` to view your picks")
+        lines.append(f"- `!predictsprintpodium A | B | C` ({_lock_status_text(meta, 'sprint_podium')})")
+        lines.append(f"- `!predictsprintp8 <driver>` ({_lock_status_text(meta, 'sprint_p8')})")
+    lines.append("- `!mypredictions` — view your picks")
+    lines.append("- `!predictionsboard` — see all entries")
+    lines.append("- `!prstats` — your prediction standings")
     await ctx.send("\n".join(lines))
 
 @bot.command(name="predictionsboard", aliases=["predboard"])
@@ -3182,21 +3273,42 @@ async def predictionsboard(ctx):
     meta = await _prediction_round_context()
     rnd = _pred_round_obj(meta["key"])
     req = _prediction_session_requirements(meta)
-    categories = ["pole", "podium", "p10"]
+    # Ordered list of (category, display_label) for this weekend
+    cat_defs = [("pole", "Pole"), ("podium", "Podium"), ("p10", "P10")]
     if "sprint_quali" in req:
-        categories.append("sprint_pole")
+        cat_defs.append(("sprint_pole", "SP Pole"))
     if "sprint" in req:
-        categories.append("sprint_podium")
+        cat_defs.append(("sprint_podium", "SP Podium"))
+        cat_defs.append(("sprint_p8", "SP P8"))
+    # Which categories are currently locked (safe to show picks)
+    locked_cats = {cat for cat, _ in cat_defs if _prediction_category_locked(meta, cat)}
     guild_entries = ((rnd.get("entries") or {}).get(str(ctx.guild.id)) or {})
     if not guild_entries:
-        return await ctx.send(f"\u2139\uFE0F No predictions submitted yet for **{meta['race_name']}**.")
+        return await ctx.send(f"ℹ️ No predictions submitted yet for **{meta['race_name']}**.")
     lines = []
     for uid, entry in list(guild_entries.items())[:20]:
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
-        filled = sum(1 for k in categories if entry.get(k))
-        lines.append(f"• {name} — {filled}/{len(categories)} picks")
-    await ctx.send(f"📋 **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines))
+        filled = sum(1 for cat, _ in cat_defs if entry.get(cat))
+        header = f"**{name}** — {filled}/{len(cat_defs)} picks"
+        pick_parts = []
+        for cat, label in cat_defs:
+            val = entry.get(cat)
+            if not val:
+                continue
+            if cat in locked_cats:
+                if isinstance(val, list):
+                    pick_parts.append(f"{label}: {' | '.join(str(x) for x in val)}")
+                else:
+                    pick_parts.append(f"{label}: {val}")
+        if pick_parts:
+            lines.append(f"{header}\n  {', '.join(pick_parts)}")
+        else:
+            lines.append(header)
+    msg = f"📋 **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines)
+    if len(msg) > 1900:
+        msg = msg[:1850] + "\n… (truncated)"
+    await ctx.send(msg)
 
 @bot.hybrid_command(name="predictionslock")
 @commands.has_permissions(administrator=True)
@@ -3229,6 +3341,9 @@ async def predictionsetresult(ctx, category: str, *, value: str):
         "sprintpodium": "sprint_podium",
         "sprint_podium": "sprint_podium",
         "sppodium": "sprint_podium",
+        "sprintp8": "sprint_p8",
+        "sprint_p8": "sprint_p8",
+        "spp8": "sprint_p8",
     }.get(category, category)
     meta = await _prediction_round_context()
     rnd = _pred_round_obj(meta["key"])
@@ -3249,8 +3364,10 @@ async def predictionsetresult(ctx, category: str, *, value: str):
         if not podium:
             return await ctx.send("❌ Sprint podium format: `!predictionsetresult sprint_podium Driver 1 | Driver 2 | Driver 3`")
         actual["sprint_podium"] = podium
+    elif category == "sprint_p8":
+        actual["sprint_p8"] = _normalize_driver_pick(value)
     else:
-        return await ctx.send("❌ Category must be `pole`, `podium`, `p10`, `sprint_pole`, or `sprint_podium`.")
+        return await ctx.send("❌ Category must be `pole`, `podium`, `p10`, `sprint_pole`, `sprint_podium`, or `sprint_p8`.")
     rnd["scored"] = False  # legacy field, kept for compatibility
     scored_map = _pred_scored_sessions_for_guild(rnd, ctx.guild.id)
     scored_map.pop(_prediction_category_session(category), None)
@@ -3318,6 +3435,153 @@ async def predictionleaderboard(ctx):
         name = member.display_name if member else uid
         lines.append(f"{rank_i:>2}. {name} — **{pts} pts**")
     await ctx.send("\U0001F3C6 **Prediction Leaderboard (Fantasy Points)**\n" + "\n".join(lines))
+
+@bot.command(name="predresults", aliases=["roundresults", "predhistory"])
+async def predresults(ctx, *, round_key: str = None):
+    """Show prediction scores and actuals for a specific past round.
+    Usage: !predresults            (current/most recent round)
+           !predresults 2026-r3   (specific round key)
+    """
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+
+    if round_key:
+        round_key = round_key.strip().lower()
+    else:
+        meta = await _prediction_round_context()
+        round_key = meta["key"]
+
+    root = _predictions_root()
+    rnd = (root.get("rounds") or {}).get(round_key)
+    if not rnd or not isinstance(rnd, dict):
+        # Try to find a close match
+        all_keys = sorted((root.get("rounds") or {}).keys())
+        available = ", ".join(f"`{k}`" for k in all_keys[-10:]) or "none"
+        return await ctx.send(
+            f"ℹ️ No prediction data found for round `{round_key}`.\n"
+            f"Available rounds (most recent): {available}"
+        )
+
+    race_name = rnd.get("race_name") or round_key
+    actual = rnd.get("actual") or {}
+    round_scores = (rnd.get("round_scores") or {}).get(str(ctx.guild.id)) or {}
+    guild_entries = (rnd.get("entries") or {}).get(str(ctx.guild.id)) or {}
+    scored_sessions = (rnd.get("scored_sessions") or {}).get(str(ctx.guild.id)) or {}
+
+    if not guild_entries:
+        return await ctx.send(f"ℹ️ No prediction entries found for **{race_name}** (`{round_key}`).")
+
+    lines = [f"📊 **{race_name}** (`{round_key}`) — Prediction Results"]
+
+    # Show actuals if available
+    actual_parts = []
+    if actual.get("pole"):
+        actual_parts.append(f"Pole: **{actual['pole']}**")
+    if actual.get("podium") and isinstance(actual["podium"], list):
+        actual_parts.append("Podium: **" + " | ".join(actual["podium"][:3]) + "**")
+    if actual.get("p10"):
+        actual_parts.append(f"P10: **{actual['p10']}**")
+    if actual.get("sprint_pole"):
+        actual_parts.append(f"Sprint Pole: **{actual['sprint_pole']}**")
+    if actual.get("sprint_podium") and isinstance(actual["sprint_podium"], list):
+        actual_parts.append("Sprint Podium: **" + " | ".join(actual["sprint_podium"][:3]) + "**")
+    if actual.get("sprint_p8"):
+        actual_parts.append(f"Sprint P8: **{actual['sprint_p8']}**")
+
+    if actual_parts:
+        lines.append("**Results:** " + " · ".join(actual_parts))
+    else:
+        lines.append("_Results not set yet._")
+
+    scored_label = ", ".join(scored_sessions.keys()) if scored_sessions else "none"
+    lines.append(f"_Scored sessions: {scored_label}_")
+    lines.append("")
+
+    # Show per-user scores sorted by points
+    rows = []
+    for uid, entry in guild_entries.items():
+        pts = int(round_scores.get(uid, 0) or 0)
+        member = ctx.guild.get_member(int(uid))
+        name = member.display_name if member else uid
+        rows.append((pts, name))
+    rows.sort(key=lambda x: (x[0], x[1].lower()), reverse=True)
+
+    if rows:
+        for pts, name in rows:
+            lines.append(f"• {name} — **{pts} pts**")
+    else:
+        lines.append("No scores recorded.")
+
+    msg = "\n".join(lines)
+    if len(msg) > 1900:
+        msg = msg[:1850] + "\n… (truncated)"
+    await ctx.send(msg)
+
+@bot.command(name="prstats", aliases=["predstats", "myprstats"])
+async def prstats(ctx, member: Optional[discord.Member] = None):
+    """Show a user's prediction standings position and their best single-round score."""
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    target = member or ctx.author
+    uid = str(target.id)
+    totals = _pred_totals_for_guild(ctx.guild.id)
+    if not totals or uid not in totals:
+        name = target.display_name
+        return await ctx.send(f"ℹ️ **{name}** has no prediction points yet.")
+    # Build leaderboard to find rank
+    ranked = sorted(totals.items(), key=lambda kv: int(kv[1] or 0), reverse=True)
+    rank = next((i + 1 for i, (u, _) in enumerate(ranked) if u == uid), None)
+    total_pts = int(totals.get(uid, 0) or 0)
+    # Find best single-round score
+    root = _predictions_root()
+    rounds = root.get("rounds") or {}
+    best_round_name = None
+    best_round_pts = 0
+    for rk, rnd in rounds.items():
+        if not isinstance(rnd, dict):
+            continue
+        round_scores = (rnd.get("round_scores") or {}).get(str(ctx.guild.id)) or {}
+        pts = int(round_scores.get(uid, 0) or 0)
+        if pts > best_round_pts:
+            best_round_pts = pts
+            best_round_name = rnd.get("race_name") or rk
+    name = target.display_name
+    lines = [f"📊 **Prediction Stats — {name}**"]
+    lines.append(f"🏆 Season rank: **#{rank}** of {len(ranked)} — **{total_pts} pts** total")
+    if best_round_name:
+        lines.append(f"⭐ Best round: **{best_round_name}** — **{best_round_pts} pts**")
+    else:
+        lines.append("⭐ Best round: no round scores recorded yet")
+    await ctx.send("\n".join(lines))
+
+@bot.command(name="predictionadjust", aliases=["predadjust"])
+@commands.has_permissions(administrator=True)
+async def predictionadjust(ctx, target: discord.Member, points: int, *, round_key: str = None):
+    """Manually adjust a user's prediction score. Use positive or negative points.
+    Optionally specify a round key (e.g. 2026-r3) to also update that round's record.
+    Usage: !predictionadjust @user +5
+           !predictionadjust @user -3 2026-r3
+    """
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    uid = str(target.id)
+    totals = _pred_totals_for_guild(ctx.guild.id)
+    old_total = int(totals.get(uid, 0) or 0)
+    new_total = old_total + points
+    totals[uid] = new_total
+    # If round_key provided, also update that round's per-round score record
+    if round_key:
+        rnd = _pred_round_obj(round_key.strip())
+        round_scores = rnd.setdefault("round_scores", {}).setdefault(str(ctx.guild.id), {})
+        old_round = int(round_scores.get(uid, 0) or 0)
+        round_scores[uid] = old_round + points
+    _save_state_quiet()
+    sign = "+" if points >= 0 else ""
+    rk_note = f" (round `{round_key.strip()}`)" if round_key else ""
+    await ctx.send(
+        f"✅ Adjusted **{target.display_name}**'s prediction score by **{sign}{points}**{rk_note}.\n"
+        f"New season total: **{new_total} pts** (was {old_total})"
+    )
 
 # ----------------------------
 # Reaction role handlers + periodic recovery
@@ -4290,6 +4554,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
         posted_segment_summaries: set[str] = set()
         posted_final_summary = False
         current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
+        pred_reminders_posted: set[str] = set()  # tracks which lock reminders we've sent
         while RACE_LIVE_ENABLED.get(gid, False):
             _loop_tick("race_live")
             try:
@@ -4370,6 +4635,13 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                         if session_end:
                             stop_requested = True
                             _racelog(gid, "session end detected in quali; stopping live loop")
+                            # Schedule delayed auto-scoring for qualifying pole
+                            round_key = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
+                            if round_key:
+                                delay_min = int(os.getenv("PRED_AUTOSCORE_DELAY_MINUTES", "30"))
+                                asyncio.create_task(_delayed_prediction_autoscore(
+                                    guild, thread, round_key, session_kind, session_key, dict(driver_map), delay_min
+                                ))
                             break
 
                     elif session_kind in {"RACE", "SPRINT"}:
@@ -4386,6 +4658,13 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                                 _racelog(gid, f"final summary posted={ok}")
                             except Exception as e:
                                 _racelog(gid, f"final summary failed: {e}")
+                            # Schedule delayed auto-scoring (30 min default to catch penalty/lap deletions)
+                            round_key = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
+                            if round_key:
+                                delay_min = int(os.getenv("PRED_AUTOSCORE_DELAY_MINUTES", "30"))
+                                asyncio.create_task(_delayed_prediction_autoscore(
+                                    guild, thread, round_key, session_kind, session_key, dict(driver_map), delay_min
+                                ))
                             stop_requested = True
                             _racelog(gid, "session end detected in race/sprint; stopping live loop")
                             break
@@ -4393,6 +4672,35 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                 if stop_requested:
                     RACE_LIVE_ENABLED[gid] = False
                     break
+
+                # --- Pre-lock prediction reminders ---
+                try:
+                    _pred_meta = await _prediction_round_context()
+                    _pred_req = _prediction_session_requirements(_pred_meta)
+                    now_utc = datetime.now(timezone.utc)
+                    remind_window = timedelta(minutes=35)  # post reminder within 35min of lock
+                    remind_cats = [
+                        ("pole", "🏎️ **Pole prediction** (`!predictpole`) locks in ~30 min!"),
+                        ("podium", "🏆 **Podium prediction** (`!predictpodium`) locks in ~30 min!"),
+                        ("p10", "🔟 **P10 prediction** (`!predictp10`) locks in ~30 min!"),
+                    ]
+                    if "sprint_quali" in _pred_req:
+                        remind_cats.append(("sprint_pole", "🏎️ **Sprint Pole prediction** (`!predictsprintpole`) locks in ~30 min!"))
+                    if "sprint" in _pred_req:
+                        remind_cats.append(("sprint_podium", "🏆 **Sprint Podium prediction** (`!predictsprintpodium`) locks in ~30 min!"))
+                        remind_cats.append(("sprint_p8", "8️⃣ **Sprint P8 prediction** (`!predictsprintp8`) locks in ~30 min!"))
+                    for cat, remind_msg in remind_cats:
+                        if cat in pred_reminders_posted:
+                            continue
+                        if _prediction_category_locked(_pred_meta, cat):
+                            pred_reminders_posted.add(cat)
+                            continue
+                        lock_dt = _prediction_lock_dt(_pred_meta, cat)
+                        if lock_dt and timedelta(0) < (lock_dt - now_utc) <= remind_window:
+                            await thread.send(f"⏰ {remind_msg}")
+                            pred_reminders_posted.add(cat)
+                except Exception:
+                    pass  # never let reminder logic crash the live loop
 
                 await asyncio.sleep(poll_s)
 
