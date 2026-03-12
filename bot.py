@@ -1741,8 +1741,7 @@ async def fetch_driver_standings_text(limit: int = 0) -> str:
         lines = []
         for r in rows:
             lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
-        updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
+        return "__**F1 Driver Standings**__\n```\n" + "\n".join(lines) + "\n```"
     return "No standings available from OpenF1."
 
 async def fetch_constructor_standings_text(limit: int = 0) -> str:
@@ -1751,8 +1750,7 @@ async def fetch_constructor_standings_text(limit: int = 0) -> str:
         lines = []
         for r in rows:
             lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
-        updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        return "F1 Constructor Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
+        return "__**F1 Constructor Standings**__\n```\n" + "\n".join(lines) + "\n```"
     return "No standings available from OpenF1."
 
 # Discord setup
