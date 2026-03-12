@@ -1763,7 +1763,7 @@ async def fetch_driver_standings_text(limit: int = 22) -> str:
     if rows:
         lines = []
         for r in rows[: max(1, int(limit))]:
-            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts ({r.get('team', 'Unknown')})")
+            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
         updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
@@ -3652,6 +3652,9 @@ async def on_ready():
     # Race supervisor loop (your existing module)
     _ensure_background_task("RACE_SUPERVISOR_TASK", race_supervisor_loop, "RaceLive")
 
+    # Race thread pre-creation loop (creates thread ~6 days before race)
+    _ensure_background_task("RACE_PRECREATE_TASK", race_thread_precreate_loop, "RaceLive")
+
     # F1 reminders loop
     _ensure_background_task("F1_REMINDER_TASK", f1_reminder_loop, "F1Reminder")
     _ensure_background_task("RUNTIME_STATUS_TASK", runtime_status_loop, "RuntimeStatus")
@@ -4772,6 +4775,44 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                 await asyncio.sleep(5)
 
     _racelog(gid, "race_live_loop exited")
+
+async def race_thread_precreate_loop():
+    """
+    Runs every 6 hours. When a race is within RACE_THREAD_CREATE_DAYS (default 6)
+    days, automatically creates the race thread for each guild if one doesn't exist yet.
+    This means the thread is up by Monday of race week for a Sunday race.
+    Manual pre-creation via /racethread is always respected and won't be overwritten.
+    """
+    await bot.wait_until_ready()
+    logging.info("[RaceLive] Thread pre-creation loop started")
+
+    while not bot.is_closed():
+        try:
+            pre_create_days = max(1, int(os.getenv("RACE_THREAD_CREATE_DAYS", "6")))
+            now = datetime.now(timezone.utc)
+            round_meta = await current_or_next_round_meta()
+            race_dt = round_meta.get("race_dt")
+            round_key = str(round_meta.get("key") or "unknown-round")
+            race_name = str(round_meta.get("race_name") or "").strip()
+
+            if race_dt is not None:
+                days_until = (race_dt - now).total_seconds() / 86400
+                if 0 < days_until <= pre_create_days:
+                    title = f"{race_name} - Race Weekend" if race_name else "F1 Race Weekend"
+                    for guild in bot.guilds:
+                        try:
+                            existing_rec = _race_thread_record(round_key, guild.id) or {}
+                            if existing_rec.get("thread_id"):
+                                continue  # thread already exists, skip
+                            thread = await _ensure_live_thread(guild, round_key, race_name or "F1", title)
+                            logging.info(f"[RaceLive] Pre-created race thread for guild {guild.id}: {round_key} ({days_until:.1f} days before race)")
+                            await _send_race_live_ops_notice(guild, f"Race thread pre-created: {thread.mention} ({days_until:.0f} days until race)")
+                        except Exception as e:
+                            logging.warning(f"[RaceLive] Thread pre-creation failed for guild {guild.id}: {e}")
+        except Exception as e:
+            logging.error(f"[RaceLive] Thread pre-creation loop error: {e}")
+
+        await asyncio.sleep(6 * 3600)  # check every 6 hours
 
 async def race_supervisor_loop():
     await bot.wait_until_ready()
