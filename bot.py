@@ -1634,124 +1634,161 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
+async def _fetch_champ_driver_rows(session_key: Any) -> List[Dict[str, Any]]:
+    """Fetch and process championship_drivers for a single session key. Returns [] if unavailable."""
+    try:
+        rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
+    except Exception:
+        return []
+    if not isinstance(rows, list) or not rows:
+        return []
+    meta_map: Dict[int, Dict[str, Any]] = {}
+    try:
+        drivers = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta")
+        if isinstance(drivers, list):
+            for d in drivers:
+                if not isinstance(d, dict):
+                    continue
+                try:
+                    n = int(d.get("driver_number"))
+                except Exception:
+                    continue
+                meta_map[n] = d
+    except Exception:
+        pass
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        try:
+            num = int(r.get("driver_number"))
+        except Exception:
+            num = 0
+        dmeta = meta_map.get(num, {})
+        full_name = (
+            str(r.get("full_name") or "").strip()
+            or str(r.get("broadcast_name") or "").strip()
+        )
+        if not full_name:
+            first = str(r.get("first_name") or "").strip()
+            last = str(r.get("last_name") or "").strip()
+            full_name = (f"{first} {last}").strip()
+        if not full_name:
+            full_name = (
+                str(dmeta.get("full_name") or "").strip()
+                or str(dmeta.get("broadcast_name") or "").strip()
+            )
+        if not full_name:
+            first = str(dmeta.get("first_name") or "").strip()
+            last = str(dmeta.get("last_name") or "").strip()
+            full_name = (f"{first} {last}").strip()
+        if not full_name:
+            full_name = str(r.get("driver_name") or f"#{num}")
+        team = (
+            str(r.get("team_name") or "").strip()
+            or str(dmeta.get("team_name") or "").strip()
+            or "Unknown"
+        )
+        code = (
+            str(r.get("name_acronym") or "").strip()
+            or str(dmeta.get("name_acronym") or "").strip()
+        )
+        out.append({
+            "position": int(r.get("position_current", r.get("position", 0)) or 0),
+            "points": int(r.get("points_current", r.get("points", 0)) or 0),
+            "driver_number": num,
+            "code": code,
+            "name": full_name,
+            "team": team,
+        })
+    out = [x for x in out if int(x.get("position", 0) or 0) > 0]
+    out.sort(key=lambda x: int(x.get("position", 999) or 999))
+    return out
+
+
 async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
-        try:
-            rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
-        except Exception:
-            # 404 = no championship data for this session, try the next one.
-            # 429/503 cooldowns are already set by _openf1_get_json internally.
-            continue
-        if not isinstance(rows, list) or not rows:
-            continue
-        meta_map: Dict[int, Dict[str, Any]] = {}
-        try:
-            drivers = await asyncio.to_thread(_openf1_get_json, "drivers", {"session_key": session_key}, 20, "standings_driver_meta")
-            if isinstance(drivers, list):
-                for d in drivers:
-                    if not isinstance(d, dict):
-                        continue
-                    try:
-                        n = int(d.get("driver_number"))
-                    except Exception:
-                        continue
-                    meta_map[n] = d
-        except Exception as e:
-            logging.warning(f"[Standings] Failed to fetch driver metadata: {e}")
-
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            try:
-                num = int(r.get("driver_number"))
-            except Exception:
-                num = 0
-            dmeta = meta_map.get(num, {})
-
-            # championship_drivers rows already carry full_name, team_name, etc.
-            # Use them first; fall back to drivers endpoint meta only if missing.
-            full_name = (
-                str(r.get("full_name") or "").strip()
-                or str(r.get("broadcast_name") or "").strip()
-            )
-            if not full_name:
-                first = str(r.get("first_name") or "").strip()
-                last = str(r.get("last_name") or "").strip()
-                full_name = (f"{first} {last}").strip()
-            if not full_name:
-                full_name = (
-                    str(dmeta.get("full_name") or "").strip()
-                    or str(dmeta.get("broadcast_name") or "").strip()
-                )
-            if not full_name:
-                first = str(dmeta.get("first_name") or "").strip()
-                last = str(dmeta.get("last_name") or "").strip()
-                full_name = (f"{first} {last}").strip()
-            if not full_name:
-                full_name = str(r.get("driver_name") or f"#{num}")
-
-            team = (
-                str(r.get("team_name") or "").strip()
-                or str(dmeta.get("team_name") or "").strip()
-                or "Unknown"
-            )
-            code = (
-                str(r.get("name_acronym") or "").strip()
-                or str(dmeta.get("name_acronym") or "").strip()
-            )
-
-            out.append(
-                {
-                    "position": int(r.get("position_current", r.get("position", 0)) or 0),
-                    "points": int(r.get("points_current", r.get("points", 0)) or 0),
-                    "driver_number": num,
-                    "code": code,
-                    "name": full_name,
-                    "team": team,
-                }
-            )
-        out = [x for x in out if int(x.get("position", 0) or 0) > 0]
-        out.sort(key=lambda x: int(x.get("position", 999) or 999))
-        return out if not limit else out[:int(limit)]
+        rows = await _fetch_champ_driver_rows(session_key)
+        if rows:
+            return rows if not limit else rows[:int(limit)]
     return []
 
-async def _openf1_constructor_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
-    # Build constructor standings by aggregating from championship_drivers,
-    # which has reliable team_name. Avoids championship_teams null name issues.
-    driver_rows = await _openf1_driver_standings_rows(limit=0)
-    if not driver_rows:
-        return []
+
+async def _openf1_driver_standings_pair() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Returns (current_standings, previous_standings). previous is [] if no prior race exists."""
+    candidates = await _openf1_candidate_race_session_keys()
+    current: List[Dict[str, Any]] = []
+    previous: List[Dict[str, Any]] = []
+    for session_key in candidates:
+        rows = await _fetch_champ_driver_rows(session_key)
+        if not rows:
+            continue
+        if not current:
+            current = rows
+        else:
+            previous = rows
+            break
+    return current, previous
+
+
+def _build_constructor_rows(driver_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     team_pts: Dict[str, int] = {}
     for r in driver_rows:
         team = str(r.get("team") or "").strip()
         if not team or team == "Unknown":
             continue
         team_pts[team] = team_pts.get(team, 0) + int(r.get("points", 0) or 0)
-    out = [
+    return [
         {"position": i + 1, "points": pts, "name": name}
         for i, (name, pts) in enumerate(sorted(team_pts.items(), key=lambda x: x[1], reverse=True))
     ]
+
+
+async def _openf1_constructor_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
+    driver_rows = await _openf1_driver_standings_rows(limit=0)
+    out = _build_constructor_rows(driver_rows)
     return out if not limit else out[:int(limit)]
 
+
+def _delta_str(current_pos: int, prev_pos: Optional[int]) -> str:
+    if prev_pos is None:
+        return "-"
+    diff = prev_pos - current_pos  # positive = moved up (lower number is better)
+    if diff > 0:
+        return f"↑{diff}"
+    if diff < 0:
+        return f"↓{abs(diff)}"
+    return "-"
+
+
 async def fetch_driver_standings_text(limit: int = 0) -> str:
-    rows = await _openf1_driver_standings_rows(limit=limit)
-    if rows:
-        lines = []
-        for r in rows:
-            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
-        return "__**F1 Driver Standings**__\n```\n" + "\n".join(lines) + "\n```"
-    return "No standings available from OpenF1."
+    current, previous = await _openf1_driver_standings_pair()
+    if not current:
+        return "No standings available from OpenF1."
+    prev_pos: Dict[int, int] = {r["driver_number"]: r["position"] for r in previous}
+    lines = []
+    for r in current:
+        pos = int(r.get("position", 0))
+        num = int(r.get("driver_number", 0))
+        delta = _delta_str(pos, prev_pos.get(num))
+        lines.append(f"{pos:>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts  {delta}")
+    return "__**F1 Driver Standings**__\n```\n" + "\n".join(lines) + "\n```"
+
 
 async def fetch_constructor_standings_text(limit: int = 0) -> str:
-    rows = await _openf1_constructor_standings_rows(limit=limit)
-    if rows:
-        lines = []
-        for r in rows:
-            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
-        return "__**F1 Constructor Standings**__\n```\n" + "\n".join(lines) + "\n```"
-    return "No standings available from OpenF1."
+    current_drivers, prev_drivers = await _openf1_driver_standings_pair()
+    if not current_drivers:
+        return "No standings available from OpenF1."
+    current_rows = _build_constructor_rows(current_drivers)
+    prev_pos: Dict[str, int] = {r["name"]: r["position"] for r in _build_constructor_rows(prev_drivers)}
+    lines = []
+    for r in current_rows:
+        pos = int(r.get("position", 0))
+        name = r.get("name", "Unknown")
+        delta = _delta_str(pos, prev_pos.get(name))
+        lines.append(f"{pos:>2}. {name} - {r.get('points', 0)} pts  {delta}")
+    return "__**F1 Constructor Standings**__\n```\n" + "\n".join(lines) + "\n```"
 
 # Discord setup
 # ----------------------------
