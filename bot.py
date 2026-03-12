@@ -1631,20 +1631,14 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
-async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]:
+async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
             rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_drivers")
-        except requests.HTTPError as e:
-            code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
-            if code == 404:
-                if session_key == "latest":
-                    continue
-                _openf1_set_endpoint_cooldown("championship_drivers", 900)
-                break
-            continue
         except Exception:
+            # 404 = no championship data for this session, try the next one.
+            # 429/503 cooldowns are already set by _openf1_get_json internally.
             continue
         if not isinstance(rows, list) or not rows:
             continue
@@ -1720,19 +1714,11 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
         return out[: max(1, int(limit))]
     return []
 
-async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, Any]]:
+async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
             rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key}, 20, "standings_teams")
-        except requests.HTTPError as e:
-            code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
-            if code == 404:
-                if session_key == "latest":
-                    continue
-                _openf1_set_endpoint_cooldown("championship_teams", 900)
-                break
-            continue
         except Exception:
             continue
         if not isinstance(rows, list) or not rows:
@@ -1773,7 +1759,7 @@ async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, 
         return out[: max(1, int(limit))]
     return []
 
-async def fetch_driver_standings_text(limit: int = 20) -> str:
+async def fetch_driver_standings_text(limit: int = 22) -> str:
     rows = await _openf1_driver_standings_rows(limit=limit)
     if rows:
         lines = []
@@ -1783,7 +1769,7 @@ async def fetch_driver_standings_text(limit: int = 20) -> str:
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
 
-async def fetch_constructor_standings_text(limit: int = 10) -> str:
+async def fetch_constructor_standings_text(limit: int = 11) -> str:
     rows = await _openf1_constructor_standings_rows(limit=limit)
     if rows:
         lines = []
