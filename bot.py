@@ -1634,7 +1634,7 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
-async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]:
+async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
     for session_key in candidates:
         try:
@@ -1714,69 +1714,42 @@ async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]
             )
         out = [x for x in out if int(x.get("position", 0) or 0) > 0]
         out.sort(key=lambda x: int(x.get("position", 999) or 999))
-        return out[: max(1, int(limit))]
+        return out if not limit else out[:int(limit)]
     return []
 
-async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, Any]]:
-    candidates = await _openf1_candidate_race_session_keys()
-    for session_key in candidates:
-        try:
-            rows = await asyncio.to_thread(_openf1_get_json, "championship_teams", {"session_key": session_key}, 20, "standings_teams")
-        except Exception:
+async def _openf1_constructor_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
+    # Build constructor standings by aggregating from championship_drivers,
+    # which has reliable team_name. Avoids championship_teams null name issues.
+    driver_rows = await _openf1_driver_standings_rows(limit=0)
+    if not driver_rows:
+        return []
+    team_pts: Dict[str, int] = {}
+    for r in driver_rows:
+        team = str(r.get("team") or "").strip()
+        if not team or team == "Unknown":
             continue
-        if not isinstance(rows, list) or not rows:
-            continue
+        team_pts[team] = team_pts.get(team, 0) + int(r.get("points", 0) or 0)
+    out = [
+        {"position": i + 1, "points": pts, "name": name}
+        for i, (name, pts) in enumerate(sorted(team_pts.items(), key=lambda x: x[1], reverse=True))
+    ]
+    return out if not limit else out[:int(limit)]
 
-        # championship_teams sometimes returns null team_name.
-        # Build a fallback from championship_drivers which has reliable team_name.
-        # Map points total -> team name by summing driver points per team.
-        fallback_by_pts: Dict[float, str] = {}
-        try:
-            d_rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_teams_fallback")
-            if isinstance(d_rows, list):
-                team_pts: Dict[str, float] = {}
-                for d in d_rows:
-                    if not isinstance(d, dict):
-                        continue
-                    tn = str(d.get("team_name") or "").strip()
-                    if not tn:
-                        continue
-                    pts = float(d.get("points_current", d.get("points", 0)) or 0)
-                    team_pts[tn] = team_pts.get(tn, 0.0) + pts
-                # Sort by descending points so index matches constructor position
-                sorted_teams = sorted(team_pts.items(), key=lambda x: x[1], reverse=True)
-                fallback_by_pts = {i + 1: name for i, (name, _) in enumerate(sorted_teams)}
-        except Exception:
-            pass
-
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            pos = int(r.get("position_current", r.get("position", 0)) or 0)
-            pts = int(r.get("points_current", r.get("points", 0)) or 0)
-            name = str(r.get("team_name") or "").strip() or fallback_by_pts.get(pos, "Unknown")
-            out.append({"position": pos, "points": pts, "name": name})
-        out = [x for x in out if int(x.get("position", 0) or 0) > 0]
-        out.sort(key=lambda x: int(x.get("position", 999) or 999))
-        return out[: max(1, int(limit))]
-    return []
-
-async def fetch_driver_standings_text(limit: int = 22) -> str:
+async def fetch_driver_standings_text(limit: int = 0) -> str:
     rows = await _openf1_driver_standings_rows(limit=limit)
     if rows:
         lines = []
-        for r in rows[: max(1, int(limit))]:
+        for r in rows:
             lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
         updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
 
-async def fetch_constructor_standings_text(limit: int = 11) -> str:
+async def fetch_constructor_standings_text(limit: int = 0) -> str:
     rows = await _openf1_constructor_standings_rows(limit=limit)
     if rows:
         lines = []
-        for r in rows[: max(1, int(limit))]:
+        for r in rows:
             lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
         updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Constructor Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
