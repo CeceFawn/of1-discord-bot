@@ -1637,8 +1637,9 @@ async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]
         except requests.HTTPError as e:
             code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
             if code == 404:
-                _openf1_set_endpoint_cooldown("championship_drivers", 900)
-                break
+                if session_key != "latest":
+                    _openf1_set_endpoint_cooldown("championship_drivers", 900)
+                    break
             continue
         except Exception:
             continue
@@ -1696,8 +1697,9 @@ async def _openf1_constructor_standings_rows(limit: int = 11) -> List[Dict[str, 
         except requests.HTTPError as e:
             code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
             if code == 404:
-                _openf1_set_endpoint_cooldown("championship_teams", 900)
-                break
+                if session_key != "latest":
+                    _openf1_set_endpoint_cooldown("championship_teams", 900)
+                    break
             continue
         except Exception:
             continue
