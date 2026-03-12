@@ -1672,10 +1672,11 @@ async def _openf1_driver_standings_rows(limit: int = 22) -> List[Dict[str, Any]]
 
             # championship_drivers rows already carry full_name, team_name, etc.
             # Use them first; fall back to drivers endpoint meta only if missing.
-            full_name = (
+            if full_name := (
                 str(r.get("full_name") or "").strip()
                 or str(r.get("broadcast_name") or "").strip()
-            )
+            ):
+                pass
             if not full_name:
                 first = str(r.get("first_name") or "").strip()
                 last = str(r.get("last_name") or "").strip()
