@@ -1601,7 +1601,7 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
         return list(cached_keys)
 
     now = datetime.now(timezone.utc)
-    candidates: List[Any] = ["latest"]
+    candidates: List[Any] = []
     years = [now.year, now.year - 1]
     for year in years:
         try:
@@ -1627,6 +1627,9 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
         for _dt, key in parsed:
             if key not in candidates:
                 candidates.append(key)
+    # "latest" goes last — it often points to a non-race or in-progress session
+    # with incomplete championship data (null team names, missing name fields).
+    candidates.append("latest")
     _OPENF1_CANDIDATE_SESSIONS_CACHE["ts"] = now_ts
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
@@ -1764,7 +1767,7 @@ async def fetch_driver_standings_text(limit: int = 22) -> str:
     if rows:
         lines = []
         for r in rows[: max(1, int(limit))]:
-            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts ({r.get('team', 'Unknown')})")
+            lines.append(f"{int(r.get('position', 0)):>2}. {r.get('name', 'Unknown')} - {r.get('points', 0)} pts")
         updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return "F1 Driver Standings (Current Season)\n" + "\n".join(lines) + f"\n\n_Last updated: {updated}_"
     return "No standings available from OpenF1."
