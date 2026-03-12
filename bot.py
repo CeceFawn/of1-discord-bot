@@ -1672,19 +1672,47 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
             except Exception:
                 num = 0
             dmeta = meta_map.get(num, {})
-            full_name = str(dmeta.get("full_name") or "").strip()
+
+            # championship_drivers rows already carry full_name, team_name, etc.
+            # Use them first; fall back to drivers endpoint meta only if missing.
+            full_name = (
+                str(r.get("full_name") or "").strip()
+                or str(r.get("broadcast_name") or "").strip()
+            )
+            if not full_name:
+                first = str(r.get("first_name") or "").strip()
+                last = str(r.get("last_name") or "").strip()
+                full_name = (f"{first} {last}").strip()
+            if not full_name:
+                full_name = (
+                    str(dmeta.get("full_name") or "").strip()
+                    or str(dmeta.get("broadcast_name") or "").strip()
+                )
             if not full_name:
                 first = str(dmeta.get("first_name") or "").strip()
                 last = str(dmeta.get("last_name") or "").strip()
-                full_name = (f"{first} {last}").strip() or str(r.get("driver_name") or f"#{num}")
+                full_name = (f"{first} {last}").strip()
+            if not full_name:
+                full_name = str(r.get("driver_name") or f"#{num}")
+
+            team = (
+                str(r.get("team_name") or "").strip()
+                or str(dmeta.get("team_name") or "").strip()
+                or "Unknown"
+            )
+            code = (
+                str(r.get("name_acronym") or "").strip()
+                or str(dmeta.get("name_acronym") or "").strip()
+            )
+
             out.append(
                 {
                     "position": int(r.get("position_current", r.get("position", 0)) or 0),
                     "points": int(r.get("points_current", r.get("points", 0)) or 0),
                     "driver_number": num,
-                    "code": str(dmeta.get("name_acronym") or "").strip(),
+                    "code": code,
                     "name": full_name,
-                    "team": str(dmeta.get("team_name") or "Unknown").strip() or "Unknown",
+                    "team": team,
                 }
             )
         out = [x for x in out if int(x.get("position", 0) or 0) > 0]
@@ -1709,15 +1737,37 @@ async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, 
             continue
         if not isinstance(rows, list) or not rows:
             continue
+
+        # championship_teams sometimes returns null team_name.
+        # Build a fallback from championship_drivers which has reliable team_name.
+        # Map points total -> team name by summing driver points per team.
+        fallback_by_pts: Dict[float, str] = {}
+        try:
+            d_rows = await asyncio.to_thread(_openf1_get_json, "championship_drivers", {"session_key": session_key}, 20, "standings_teams_fallback")
+            if isinstance(d_rows, list):
+                team_pts: Dict[str, float] = {}
+                for d in d_rows:
+                    if not isinstance(d, dict):
+                        continue
+                    tn = str(d.get("team_name") or "").strip()
+                    if not tn:
+                        continue
+                    pts = float(d.get("points_current", d.get("points", 0)) or 0)
+                    team_pts[tn] = team_pts.get(tn, 0.0) + pts
+                # Sort by descending points so index matches constructor position
+                sorted_teams = sorted(team_pts.items(), key=lambda x: x[1], reverse=True)
+                fallback_by_pts = {i + 1: name for i, (name, _) in enumerate(sorted_teams)}
+        except Exception:
+            pass
+
         out: List[Dict[str, Any]] = []
         for r in rows:
             if not isinstance(r, dict):
                 continue
-            out.append({
-                "position": int(r.get("position_current", r.get("position", 0)) or 0),
-                "points": int(r.get("points_current", r.get("points", 0)) or 0),
-                "name": str(r.get("team_name") or "Unknown").strip() or "Unknown",
-            })
+            pos = int(r.get("position_current", r.get("position", 0)) or 0)
+            pts = int(r.get("points_current", r.get("points", 0)) or 0)
+            name = str(r.get("team_name") or "").strip() or fallback_by_pts.get(pos, "Unknown")
+            out.append({"position": pos, "points": pts, "name": name})
         out = [x for x in out if int(x.get("position", 0) or 0) > 0]
         out.sort(key=lambda x: int(x.get("position", 999) or 999))
         return out[: max(1, int(limit))]
