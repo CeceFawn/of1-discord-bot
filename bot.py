@@ -1618,13 +1618,15 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
             dt = _parse_openf1_dt(s.get("date_start"))
             if key is None or dt is None:
                 continue
+            # Only include sessions that have already started — future races
+            # won't have championship data and would waste API calls.
+            if dt > now:
+                continue
             parsed.append((dt, key))
         parsed.sort(key=lambda x: x[0], reverse=True)
         for _dt, key in parsed:
             if key not in candidates:
                 candidates.append(key)
-        if len(candidates) > 1:
-            break
     _OPENF1_CANDIDATE_SESSIONS_CACHE["ts"] = now_ts
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
@@ -1637,6 +1639,8 @@ async def _openf1_driver_standings_rows(limit: int = 20) -> List[Dict[str, Any]]
         except requests.HTTPError as e:
             code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
             if code == 404:
+                if session_key == "latest":
+                    continue
                 _openf1_set_endpoint_cooldown("championship_drivers", 900)
                 break
             continue
@@ -1696,6 +1700,8 @@ async def _openf1_constructor_standings_rows(limit: int = 10) -> List[Dict[str, 
         except requests.HTTPError as e:
             code = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
             if code == 404:
+                if session_key == "latest":
+                    continue
                 _openf1_set_endpoint_cooldown("championship_teams", 900)
                 break
             continue
