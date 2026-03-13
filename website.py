@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import requests
 from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, jsonify
@@ -24,9 +26,139 @@ WATCH_PARTY_PATH = os.path.join(os.path.dirname(__file__), "watch_party.json")
 OPENF1_BASE = "https://api.openf1.org/v1"
 PRE_HOURS  = 24
 POST_HOURS = 12
-CACHE_TTL  = 3600  # seconds — reuse data for 1 hour, including during live-session lockouts
 
 _cache: dict = {}  # key -> (fetched_at, data)
+
+# ----------------------------
+# OAuth token cache (mirrors bot's logic)
+# ----------------------------
+_TOKEN_LOCK = threading.Lock()
+_TOKEN_CACHE: dict = {}   # token, expires_at, fetched_at
+_TOKEN_RETRY_AFTER = 0.0  # epoch seconds — don't attempt before this
+
+
+def _fetch_login_token() -> tuple[str, float]:
+    """POST credentials to OPENF1_AUTH_URL and return (token, expires_at_epoch)."""
+    auth_url = os.getenv("OPENF1_AUTH_URL", "").strip()
+    username  = os.getenv("OPENF1_AUTH_USERNAME", "").strip()
+    password  = os.getenv("OPENF1_AUTH_PASSWORD", "").strip()
+    if not auth_url or not username or not password:
+        return "", 0.0
+
+    user_field   = os.getenv("OPENF1_AUTH_USERNAME_FIELD", "username").strip() or "username"
+    pass_field   = os.getenv("OPENF1_AUTH_PASSWORD_FIELD", "password").strip() or "password"
+    token_key    = os.getenv("OPENF1_AUTH_TOKEN_JSON_KEY", "access_token").strip() or "access_token"
+    exp_in_key   = os.getenv("OPENF1_AUTH_EXPIRES_IN_JSON_KEY", "expires_in").strip() or "expires_in"
+    exp_at_key   = os.getenv("OPENF1_AUTH_EXPIRES_AT_JSON_KEY", "").strip()
+
+    payload: dict = {user_field: username, pass_field: password}
+    extra_raw = os.getenv("OPENF1_AUTH_EXTRA_JSON", "").strip()
+    if extra_raw:
+        try:
+            extra = json.loads(extra_raw)
+            if isinstance(extra, dict):
+                payload.update(extra)
+        except Exception:
+            pass
+
+    req_headers: dict = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": "OF1-Website",
+    }
+    hdr_raw = os.getenv("OPENF1_AUTH_HEADERS_JSON", "").strip()
+    if hdr_raw:
+        try:
+            h = json.loads(hdr_raw)
+            if isinstance(h, dict):
+                req_headers.update({str(k): str(v) for k, v in h.items()})
+        except Exception:
+            pass
+
+    r = requests.post(auth_url, data=payload, headers=req_headers, timeout=20)
+    r.raise_for_status()
+    body = r.json() if r.content else {}
+
+    # Traverse dot-notation key path
+    def _path_get(obj: dict, key: str):
+        for part in key.split("."):
+            if isinstance(obj, dict):
+                obj = obj.get(part)
+            else:
+                return None
+        return obj
+
+    token = str(_path_get(body, token_key) or "").strip()
+    if not token:
+        raise RuntimeError("auth response missing token")
+
+    now_ts = time.time()
+    expires_at = 0.0
+    if exp_at_key:
+        raw = _path_get(body, exp_at_key)
+        if isinstance(raw, (int, float)):
+            expires_at = float(raw)
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                pass
+    if expires_at <= 0.0:
+        raw_in = _path_get(body, exp_in_key)
+        try:
+            exp_in = max(60, int(raw_in))
+        except Exception:
+            exp_in = 3600
+        expires_at = now_ts + exp_in
+
+    return token, expires_at
+
+
+def _get_bearer_token() -> str:
+    """Return a valid bearer token, refreshing via OAuth if needed."""
+    global _TOKEN_RETRY_AFTER
+
+    static = os.getenv("OPENF1_BEARER_TOKEN", "").strip()
+    if static:
+        return static
+
+    with _TOKEN_LOCK:
+        now_ts = time.time()
+        token      = str(_TOKEN_CACHE.get("token") or "")
+        expires_at = float(_TOKEN_CACHE.get("expires_at") or 0.0)
+
+        # Still in back-off period — return cached token if valid
+        if now_ts < _TOKEN_RETRY_AFTER:
+            return token if (token and now_ts < expires_at) else ""
+
+        # Token still fresh (120 s buffer)
+        if token and now_ts < (expires_at - 120.0):
+            return token
+
+        try:
+            new_token, new_expires_at = _fetch_login_token()
+        except Exception as e:
+            err = str(e)
+            if "422" in err:
+                _TOKEN_RETRY_AFTER = now_ts + 60.0
+            elif "429" in err:
+                _TOKEN_RETRY_AFTER = now_ts + 120.0
+            elif "503" in err:
+                _TOKEN_RETRY_AFTER = now_ts + 30.0
+            else:
+                _TOKEN_RETRY_AFTER = now_ts + 15.0
+            return token if (token and now_ts < expires_at) else ""
+
+        if not new_token:
+            _TOKEN_RETRY_AFTER = now_ts + 30.0
+            return token if (token and now_ts < expires_at) else ""
+
+        _TOKEN_RETRY_AFTER = 0.0
+        _TOKEN_CACHE["token"]      = new_token
+        _TOKEN_CACHE["expires_at"] = float(new_expires_at)
+        _TOKEN_CACHE["fetched_at"] = now_ts
+        return new_token
+
 
 # ----------------------------
 # Helpers
@@ -42,15 +174,19 @@ def load_watch_party() -> dict:
 
 
 def _openf1_headers() -> dict:
-    token = os.getenv("OPENF1_BEARER_TOKEN", "").strip()
     headers = {"User-Agent": "OF1-Website"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    api_key = os.getenv("OPENF1_API_KEY", "").strip()
+    if api_key:
+        headers["x-api-key"] = api_key
+    bearer = _get_bearer_token()
+    if bearer:
+        header_name   = os.getenv("OPENF1_AUTH_HEADER_NAME", "Authorization").strip() or "Authorization"
+        header_prefix = os.getenv("OPENF1_AUTH_HEADER_PREFIX", "Bearer").strip()
+        headers[header_name] = f"{header_prefix} {bearer}".strip()
     return headers
 
 
 def _openf1_get(endpoint: str, params: dict) -> list:
-    import time
     cache_key = endpoint + str(sorted(params.items()))
     cached = _cache.get(cache_key)
     now_ts = time.time()
@@ -216,16 +352,19 @@ def api_next_race():
 
 @app.route("/api/debug")
 def api_debug():
-    token = os.getenv("OPENF1_BEARER_TOKEN", "")
+    static_token = os.getenv("OPENF1_BEARER_TOKEN", "")
+    bearer = _get_bearer_token()
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     raw = requests.get(f"{OPENF1_BASE}/sessions", params={"session_key": "latest"},
                        headers=_openf1_headers(), timeout=10).json()
     return jsonify({
-        "token_set": bool(token),
-        "token_prefix": token[:8] + "..." if token else None,
+        "static_token_set": bool(static_token),
+        "oauth_auth_url_set": bool(os.getenv("OPENF1_AUTH_URL")),
+        "oauth_credentials_set": bool(os.getenv("OPENF1_AUTH_USERNAME") and os.getenv("OPENF1_AUTH_PASSWORD")),
+        "bearer_token_active": bool(bearer),
+        "bearer_prefix": bearer[:8] + "..." if bearer else None,
         "env_path": env_path,
         "env_file_exists": os.path.exists(env_path),
-        "openf1_auth_url_set": bool(os.getenv("OPENF1_AUTH_URL")),
         "raw_latest_response": raw,
         "next_session": get_next_session(),
         "next_race": get_next_race(),
