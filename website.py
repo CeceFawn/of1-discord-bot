@@ -5,6 +5,9 @@ import os
 import requests
 from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, jsonify
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 app = Flask(__name__)
 
