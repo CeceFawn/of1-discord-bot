@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, jsonify
 
 app = Flask(__name__)
@@ -17,7 +17,10 @@ TWITTER_URL     = os.getenv("TWITTER_URL", "")
 TIKTOK_URL      = os.getenv("TIKTOK_URL", "")
 
 WATCH_PARTY_PATH = os.path.join(os.path.dirname(__file__), "watch_party.json")
-STATE_PATH = os.path.join(os.path.dirname(__file__), "state.json")
+
+OPENF1_BASE = "https://api.openf1.org/v1"
+PRE_HOURS  = 24
+POST_HOURS = 12
 
 # ----------------------------
 # Helpers
@@ -32,28 +35,85 @@ def load_watch_party() -> dict:
     return {}
 
 
-def get_active_race_thread() -> dict | None:
-    """Return race info for the most recently activated race thread, else None."""
+def _openf1_get(endpoint: str, params: dict) -> list:
+    resp = requests.get(f"{OPENF1_BASE}/{endpoint}", params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_current_race_weekend() -> dict | None:
+    """Return race info if we're currently within a race weekend window, else None.
+    Uses the same logic as the bot: fetch latest session, get all sessions for that
+    meeting, check if now falls within the padded window."""
     try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        threads = state.get("_buckets", {}).get("race_threads", {})
-        best = None
-        best_activated = ""
-        for round_key, round_obj in threads.items():
-            if not isinstance(round_obj, dict):
-                continue
-            race_name = round_obj.get("race_name") or ""
-            guilds = round_obj.get("guilds", {})
-            for guild_rec in guilds.values():
-                if not isinstance(guild_rec, dict):
+        now = datetime.now(timezone.utc)
+
+        latest = _openf1_get("sessions", {"session_key": "latest"})
+        if not latest or not isinstance(latest, list):
+            return None
+
+        meeting_key = latest[0].get("meeting_key")
+        meeting_name = latest[0].get("meeting_name") or "Race Weekend"
+        if not meeting_key:
+            return None
+
+        all_sessions = _openf1_get("sessions", {"meeting_key": meeting_key})
+        if not all_sessions:
+            return None
+
+        starts, ends = [], []
+        for s in all_sessions:
+            ds = s.get("date_start")
+            de = s.get("date_end")
+            if ds:
+                try:
+                    starts.append(datetime.fromisoformat(str(ds).replace("Z", "+00:00")).astimezone(timezone.utc))
+                except Exception:
+                    pass
+            if de:
+                try:
+                    ends.append(datetime.fromisoformat(str(de).replace("Z", "+00:00")).astimezone(timezone.utc))
+                except Exception:
+                    pass
+
+        if not starts or not ends:
+            return None
+
+        window_start = min(starts) - timedelta(hours=PRE_HOURS)
+        window_end   = max(ends)   + timedelta(hours=POST_HOURS)
+
+        if window_start <= now <= window_end:
+            return {"race_name": meeting_name}
+    except Exception:
+        pass
+    return None
+
+
+def get_next_session() -> dict | None:
+    """Return the next upcoming F1 session (any type) from OpenF1."""
+    try:
+        now = datetime.now(timezone.utc)
+        for year in [now.year, now.year + 1]:
+            sessions = _openf1_get("sessions", {"year": year})
+            upcoming = []
+            for s in sessions:
+                ds = s.get("date_start")
+                if not ds:
                     continue
-                if guild_rec.get("weekend_state") == "active":
-                    activated = guild_rec.get("activated_at") or ""
-                    if activated > best_activated:
-                        best_activated = activated
-                        best = {"race_name": race_name or "Race Weekend", "round_key": round_key}
-        return best
+                try:
+                    dt = datetime.fromisoformat(str(ds).replace("Z", "+00:00")).astimezone(timezone.utc)
+                except Exception:
+                    continue
+                if dt > now:
+                    upcoming.append((dt, s))
+            if upcoming:
+                upcoming.sort(key=lambda x: x[0])
+                dt, s = upcoming[0]
+                return {
+                    "session_name": s.get("session_name") or "Next Session",
+                    "meeting_name": s.get("meeting_name") or "",
+                    "date_iso": dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                }
     except Exception:
         pass
     return None
@@ -105,17 +165,16 @@ def get_next_race() -> dict | None:
 # ----------------------------
 @app.route("/")
 def index():
-    active_thread = get_active_race_thread()
+    current_race = get_current_race_weekend()
     watch_party = load_watch_party()
-    # If the bot has an active race thread, use it as the watch party title and mark active.
-    # Manual watch_party.json fields (location, time, details) are still shown if present.
-    if active_thread:
+    if current_race:
         watch_party["active"] = True
-        watch_party["title"] = active_thread["race_name"]
+        watch_party["title"] = current_race["race_name"]
     return render_template(
         "index.html",
         watch_party=watch_party,
         next_race=get_next_race(),
+        next_session=get_next_session(),
         discord_invite=DISCORD_INVITE,
         instagram_url=INSTAGRAM_URL,
         twitter_url=TWITTER_URL,

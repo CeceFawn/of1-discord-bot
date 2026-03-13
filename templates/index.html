@@ -33,11 +33,17 @@
 
   <!-- ── NAVBAR ───────────────────────────────────────────────── -->
   <nav class="fixed top-0 left-0 right-0 z-50 bg-f1dark/90 backdrop-blur border-b border-white/10">
-    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center">
+    <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2">
         <span class="text-f1red font-black text-2xl tracking-tight">OF1</span>
         <span class="text-white/40 text-sm font-medium hidden sm:block">Orlando F1</span>
       </a>
+      {% if next_session %}
+      <div class="flex flex-col items-end">
+        <span class="text-white/40 text-xs uppercase tracking-widest">{{ next_session.session_name }}{% if next_session.meeting_name %} · {{ next_session.meeting_name }}{% endif %}</span>
+        <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}">--:--:--</span>
+      </div>
+      {% endif %}
     </div>
   </nav>
 
@@ -143,10 +149,29 @@
 
   <!-- ── FOOTER ────────────────────────────────────────────────── -->
   <footer class="border-t border-white/10 px-6 py-8 text-center text-white/20 text-sm">
-    © {{ now.year }} Orlando F1 · Made with ❤️ for the community
+    Orlando F1 · Made with ❤️ for the community
   </footer>
 
-  <!-- ── COUNTDOWN SCRIPT ──────────────────────────────────────── -->
+  <!-- ── COUNTDOWN SCRIPTS ─────────────────────────────────────── -->
+  <script>
+    const navEl = document.getElementById('nav-countdown');
+    if (navEl) {
+      const navTarget = new Date(navEl.dataset.target);
+      function updateNav() {
+        const diff = navTarget - Date.now();
+        if (diff <= 0) { navEl.textContent = 'Starting now'; return; }
+        const d = Math.floor(diff / 86400000);
+        const h = Math.floor((diff % 86400000) / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        const s = Math.floor((diff % 60000) / 1000);
+        navEl.textContent = d > 0
+          ? `${d}d ${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m`
+          : `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      }
+      updateNav();
+      setInterval(updateNav, 1000);
+    }
+  </script>
   <script>
     const el = document.getElementById('countdown');
     if (el) {
