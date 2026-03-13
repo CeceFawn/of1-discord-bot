@@ -21,6 +21,9 @@ WATCH_PARTY_PATH = os.path.join(os.path.dirname(__file__), "watch_party.json")
 OPENF1_BASE = "https://api.openf1.org/v1"
 PRE_HOURS  = 24
 POST_HOURS = 12
+CACHE_TTL  = 3600  # seconds — reuse data for 1 hour, including during live-session lockouts
+
+_cache: dict = {}  # key -> (fetched_at, data)
 
 # ----------------------------
 # Helpers
@@ -35,10 +38,36 @@ def load_watch_party() -> dict:
     return {}
 
 
+def _openf1_headers() -> dict:
+    token = os.getenv("OPENF1_BEARER_TOKEN", "").strip()
+    headers = {"User-Agent": "OF1-Website"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _openf1_get(endpoint: str, params: dict) -> list:
-    resp = requests.get(f"{OPENF1_BASE}/{endpoint}", params=params, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+    import time
+    cache_key = endpoint + str(sorted(params.items()))
+    cached = _cache.get(cache_key)
+    now_ts = time.time()
+
+    # Try a fresh fetch first
+    try:
+        resp = requests.get(f"{OPENF1_BASE}/{endpoint}", params=params,
+                            headers=_openf1_headers(), timeout=10)
+        data = resp.json()
+        # OpenF1 returns a dict with "detail" when restricted during live sessions
+        if isinstance(data, list):
+            _cache[cache_key] = (now_ts, data)
+            return data
+    except Exception:
+        pass
+
+    # Fall back to cached data if available
+    if cached:
+        return cached[1]
+    return []
 
 
 def get_current_race_weekend() -> dict | None:
