@@ -6,8 +6,11 @@ import threading
 import time
 import requests
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from flask import Flask, render_template, jsonify
 from dotenv import load_dotenv
+
+EASTERN = ZoneInfo("America/New_York")
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -257,10 +260,38 @@ def get_current_race_weekend() -> dict | None:
         window_end   = max(ends)   + timedelta(hours=POST_HOURS)
 
         if window_start <= now <= window_end:
+            # Find the race session for date/time display; fall back to last session
+            race_session = None
+            for s in all_sessions:
+                st = str(s.get("session_type") or s.get("session_name") or "").upper()
+                if st == "RACE":
+                    race_session = s
+                    break
+            if race_session is None:
+                dated = [(s, s.get("date_start")) for s in all_sessions if s.get("date_start")]
+                if dated:
+                    dated.sort(key=lambda x: x[1])
+                    race_session = dated[-1][0]
+
+            date_display = ""
+            time_display = ""
+            if race_session and race_session.get("date_start"):
+                try:
+                    dt_utc = datetime.fromisoformat(
+                        str(race_session["date_start"]).replace("Z", "+00:00")
+                    ).astimezone(timezone.utc)
+                    dt_est = dt_utc.astimezone(EASTERN)
+                    date_display = dt_est.strftime("%A, %B %-d")
+                    time_display = dt_est.strftime("%-I:%M %p %Z")
+                except Exception:
+                    pass
+
             return {
                 "race_name": meeting_name,
                 "country": lat.get("country_name") or "",
                 "circuit": lat.get("circuit_short_name") or "",
+                "date_display": date_display,
+                "time_display": time_display,
             }
     except Exception:
         pass
@@ -342,6 +373,10 @@ def index():
     if current_race:
         watch_party["active"] = True
         watch_party["title"] = current_race["race_name"]
+        if current_race.get("date_display"):
+            watch_party["date"] = current_race["date_display"]
+        if current_race.get("time_display"):
+            watch_party["time"] = current_race["time_display"]
         if not watch_party.get("location") and current_race.get("circuit"):
             watch_party.setdefault("subtitle", current_race["circuit"])
     return render_template(

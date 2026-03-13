@@ -3963,7 +3963,7 @@ def _race_control_emoji_for_message(msg: str) -> str:
         return "🟡"
     if "red flag" in t or t.startswith("red "):
         return "🔴"
-    if "green flag" in t or "green light" in t or t.startswith("green"):
+    if "green flag" in t or "green light" in t or "lights out" in t or t.startswith("green"):
         return "🟢"
     if "CHEQUERED FLAG" in t or "checkered flag" in t or "session ended" in t:
         return "🏁"
@@ -3981,6 +3981,8 @@ def _race_control_should_post(msg: str) -> bool:
         "track surface slippery",
         "yellow flag clear",
         "yellow flags clear",
+        "maximum delta time",
+        "failing to follow",
     )
     if any(x in t for x in noisy_markers):
         return False
@@ -3989,6 +3991,7 @@ def _race_control_should_post(msg: str) -> bool:
         "red flag",
         "green flag",
         "green light",
+        "lights out",
         "chequered flag",
         "checkered flag",
         "session ended",
@@ -4155,38 +4158,34 @@ async def _post_quali_boundary_summary(
     is_sprint_quali = session_kind == "SPRINT_QUALI"
     cutoff_title = "Sprint Qualifying" if is_sprint_quali else "Qualifying"
 
-    # Expected number of classified drivers for each segment boundary
-    if seg in {"Q1", "SQ1"}:
-        expected_total = 22
-    elif seg in {"Q2", "SQ2"}:
-        expected_total = 16
-    else:
-        expected_total = 10
-
     def _name(num: str) -> str:
         return driver_map.get(num, f"#{num}")
 
-    # Poll until positions stop changing for 20 consecutive polls (~60s),
-    # ensuring all drivers on flying laps have completed them.
+    # Poll until positions stop changing for 20 consecutive polls (~60s).
+    # Don't gate on an expected driver count — F1 grids vary and checking
+    # count caused the function to silently time out and post nothing.
     ordered: List[Tuple[str, int]] = []
     prev_snapshot: Optional[List[Tuple[str, int]]] = None
     stable_count = 0
     for _ in range(100):  # up to ~300s at 3s intervals
         positions = await _openf1_latest_positions(http, session_key)
-        if positions and len(positions) >= expected_total:
-            ordered = sorted(positions.items(), key=lambda kv: kv[1])
-            if ordered == prev_snapshot:
+        if positions:
+            current = sorted(positions.items(), key=lambda kv: kv[1])
+            ordered = current  # always keep latest snapshot
+            if current == prev_snapshot:
                 stable_count += 1
                 if stable_count >= 20:  # unchanged for 20 consecutive polls (~60s)
                     break
             else:
                 stable_count = 0
-                prev_snapshot = ordered
+                prev_snapshot = current
         await asyncio.sleep(3)
 
     if not ordered:
         return
 
+    # With up to 22 cars: Q1/SQ1 knocks out P17-P22 (6 cars),
+    # Q2/SQ2 knocks out P11-P16 (6 cars), Q3/SQ3 sets top 10.
     if seg in {"Q1", "SQ1"}:
         knocked = [(num, pos) for num, pos in ordered if pos >= 17]
         if not knocked:
@@ -4708,16 +4707,27 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                             RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
 
                         if session_end:
-                            stop_requested = True
-                            _racelog(gid, "session end detected in quali; stopping live loop")
-                            # Schedule delayed auto-scoring for qualifying pole
-                            round_key = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
-                            if round_key:
-                                delay_min = int(os.getenv("PRED_AUTOSCORE_DELAY_MINUTES", "30"))
-                                asyncio.create_task(_delayed_prediction_autoscore(
-                                    guild, thread, round_key, session_kind, session_key, dict(driver_map), delay_min
-                                ))
-                            break
+                            # Only stop after the final segment (Q3 / SQ3).
+                            # Intermediate chequered flags after SQ1 or SQ2 must
+                            # not terminate the loop — the next segment still needs
+                            # to run. current_quali_seg was already advanced to the
+                            # next segment by the boundary block above, so checking
+                            # {"Q3","SQ3"} here is correct.
+                            explicit_end = ("SESSION END" in upper_msg) or ("SESSION FINISHED" in upper_msg)
+                            final_seg_done = current_quali_seg in {"Q3", "SQ3"}
+                            if not explicit_end and not final_seg_done:
+                                _racelog(gid, f"segment chequered flag (not final), continuing for {current_quali_seg}")
+                            else:
+                                stop_requested = True
+                                _racelog(gid, "session end detected in quali; stopping live loop")
+                                # Schedule delayed auto-scoring for qualifying pole
+                                round_key = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
+                                if round_key:
+                                    delay_min = int(os.getenv("PRED_AUTOSCORE_DELAY_MINUTES", "30"))
+                                    asyncio.create_task(_delayed_prediction_autoscore(
+                                        guild, thread, round_key, session_kind, session_key, dict(driver_map), delay_min
+                                    ))
+                                break
 
                     elif session_kind in {"RACE", "SPRINT"}:
                         if session_end and not posted_final_summary:
