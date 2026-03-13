@@ -25,7 +25,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
     .red-glow { box-shadow: 0 0 40px rgba(232, 0, 45, 0.15); }
-    #countdown span { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 
@@ -61,45 +60,6 @@
       </p>
     </div>
   </section>
-
-  <!-- ── NEXT RACE COUNTDOWN ──────────────────────────────────── -->
-  {% if next_race %}
-  <section class="px-6 pb-16">
-    <div class="max-w-2xl mx-auto">
-      <div class="bg-zinc-900 border border-white/10 rounded-2xl p-8 red-glow">
-        <div class="flex items-center gap-2 text-f1red text-xs font-semibold uppercase tracking-widest mb-4">
-          <span class="w-1.5 h-1.5 rounded-full bg-f1red animate-pulse inline-block"></span>
-          Next Race
-        </div>
-        <div class="mb-8">
-          <h2 class="text-2xl font-bold">{{ next_race.name }}</h2>
-          <p class="text-white/40 text-sm mt-1">
-            {{ next_race.circuit }}{% if next_race.country %} · {{ next_race.country }}{% endif %}
-            · {{ next_race.date_display }}
-          </p>
-        </div>
-        <div id="countdown" class="grid grid-cols-4 gap-3 text-center" data-target="{{ next_race.date_iso }}">
-          <div class="bg-black/40 rounded-xl p-4">
-            <div id="cd-days" class="text-4xl font-black text-white">--</div>
-            <div class="text-white/40 text-xs uppercase tracking-wider mt-1">Days</div>
-          </div>
-          <div class="bg-black/40 rounded-xl p-4">
-            <div id="cd-hours" class="text-4xl font-black text-white">--</div>
-            <div class="text-white/40 text-xs uppercase tracking-wider mt-1">Hours</div>
-          </div>
-          <div class="bg-black/40 rounded-xl p-4">
-            <div id="cd-mins" class="text-4xl font-black text-white">--</div>
-            <div class="text-white/40 text-xs uppercase tracking-wider mt-1">Mins</div>
-          </div>
-          <div class="bg-black/40 rounded-xl p-4">
-            <div id="cd-secs" class="text-4xl font-black text-white">--</div>
-            <div class="text-white/40 text-xs uppercase tracking-wider mt-1">Secs</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-  {% endif %}
 
   <!-- ── WATCH PARTY ──────────────────────────────────────────── -->
   {% if watch_party and watch_party.get('active') %}
@@ -170,32 +130,6 @@
       }
       updateNav();
       setInterval(updateNav, 1000);
-    }
-  </script>
-  <script>
-    const el = document.getElementById('countdown');
-    if (el) {
-      const target = new Date(el.dataset.target);
-      function update() {
-        const diff = target - Date.now();
-        if (diff <= 0) {
-          document.getElementById('cd-days').textContent = '00';
-          document.getElementById('cd-hours').textContent = '00';
-          document.getElementById('cd-mins').textContent = '00';
-          document.getElementById('cd-secs').textContent = '00';
-          return;
-        }
-        const d = Math.floor(diff / 86400000);
-        const h = Math.floor((diff % 86400000) / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        document.getElementById('cd-days').textContent  = String(d).padStart(2, '0');
-        document.getElementById('cd-hours').textContent = String(h).padStart(2, '0');
-        document.getElementById('cd-mins').textContent  = String(m).padStart(2, '0');
-        document.getElementById('cd-secs').textContent  = String(s).padStart(2, '0');
-      }
-      update();
-      setInterval(update, 1000);
     }
   </script>
 

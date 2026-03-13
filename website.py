@@ -221,7 +221,13 @@ def get_current_race_weekend() -> dict | None:
             return None
 
         meeting_key = latest[0].get("meeting_key")
-        meeting_name = latest[0].get("meeting_name") or "Race Weekend"
+        lat = latest[0]
+        meeting_name = (
+            lat.get("meeting_name")
+            or lat.get("country_name")
+            or lat.get("circuit_short_name")
+            or "Race Weekend"
+        )
         if not meeting_key:
             return None
 
@@ -251,7 +257,11 @@ def get_current_race_weekend() -> dict | None:
         window_end   = max(ends)   + timedelta(hours=POST_HOURS)
 
         if window_start <= now <= window_end:
-            return {"race_name": meeting_name}
+            return {
+                "race_name": meeting_name,
+                "country": lat.get("country_name") or "",
+                "circuit": lat.get("circuit_short_name") or "",
+            }
     except Exception:
         pass
     return None
@@ -332,6 +342,8 @@ def index():
     if current_race:
         watch_party["active"] = True
         watch_party["title"] = current_race["race_name"]
+        if not watch_party.get("location") and current_race.get("circuit"):
+            watch_party.setdefault("subtitle", current_race["circuit"])
     return render_template(
         "index.html",
         watch_party=watch_party,
