@@ -39,6 +39,7 @@ DASHBOARD_STARTED_AT = time.time()
 # ----------------------------
 BOT_SYSTEMD_SERVICE = (os.getenv("BOT_SYSTEMD_SERVICE") or "discordbot.service").strip()
 DASHBOARD_SYSTEMD_SERVICE = (os.getenv("DASHBOARD_SYSTEMD_SERVICE") or "of1-dashboard.service").strip()
+WEBSITE_SYSTEMD_SERVICE = (os.getenv("WEBSITE_SYSTEMD_SERVICE") or "of1-website.service").strip()
 BOT_REPO_DIR = (os.getenv("BOT_REPO_DIR") or "").strip()
 if not BOT_REPO_DIR:
     # Fallback: assume dashboard.py is inside the repo
@@ -288,10 +289,16 @@ BASE_TEMPLATE = """
                 Deploy dashboard update
               </button>
             </form>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployboth') }}" method="post" style="margin:0;">
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploywebsite') }}" method="post" style="margin:0;">
               {{ csrf_input|safe }}
               <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Deploy both (bot + dashboard)
+                Deploy website update
+              </button>
+            </form>
+            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployall') }}" method="post" style="margin:0;">
+              {{ csrf_input|safe }}
+              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
+                Deploy all (bot + dashboard + website)
               </button>
             </form>
           </div>
@@ -722,7 +729,7 @@ def _deploy_worker(target: str = "bot"):
     chunks = []
     ok_all = True
     target = (target or "bot").strip().lower()
-    if target not in {"bot", "dashboard", "both"}:
+    if target not in {"bot", "dashboard", "website", "both", "all"}:
         target = "bot"
     try:
         def checkpoint(step: str, ok: bool | None = None, detail: str = "") -> None:
@@ -739,6 +746,7 @@ def _deploy_worker(target: str = "bot"):
         chunks.append(f"Repo dir: {BOT_REPO_DIR}")
         chunks.append(f"Bot service: {BOT_SYSTEMD_SERVICE}")
         chunks.append(f"Dashboard service: {DASHBOARD_SYSTEMD_SERVICE}")
+        chunks.append(f"Website service: {WEBSITE_SYSTEMD_SERVICE}")
         chunks.append(f"Deploy worker started (target={target}).")
 
         # git pull (fast-forward only to avoid surprise merges)
@@ -771,9 +779,15 @@ def _deploy_worker(target: str = "bot"):
                 services.append(("bot", BOT_SYSTEMD_SERVICE))
             elif target == "dashboard":
                 services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
-            else:
+            elif target == "website":
+                services.append(("website", WEBSITE_SYSTEMD_SERVICE))
+            elif target == "both":
                 services.append(("bot", BOT_SYSTEMD_SERVICE))
                 services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
+            else:  # all
+                services.append(("bot", BOT_SYSTEMD_SERVICE))
+                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
+                services.append(("website", WEBSITE_SYSTEMD_SERVICE))
 
             for label, svc in services:
                 ok, out = _sudo_systemctl("restart", svc)
@@ -1269,7 +1283,7 @@ def state():
 def bot_action(action: str):
     global _DEPLOY_IN_PROGRESS
     action = (action or "").strip().lower()
-    allowed = {"start", "stop", "restart", "deploy", "deploybot", "deploydashboard", "deployboth"}
+    allowed = {"start", "stop", "restart", "deploy", "deploybot", "deploydashboard", "deploywebsite", "deployboth", "deployall"}
     if action not in allowed:
         abort(404)
 
@@ -1293,7 +1307,9 @@ def bot_action(action: str):
         "deploy": "bot",  # backwards-compat
         "deploybot": "bot",
         "deploydashboard": "dashboard",
+        "deploywebsite": "website",
         "deployboth": "both",
+        "deployall": "all",
     }.get(action, "bot")
     with _DEPLOY_LOCK:
         if _DEPLOY_IN_PROGRESS:
