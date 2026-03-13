@@ -153,13 +153,7 @@ def get_next_race() -> dict | None:
     try:
         now = datetime.now(timezone.utc)
         for year in [now.year, now.year + 1]:
-            resp = requests.get(
-                "https://api.openf1.org/v1/sessions",
-                params={"session_type": "Race", "year": year},
-                timeout=10,
-            )
-            resp.raise_for_status()
-            sessions = resp.json()
+            sessions = _openf1_get("sessions", {"session_type": "Race", "year": year})
             upcoming = []
             for s in sessions:
                 dt_str = s.get("date_start")
@@ -215,6 +209,23 @@ def index():
 @app.route("/api/next-race")
 def api_next_race():
     return jsonify(get_next_race() or {})
+
+
+@app.route("/api/debug")
+def api_debug():
+    import time
+    token = os.getenv("OPENF1_BEARER_TOKEN", "")
+    raw = requests.get(f"{OPENF1_BASE}/sessions", params={"session_key": "latest"},
+                       headers=_openf1_headers(), timeout=10).json()
+    return jsonify({
+        "token_set": bool(token),
+        "token_prefix": token[:8] + "..." if token else None,
+        "raw_latest_response": raw,
+        "next_session": get_next_session(),
+        "next_race": get_next_race(),
+        "current_race_weekend": get_current_race_weekend(),
+        "cache_keys": list(_cache.keys()),
+    })
 
 
 if __name__ == "__main__":
