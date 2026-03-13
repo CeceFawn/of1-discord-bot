@@ -33,19 +33,27 @@ def load_watch_party() -> dict:
 
 
 def get_active_race_thread() -> dict | None:
-    """Return race info if the bot has an active race thread open, else None."""
+    """Return race info for the most recently activated race thread, else None."""
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             state = json.load(f)
         threads = state.get("_buckets", {}).get("race_threads", {})
+        best = None
+        best_activated = ""
         for round_key, round_obj in threads.items():
             if not isinstance(round_obj, dict):
                 continue
             race_name = round_obj.get("race_name") or ""
             guilds = round_obj.get("guilds", {})
             for guild_rec in guilds.values():
-                if isinstance(guild_rec, dict) and guild_rec.get("weekend_state") == "active":
-                    return {"race_name": race_name or "Race Weekend", "round_key": round_key}
+                if not isinstance(guild_rec, dict):
+                    continue
+                if guild_rec.get("weekend_state") == "active":
+                    activated = guild_rec.get("activated_at") or ""
+                    if activated > best_activated:
+                        best_activated = activated
+                        best = {"race_name": race_name or "Race Weekend", "round_key": round_key}
+        return best
     except Exception:
         pass
     return None
