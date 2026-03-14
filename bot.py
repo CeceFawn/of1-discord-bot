@@ -3959,7 +3959,7 @@ def _race_control_emoji_for_message(msg: str) -> str:
         return "🟣"
     if "virtual safety car" in t or " vsc" in t or t.startswith("vsc"):
         return "🟠"
-    if "safety car" in t:
+    if t.startswith("safety car"):
         return "🟡"
     if "red flag" in t or t.startswith("red "):
         return "🔴"
@@ -4006,12 +4006,14 @@ def _race_control_should_post(msg: str) -> bool:
 
 def _normalize_session_kind(session_type: str) -> str:
     st = str(session_type or "").upper().strip()
+    # Check sprint variants first — OpenF1 returns session_type="Qualifying"/"Race"
+    # for both regular and sprint sessions; session_name is the reliable discriminator.
+    if "SPRINT" in st and ("QUALI" in st or "SHOOTOUT" in st):
+        return "SPRINT_QUALI"
+    if "SPRINT" in st:
+        return "SPRINT"
     if st in {"QUALI", "QUALIFYING"}:
         return "QUALI"
-    if st in {"SPRINT QUALIFYING", "SPRINT SHOOTOUT"}:
-        return "SPRINT_QUALI"
-    if st == "SPRINT":
-        return "SPRINT"
     if st == "RACE":
         return "RACE"
     return st
@@ -4622,6 +4624,12 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
         posted_segment_summaries: set[str] = set()
         posted_final_summary = False
         current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
+        # Set when a segment ends; cleared when SESSION STARTED fires the boundary post.
+        # This lets us post the boundary on SESSION STARTED (next segment beginning)
+        # instead of on CHEQUERED FLAG, because OpenF1 sends SESSION FINISHED *before*
+        # CHEQUERED FLAG at the same timestamp — the old approach stopped the loop on
+        # SESSION FINISHED before CHEQUERED FLAG was ever processed.
+        _seen_session_end_since_last_boundary: bool = False
         pred_reminders_posted: set[str] = set()  # tracks which lock reminders we've sent
         while RACE_LIVE_ENABLED.get(gid, False):
             _loop_tick("race_live")
@@ -4667,34 +4675,31 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                         # Keep current_quali_seg up to date whenever a segment is mentioned
                         if seg:
                             current_quali_seg = seg
-                        # Fall back to the tracked segment (not always Q3) when session ends
-                        if not seg and session_end:
-                            seg = current_quali_seg
-                        if seg:
-                            looks_boundary = (
-                                ("END" in upper_msg)
-                                or ("RESULT" in upper_msg)
-                                or ("CHECKERED" in upper_msg)
-                                or ("CHEQUERED" in upper_msg)
-                                or ("ELIMINATED" in upper_msg)
-                            )
-                            key = f"{seg}:{'end' if looks_boundary else 'other'}"
-                            if looks_boundary and key not in posted_segment_summaries:
+
+                        # SESSION STARTED = the previous segment has fully ended.
+                        # Post that segment's boundary here rather than on CHEQUERED FLAG,
+                        # because OpenF1 delivers SESSION FINISHED *before* CHEQUERED FLAG
+                        # at identical timestamps — waiting for CHEQUERED FLAG meant the
+                        # old explicit_end check stopped the loop first.
+                        if "SESSION STARTED" in upper_msg and _seen_session_end_since_last_boundary:
+                            closing_seg = current_quali_seg
+                            key = f"{closing_seg}:end"
+                            if key not in posted_segment_summaries:
                                 posted_segment_summaries.add(key)
-                                # Advance tracker to next segment after posting boundary
                                 _seg_next = {"Q1": "Q2", "Q2": "Q3", "Q3": "Q3", "SQ1": "SQ2", "SQ2": "SQ3", "SQ3": "SQ3"}
-                                current_quali_seg = _seg_next.get(seg, seg)
+                                current_quali_seg = _seg_next.get(closing_seg, closing_seg)
                                 try:
                                     await _post_quali_boundary_summary(
                                         thread=thread,
                                         http=http,
                                         session_key=session_key,
                                         session_kind=session_kind,
-                                        segment=seg,
+                                        segment=closing_seg,
                                         driver_map=driver_map,
                                     )
                                 except Exception as e:
-                                    _racelog(gid, f"quali summary failed for {seg}: {e}")
+                                    _racelog(gid, f"quali summary failed for {closing_seg}: {e}")
+                            _seen_session_end_since_last_boundary = False
 
                         # Post track limit / lap time deletion messages during qualifying
                         lower_msg = msg.lower()
@@ -4707,20 +4712,24 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                             RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
 
                         if session_end:
-                            # Only stop after the final segment (Q3 / SQ3).
-                            # Intermediate chequered flags after SQ1 or SQ2 must
-                            # not terminate the loop — the next segment still needs
-                            # to run. current_quali_seg was already advanced to the
-                            # next segment by the boundary block above, so checking
-                            # {"Q3","SQ3"} here is correct.
-                            explicit_end = ("SESSION END" in upper_msg) or ("SESSION FINISHED" in upper_msg)
-                            final_seg_done = current_quali_seg in {"Q3", "SQ3"}
-                            if not explicit_end and not final_seg_done:
-                                _racelog(gid, f"segment chequered flag (not final), continuing for {current_quali_seg}")
-                            else:
+                            if current_quali_seg in {"Q3", "SQ3"}:
+                                # Final segment ended — post its boundary and stop
+                                key = f"{current_quali_seg}:end"
+                                if key not in posted_segment_summaries:
+                                    posted_segment_summaries.add(key)
+                                    try:
+                                        await _post_quali_boundary_summary(
+                                            thread=thread,
+                                            http=http,
+                                            session_key=session_key,
+                                            session_kind=session_kind,
+                                            segment=current_quali_seg,
+                                            driver_map=driver_map,
+                                        )
+                                    except Exception as e:
+                                        _racelog(gid, f"quali summary failed for {current_quali_seg}: {e}")
                                 stop_requested = True
-                                _racelog(gid, "session end detected in quali; stopping live loop")
-                                # Schedule delayed auto-scoring for qualifying pole
+                                _racelog(gid, "session end detected in quali (final segment); stopping live loop")
                                 round_key = str(RACE_LIVE_ROUND_KEYS.get(gid) or "")
                                 if round_key:
                                     delay_min = int(os.getenv("PRED_AUTOSCORE_DELAY_MINUTES", "30"))
@@ -4728,6 +4737,10 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                                         guild, thread, round_key, session_kind, session_key, dict(driver_map), delay_min
                                     ))
                                 break
+                            else:
+                                # Intermediate segment ended — SESSION STARTED will trigger boundary
+                                _seen_session_end_since_last_boundary = True
+                                _racelog(gid, f"segment end ({current_quali_seg}), waiting for SESSION STARTED to post boundary")
 
                     elif session_kind in {"RACE", "SPRINT"}:
                         if session_end and not posted_final_summary:
@@ -4864,7 +4877,8 @@ async def race_supervisor_loop():
 
                 latest_live = latest_now[0]
                 latest_type = _session_type_upper(latest_live)
-                session_type = str(latest_live.get("session_type") or latest_live.get("session_name") or "")
+                # Prefer session_name — it's more specific (e.g. "Sprint Qualifying" vs generic "Qualifying")
+                session_type = str(latest_live.get("session_name") or latest_live.get("session_type") or "")
                 session_key = int(latest_live.get("session_key") or 0)
                 if not session_key:
                     await asyncio.sleep(60)
@@ -5736,7 +5750,7 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
         # --- Replay each target session ---
         for session in target_sessions:
             session_key = session.get("session_key")
-            session_type = str(session.get("session_type") or session.get("session_name") or "")
+            session_type = str(session.get("session_name") or session.get("session_type") or "")
             session_kind = _normalize_session_kind(session_type)
 
             lines.append("=" * 70)
@@ -5766,7 +5780,8 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
             current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
             posted_segment_summaries: set = set()
             posted_final_summary = False
-            loop_stopped_at: Optional[str] = None  # timestamp when the real loop would have stopped
+            loop_stopped_at: Optional[str] = None
+            _replay_seen_session_end: bool = False
 
             for item in rc:
                 msg = str(item.get("message") or "").strip()
@@ -5804,45 +5819,38 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
                 else:
                     lines.append(f"[{ts}] SKIP : {msg}{after_stop}")
 
-                # --- Qualifying boundary logic ---
+                # --- Qualifying boundary logic (mirrors fixed live loop) ---
                 if session_kind in {"QUALI", "SPRINT_QUALI"}:
                     seg = _extract_quali_segment(msg)
                     if seg:
                         current_quali_seg = seg
-                    if not seg and session_end:
-                        seg = current_quali_seg
-                    if seg:
-                        looks_boundary = (
-                            ("END" in upper_msg) or ("RESULT" in upper_msg)
-                            or ("CHECKERED" in upper_msg) or ("CHEQUERED" in upper_msg)
-                            or ("ELIMINATED" in upper_msg)
-                        )
-                        key = f"{seg}:end"
-                        if looks_boundary and key not in posted_segment_summaries:
+
+                    if "SESSION STARTED" in upper_msg and _replay_seen_session_end:
+                        closing_seg = current_quali_seg
+                        key = f"{closing_seg}:end"
+                        if key not in posted_segment_summaries:
                             posted_segment_summaries.add(key)
                             _seg_next = {"Q1": "Q2", "Q2": "Q3", "Q3": "Q3", "SQ1": "SQ2", "SQ2": "SQ3", "SQ3": "SQ3"}
-                            current_quali_seg = _seg_next.get(seg, seg)
+                            current_quali_seg = _seg_next.get(closing_seg, closing_seg)
                             cutoff = "Sprint Qualifying" if session_kind == "SPRINT_QUALI" else "Qualifying"
-
-                            lines.append(f"         ↳ BOUNDARY TRIGGERED for {seg} (current_quali_seg now={current_quali_seg}){after_stop}")
-
-                            if seg in {"Q1", "SQ1"}:
+                            lines.append(f"         ↳ BOUNDARY on SESSION STARTED for {closing_seg} (next seg={current_quali_seg}){after_stop}")
+                            if closing_seg in {"Q1", "SQ1"}:
                                 knocked = [(n, p) for n, p in ordered_all if p >= 17]
                                 if knocked:
                                     body = "\n".join(f"           P{p} {_name(n)}" for n, p in knocked[:6])
-                                    lines.append(f"         ↳ SPOILER POST: 🚫 {cutoff} {seg} Knockouts")
+                                    lines.append(f"         ↳ SPOILER POST: 🚫 {cutoff} {closing_seg} Knockouts")
                                     lines.append(body)
                                 else:
-                                    lines.append(f"         ↳ No knockouts found in positions (got {len(ordered_all)} entries)")
-                            elif seg in {"Q2", "SQ2"}:
+                                    lines.append(f"         ↳ No knockouts found (got {len(ordered_all)} positions)")
+                            elif closing_seg in {"Q2", "SQ2"}:
                                 knocked = [(n, p) for n, p in ordered_all if 11 <= p <= 16]
                                 if knocked:
                                     body = "\n".join(f"           P{p} {_name(n)}" for n, p in knocked[:6])
-                                    lines.append(f"         ↳ SPOILER POST: 🚫 {cutoff} {seg} Knockouts")
+                                    lines.append(f"         ↳ SPOILER POST: 🚫 {cutoff} {closing_seg} Knockouts")
                                     lines.append(body)
                                 else:
-                                    lines.append(f"         ↳ No P11-P16 found in positions (got {len(ordered_all)} entries)")
-                            else:  # Q3 / SQ3
+                                    lines.append(f"         ↳ No P11-P16 found (got {len(ordered_all)} positions)")
+                            else:
                                 top10 = [(n, p) for n, p in ordered_all if 1 <= p <= 10]
                                 if top10:
                                     body = "\n".join(f"           P{p} {_name(n)}" for n, p in top10[:10])
@@ -5850,15 +5858,24 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
                                     lines.append(body)
                                 else:
                                     lines.append(f"         ↳ No top-10 positions found")
+                        _replay_seen_session_end = False
 
                     if session_end and not loop_stopped_at:
-                        explicit_end = ("SESSION END" in upper_msg) or ("SESSION FINISHED" in upper_msg)
-                        final_seg_done = current_quali_seg in {"Q3", "SQ3"}
-                        if not explicit_end and not final_seg_done:
-                            lines.append(f"         ↳ [loop continues — not final segment, current={current_quali_seg}]")
-                        else:
+                        if current_quali_seg in {"Q3", "SQ3"}:
+                            cutoff = "Sprint Qualifying" if session_kind == "SPRINT_QUALI" else "Qualifying"
+                            key = f"{current_quali_seg}:end"
+                            if key not in posted_segment_summaries:
+                                posted_segment_summaries.add(key)
+                                top10 = [(n, p) for n, p in ordered_all if 1 <= p <= 10]
+                                if top10:
+                                    body = "\n".join(f"           P{p} {_name(n)}" for n, p in top10[:10])
+                                    lines.append(f"         ↳ SPOILER POST: 📊 {cutoff} Top 10")
+                                    lines.append(body)
                             loop_stopped_at = ts
-                            lines.append(f"         ↳ [*** LOOP WOULD STOP HERE *** — final_seg={final_seg_done}, explicit={explicit_end}]")
+                            lines.append(f"         ↳ [*** LOOP WOULD STOP HERE *** — final segment {current_quali_seg} done]")
+                        else:
+                            _replay_seen_session_end = True
+                            lines.append(f"         ↳ [segment end — waiting for SESSION STARTED to post {current_quali_seg} boundary]")
 
                 # --- Race / Sprint final summary logic ---
                 elif session_kind in {"RACE", "SPRINT"}:
