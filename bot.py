@@ -5766,16 +5766,18 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
             current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
             posted_segment_summaries: set = set()
             posted_final_summary = False
-            stop = False
+            loop_stopped_at: Optional[str] = None  # timestamp when the real loop would have stopped
 
             for item in rc:
-                if stop:
-                    break
                 msg = str(item.get("message") or "").strip()
-                if not msg:
-                    continue
                 dt = str(item.get("date") or "")
                 ts = dt[11:19] if len(dt) >= 19 else dt
+
+                # Show every raw item, even empty ones
+                if not msg:
+                    lines.append(f"[{ts}] (empty message — skipped in live loop)")
+                    continue
+
                 upper_msg = msg.upper()
                 lower_msg = msg.lower()
 
@@ -5791,13 +5793,16 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
                     p in lower_msg for p in ("track limits", "lap time deleted", "time deleted", "lap deleted")
                 )
 
+                # Mark messages that arrive after the loop would have stopped
+                after_stop = f"  [AFTER LOOP STOP @ {loop_stopped_at}]" if loop_stopped_at else ""
+
                 if will_post:
                     emoji = _race_control_emoji_for_message(msg)
-                    lines.append(f"[{ts}] POST : {emoji} {msg}")
+                    lines.append(f"[{ts}] POST : {emoji} {msg}{after_stop}")
                 elif is_track_deletion:
-                    lines.append(f"[{ts}] POST : 🚫 {msg}")
+                    lines.append(f"[{ts}] POST : 🚫 {msg}{after_stop}")
                 else:
-                    lines.append(f"[{ts}] SKIP : {msg}")
+                    lines.append(f"[{ts}] SKIP : {msg}{after_stop}")
 
                 # --- Qualifying boundary logic ---
                 if session_kind in {"QUALI", "SPRINT_QUALI"}:
@@ -5819,7 +5824,7 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
                             current_quali_seg = _seg_next.get(seg, seg)
                             cutoff = "Sprint Qualifying" if session_kind == "SPRINT_QUALI" else "Qualifying"
 
-                            lines.append(f"         ↳ BOUNDARY TRIGGERED for {seg} (current_quali_seg now={current_quali_seg})")
+                            lines.append(f"         ↳ BOUNDARY TRIGGERED for {seg} (current_quali_seg now={current_quali_seg}){after_stop}")
 
                             if seg in {"Q1", "SQ1"}:
                                 knocked = [(n, p) for n, p in ordered_all if p >= 17]
@@ -5846,14 +5851,14 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
                                 else:
                                     lines.append(f"         ↳ No top-10 positions found")
 
-                    if session_end:
+                    if session_end and not loop_stopped_at:
                         explicit_end = ("SESSION END" in upper_msg) or ("SESSION FINISHED" in upper_msg)
                         final_seg_done = current_quali_seg in {"Q3", "SQ3"}
                         if not explicit_end and not final_seg_done:
                             lines.append(f"         ↳ [loop continues — not final segment, current={current_quali_seg}]")
                         else:
-                            lines.append(f"         ↳ [LOOP STOPS — session end, final seg={final_seg_done}]")
-                            stop = True
+                            loop_stopped_at = ts
+                            lines.append(f"         ↳ [*** LOOP WOULD STOP HERE *** — final_seg={final_seg_done}, explicit={explicit_end}]")
 
                 # --- Race / Sprint final summary logic ---
                 elif session_kind in {"RACE", "SPRINT"}:
@@ -5868,8 +5873,9 @@ async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: O
                             lines.append(body)
                         else:
                             lines.append(f"         ↳ [final summary: no positions P1-P{top_n} found]")
-                        lines.append(f"         ↳ [LOOP STOPS — session end]")
-                        stop = True
+                        if not loop_stopped_at:
+                            loop_stopped_at = ts
+                            lines.append(f"         ↳ [*** LOOP WOULD STOP HERE ***]")
 
             lines.append("")
 
