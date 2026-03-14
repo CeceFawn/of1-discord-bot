@@ -5689,6 +5689,216 @@ async def raceteststop(ctx):
     else:
         await ctx.send("ℹ️ No race test running.")
 
+
+# ---------------------------------------------------------------------------
+# TEMPORARY: Session replay harness — run !replaytest to observe what the bot
+# would post for the current weekend's sprint + qualifying sessions.
+# Remove this block once no longer needed.
+# ---------------------------------------------------------------------------
+
+async def _run_replay_test(channel: discord.TextChannel, meeting_key_override: Optional[int] = None) -> None:
+    lines: List[str] = []
+
+    async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
+        # --- Discover sessions for the current (or specified) meeting ---
+        if meeting_key_override:
+            all_sessions = await _openf1_get(http, "sessions", {"meeting_key": meeting_key_override}, caller="replay")
+        else:
+            latest = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="replay")
+            if not latest or not isinstance(latest, list):
+                await channel.send("❌ Could not determine current session from OpenF1.")
+                return
+            meeting_key_override = latest[0].get("meeting_key")
+            all_sessions = await _openf1_get(http, "sessions", {"meeting_key": meeting_key_override}, caller="replay")
+
+        if not all_sessions or not isinstance(all_sessions, list):
+            await channel.send("❌ No sessions found for this meeting.")
+            return
+
+        meeting_name = all_sessions[0].get("meeting_name") or "Unknown Meeting"
+        lines.append(f"REPLAY — {meeting_name} (meeting_key={meeting_key_override})")
+        lines.append(f"All sessions in meeting:")
+        for s in all_sessions:
+            lines.append(f"  [{s.get('session_key')}] {s.get('session_name')} ({s.get('session_type')})")
+        lines.append("")
+
+        # --- Pick sprint + qualifying sessions to replay ---
+        REPLAY_TARGETS = {"sprint", "qualifying", "sprint qualifying", "sprint shootout"}
+        target_sessions = [
+            s for s in all_sessions
+            if str(s.get("session_name") or s.get("session_type") or "").lower().strip() in REPLAY_TARGETS
+            or any(kw in str(s.get("session_name") or "").lower() for kw in ("sprint", "qualif", "shootout"))
+        ]
+        if not target_sessions:
+            lines.append("⚠️  No sprint/qualifying sessions found — replaying ALL sessions instead.")
+            target_sessions = all_sessions
+
+        # --- Replay each target session ---
+        for session in target_sessions:
+            session_key = session.get("session_key")
+            session_type = str(session.get("session_type") or session.get("session_name") or "")
+            session_kind = _normalize_session_kind(session_type)
+
+            lines.append("=" * 70)
+            lines.append(f"SESSION : {session.get('session_name')} | type={session_type} | kind={session_kind}")
+            lines.append(f"KEY     : {session_key}")
+            lines.append("=" * 70)
+
+            rc = await _openf1_get(http, "race_control", {"session_key": session_key}, caller="replay")
+            if not isinstance(rc, list):
+                lines.append("  ⚠️  race_control returned non-list — API may be restricted.")
+                lines.append("")
+                continue
+
+            driver_map = await _openf1_driver_name_map(http, session_key)
+            # Fetch positions once — historical session is already stable
+            positions = await _openf1_latest_positions(http, session_key)
+            ordered_all = sorted(positions.items(), key=lambda kv: kv[1]) if positions else []
+
+            lines.append(f"race_control msgs : {len(rc)}")
+            lines.append(f"positions fetched : {len(positions)}")
+            lines.append(f"drivers in map    : {len(driver_map)}")
+            lines.append("")
+
+            def _name(num: str) -> str:
+                return driver_map.get(str(num), f"#{num}")
+
+            current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
+            posted_segment_summaries: set = set()
+            posted_final_summary = False
+            stop = False
+
+            for item in rc:
+                if stop:
+                    break
+                msg = str(item.get("message") or "").strip()
+                if not msg:
+                    continue
+                dt = str(item.get("date") or "")
+                ts = dt[11:19] if len(dt) >= 19 else dt
+                upper_msg = msg.upper()
+                lower_msg = msg.lower()
+
+                session_end = (
+                    ("CHECKERED" in upper_msg)
+                    or ("CHEQUERED" in upper_msg)
+                    or ("SESSION END" in upper_msg)
+                    or ("SESSION FINISHED" in upper_msg)
+                )
+
+                will_post = _race_control_should_post(msg)
+                is_track_deletion = session_kind in {"QUALI", "SPRINT_QUALI"} and any(
+                    p in lower_msg for p in ("track limits", "lap time deleted", "time deleted", "lap deleted")
+                )
+
+                if will_post:
+                    emoji = _race_control_emoji_for_message(msg)
+                    lines.append(f"[{ts}] POST : {emoji} {msg}")
+                elif is_track_deletion:
+                    lines.append(f"[{ts}] POST : 🚫 {msg}")
+                else:
+                    lines.append(f"[{ts}] SKIP : {msg}")
+
+                # --- Qualifying boundary logic ---
+                if session_kind in {"QUALI", "SPRINT_QUALI"}:
+                    seg = _extract_quali_segment(msg)
+                    if seg:
+                        current_quali_seg = seg
+                    if not seg and session_end:
+                        seg = current_quali_seg
+                    if seg:
+                        looks_boundary = (
+                            ("END" in upper_msg) or ("RESULT" in upper_msg)
+                            or ("CHECKERED" in upper_msg) or ("CHEQUERED" in upper_msg)
+                            or ("ELIMINATED" in upper_msg)
+                        )
+                        key = f"{seg}:end"
+                        if looks_boundary and key not in posted_segment_summaries:
+                            posted_segment_summaries.add(key)
+                            _seg_next = {"Q1": "Q2", "Q2": "Q3", "Q3": "Q3", "SQ1": "SQ2", "SQ2": "SQ3", "SQ3": "SQ3"}
+                            current_quali_seg = _seg_next.get(seg, seg)
+                            cutoff = "Sprint Qualifying" if session_kind == "SPRINT_QUALI" else "Qualifying"
+
+                            lines.append(f"         ↳ BOUNDARY TRIGGERED for {seg} (current_quali_seg now={current_quali_seg})")
+
+                            if seg in {"Q1", "SQ1"}:
+                                knocked = [(n, p) for n, p in ordered_all if p >= 17]
+                                if knocked:
+                                    body = "\n".join(f"           P{p} {_name(n)}" for n, p in knocked[:6])
+                                    lines.append(f"         ↳ SPOILER POST: 🚫 {cutoff} {seg} Knockouts")
+                                    lines.append(body)
+                                else:
+                                    lines.append(f"         ↳ No knockouts found in positions (got {len(ordered_all)} entries)")
+                            elif seg in {"Q2", "SQ2"}:
+                                knocked = [(n, p) for n, p in ordered_all if 11 <= p <= 16]
+                                if knocked:
+                                    body = "\n".join(f"           P{p} {_name(n)}" for n, p in knocked[:6])
+                                    lines.append(f"         ↳ SPOILER POST: 🚫 {cutoff} {seg} Knockouts")
+                                    lines.append(body)
+                                else:
+                                    lines.append(f"         ↳ No P11-P16 found in positions (got {len(ordered_all)} entries)")
+                            else:  # Q3 / SQ3
+                                top10 = [(n, p) for n, p in ordered_all if 1 <= p <= 10]
+                                if top10:
+                                    body = "\n".join(f"           P{p} {_name(n)}" for n, p in top10[:10])
+                                    lines.append(f"         ↳ SPOILER POST: 📊 {cutoff} Top 10")
+                                    lines.append(body)
+                                else:
+                                    lines.append(f"         ↳ No top-10 positions found")
+
+                    if session_end:
+                        explicit_end = ("SESSION END" in upper_msg) or ("SESSION FINISHED" in upper_msg)
+                        final_seg_done = current_quali_seg in {"Q3", "SQ3"}
+                        if not explicit_end and not final_seg_done:
+                            lines.append(f"         ↳ [loop continues — not final segment, current={current_quali_seg}]")
+                        else:
+                            lines.append(f"         ↳ [LOOP STOPS — session end, final seg={final_seg_done}]")
+                            stop = True
+
+                # --- Race / Sprint final summary logic ---
+                elif session_kind in {"RACE", "SPRINT"}:
+                    if session_end and not posted_final_summary:
+                        posted_final_summary = True
+                        top_n = 8 if session_kind == "SPRINT" else 10
+                        label = "Sprint Final Classification (Top 8)" if session_kind == "SPRINT" else "Race Final Classification (Top 10)"
+                        top_rows = [(n, p) for n, p in ordered_all if 1 <= p <= top_n]
+                        if top_rows:
+                            body = "\n".join(f"           P{p} {_name(n)}" for n, p in top_rows[:top_n])
+                            lines.append(f"         ↳ SPOILER POST: 📊 {label}")
+                            lines.append(body)
+                        else:
+                            lines.append(f"         ↳ [final summary: no positions P1-P{top_n} found]")
+                        lines.append(f"         ↳ [LOOP STOPS — session end]")
+                        stop = True
+
+            lines.append("")
+
+    # Write and upload
+    outpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "replay_output.txt")
+    with open(outpath, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    total = len(lines)
+    try:
+        await channel.send(
+            f"✅ Replay complete — {total} lines. See attached file.",
+            file=discord.File(outpath, filename="replay_output.txt"),
+        )
+    except Exception:
+        await channel.send(f"✅ Replay written to `replay_output.txt` ({total} lines) — file too large to attach, check repo.")
+
+
+@bot.command(name="replaytest")
+@commands.has_permissions(administrator=True)
+async def cmd_replaytest(ctx, meeting_key: Optional[int] = None):
+    """[TEMP] Replay sprint + qualifying race_control messages and log what the bot would post."""
+    await ctx.send("🔄 Fetching and replaying sessions — this may take 30–60 seconds...")
+    try:
+        await _run_replay_test(ctx.channel, meeting_key)
+    except Exception as e:
+        await ctx.send(f"❌ Replay error: {type(e).__name__}: {e}")
+
+
 def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
     y = int(year)
     sessions = _openf1_get_json("sessions", {"year": y}, 30, "racereplay_sessions")
