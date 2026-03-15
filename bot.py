@@ -1601,32 +1601,44 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
         return list(cached_keys)
 
     now = datetime.now(timezone.utc)
-    candidates: List[Any] = []
+    # Include both Race and Sprint sessions — sprints award championship points
+    # so the ↑/↓ delta should compare across whichever points-scoring event
+    # came most recently, even if that was a sprint the day before the GP.
+    POINTS_SESSION_TYPES = ("Race", "Sprint")
+    parsed: List[tuple] = []
     years = [now.year, now.year - 1]
     for year in years:
-        try:
-            sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year, "session_type": "Race"}, 20, "standings_candidate_sessions")
-        except Exception:
-            continue
-        if not isinstance(sessions, list):
-            continue
-        parsed = []
-        for s in sessions:
-            if not isinstance(s, dict):
+        for session_type in POINTS_SESSION_TYPES:
+            try:
+                sessions = await asyncio.to_thread(
+                    _openf1_get_json,
+                    "sessions",
+                    {"year": year, "session_type": session_type},
+                    20,
+                    "standings_candidate_sessions",
+                )
+            except Exception:
                 continue
-            key = s.get("session_key")
-            dt = _parse_openf1_dt(s.get("date_start"))
-            if key is None or dt is None:
+            if not isinstance(sessions, list):
                 continue
-            # Only include sessions that have already started — future races
-            # won't have championship data and would waste API calls.
-            if dt > now:
-                continue
-            parsed.append((dt, key))
-        parsed.sort(key=lambda x: x[0], reverse=True)
-        for _dt, key in parsed:
-            if key not in candidates:
-                candidates.append(key)
+            for s in sessions:
+                if not isinstance(s, dict):
+                    continue
+                key = s.get("session_key")
+                dt = _parse_openf1_dt(s.get("date_start"))
+                if key is None or dt is None:
+                    continue
+                # Only include sessions that have already started — future races
+                # won't have championship data and would waste API calls.
+                if dt > now:
+                    continue
+                parsed.append((dt, key))
+
+    parsed.sort(key=lambda x: x[0], reverse=True)
+    candidates: List[Any] = []
+    for _dt, key in parsed:
+        if key not in candidates:
+            candidates.append(key)
     # "latest" goes last — it often points to a non-race or in-progress session
     # with incomplete championship data (null team names, missing name fields).
     candidates.append("latest")
