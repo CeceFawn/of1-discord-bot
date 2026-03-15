@@ -428,6 +428,10 @@ _OPENF1_TRACE: Dict[str, Any] = {"window_start": time.time(), "rows": {}}
 _OPENF1_AUTH_RETRY_AFTER_TS: float = 0.0
 _OPENF1_ENDPOINT_COOLDOWN: Dict[str, float] = {}
 _OPENF1_CANDIDATE_SESSIONS_CACHE: Dict[str, Any] = {"ts": 0.0, "keys": []}
+# In-memory copy of driver_cache.json.  Loaded once on first access, then kept
+# in sync with disk via _save_driver_cache().
+_DRIVER_CACHE: Dict[str, Any] = {}
+_DRIVER_CACHE_LOADED: bool = False
 
 
 def _openf1_set_endpoint_cooldown(endpoint: str, seconds: int) -> None:
@@ -1646,6 +1650,102 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
 
+def _load_driver_cache() -> Dict[str, Any]:
+    global _DRIVER_CACHE, _DRIVER_CACHE_LOADED
+    if _DRIVER_CACHE_LOADED:
+        return _DRIVER_CACHE
+    from settings import DRIVER_CACHE_PATH
+    try:
+        with open(DRIVER_CACHE_PATH, "r", encoding="utf-8") as f:
+            _DRIVER_CACHE = json.load(f)
+    except Exception:
+        _DRIVER_CACHE = {"drivers": {}, "last_session_key": None}
+    _DRIVER_CACHE_LOADED = True
+    return _DRIVER_CACHE
+
+
+def _save_driver_cache() -> None:
+    from settings import DRIVER_CACHE_PATH
+    try:
+        with open(DRIVER_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(_DRIVER_CACHE, f, indent=2)
+    except Exception as e:
+        logging.error(f"[DriverCache] save failed: {e}")
+
+
+def _update_driver_cache(rows: List[Dict[str, Any]], session_key: Any) -> None:
+    """Merge a fresh batch of API rows into the local driver cache.
+
+    Rules:
+    - Drivers are only ever added, never removed.
+    - When a new session_key is seen, current points are snapshotted as
+      prev_points before the new values are written in.  This gives us the
+      "previous standing" for the ↑/↓ delta arrows without needing a second
+      API call.
+    - name/team/code are updated only when the API returns a non-empty value,
+      so cached names survive API outages or incomplete responses.
+    """
+    cache = _load_driver_cache()
+    drivers = cache.setdefault("drivers", {})
+    last_key = str(cache.get("last_session_key") or "")
+    current_key = str(session_key) if session_key is not None else ""
+    is_new_session = bool(current_key and current_key != last_key)
+
+    for r in rows:
+        num = str(r.get("driver_number") or "")
+        if not num:
+            continue
+        entry = drivers.setdefault(num, {})
+
+        if is_new_session:
+            # Snapshot before overwriting so we can compute position delta.
+            entry["prev_points"] = entry.get("points", 0)
+
+        entry["points"] = int(r.get("points", 0) or 0)
+
+        # Only overwrite identity fields when the API actually has the data.
+        name = str(r.get("name") or "").strip()
+        if name:
+            entry["name"] = name
+        team = str(r.get("team") or "").strip()
+        if team and team != "Unknown":
+            entry["team"] = team
+        code = str(r.get("code") or "").strip()
+        if code:
+            entry["code"] = code
+
+    if is_new_session and current_key:
+        cache["last_session_key"] = current_key
+        cache["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    _save_driver_cache()
+
+
+def _standings_from_cache(use_previous: bool = False) -> List[Dict[str, Any]]:
+    """Build a standings list from the local cache, sorted by points descending.
+    Positions are assigned here so they're always consistent with the actual
+    point totals rather than whatever the API returned.
+    """
+    cache = _load_driver_cache()
+    drivers = cache.get("drivers") or {}
+    rows = []
+    for num_str, d in drivers.items():
+        if not d.get("name"):
+            continue
+        pts = int(d.get("prev_points" if use_previous else "points", 0) or 0)
+        rows.append({
+            "driver_number": int(num_str) if num_str.isdigit() else 0,
+            "name": d.get("name", f"#{num_str}"),
+            "code": d.get("code", ""),
+            "team": d.get("team", "Unknown"),
+            "points": pts,
+        })
+    rows.sort(key=lambda x: x["points"], reverse=True)
+    for i, r in enumerate(rows):
+        r["position"] = i + 1
+    return rows
+
+
 async def _fetch_champ_driver_rows(session_key: Any) -> List[Dict[str, Any]]:
     """Fetch and process championship_drivers for a single session key. Returns [] if unavailable."""
     try:
@@ -1733,49 +1833,50 @@ async def _fetch_champ_driver_rows(session_key: Any) -> List[Dict[str, Any]]:
     return out
 
 
-async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
+async def _refresh_driver_cache() -> None:
+    """Try to pull the latest championship data from the API and merge it into
+    the local driver cache.  Picks the candidate session that returns the most
+    drivers (up to 3 attempts) so a partially-populated latest session doesn't
+    overwrite good cached data with an incomplete set.
+    """
     candidates = await _openf1_candidate_race_session_keys()
     best_rows: List[Dict[str, Any]] = []
-    # Try up to the 3 most-recent candidate sessions and prefer whichever returns
-    # the most drivers — this avoids returning incomplete data when the latest
-    # race session hasn't finished populating (e.g. one team/driver missing).
+    best_key: Any = None
     for i, session_key in enumerate(candidates):
         rows = await _fetch_champ_driver_rows(session_key)
         if len(rows) > len(best_rows):
             best_rows = rows
+            best_key = session_key
         if len(best_rows) >= 20:
             break
         if i >= 2 and best_rows:
             break
-    return best_rows if not limit else best_rows[:int(limit)]
+    if best_rows:
+        _update_driver_cache(best_rows, best_key)
+
+
+async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
+    await _refresh_driver_cache()
+    out = _standings_from_cache(use_previous=False)
+    if not out:
+        return []
+    return out if not limit else out[:int(limit)]
 
 
 async def _openf1_driver_standings_pair() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Returns (current_standings, previous_standings). previous is [] if no prior race exists."""
-    candidates = await _openf1_candidate_race_session_keys()
-    current: List[Dict[str, Any]] = []
-    previous: List[Dict[str, Any]] = []
-    # Collect sessions until we have a current (>=20 drivers or 3 attempts) and a previous.
-    # This mirrors the completeness logic in _openf1_driver_standings_rows so that a
-    # partially-populated latest session doesn't hide teams from the delta comparison.
-    attempts_for_current = 0
-    for session_key in candidates:
-        rows = await _fetch_champ_driver_rows(session_key)
-        if not rows:
-            continue
-        if not current:
-            current = rows
-            attempts_for_current = 1
-        elif attempts_for_current < 3 and len(rows) > len(current):
-            # A slightly older session has more drivers — prefer it as "current".
-            previous = current
-            current = rows
-            attempts_for_current += 1
-        elif not previous:
-            previous = rows
-            break
-        else:
-            break
+    """Returns (current_standings, previous_standings).
+    Current is sorted by latest cached points; previous is sorted by the
+    pre-last-session snapshot so the ↑/↓ arrows reflect the most recent
+    points-scoring event (race or sprint).
+    previous is [] if no prior session snapshot exists yet.
+    """
+    await _refresh_driver_cache()
+    current = _standings_from_cache(use_previous=False)
+    previous = _standings_from_cache(use_previous=True)
+    # If every driver has prev_points == 0 the cache was just seeded and we
+    # have no real previous snapshot yet — return empty so deltas show "-".
+    if all(r["points"] == 0 for r in previous):
+        previous = []
     return current, previous
 
 
