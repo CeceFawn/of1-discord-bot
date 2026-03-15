@@ -282,6 +282,7 @@ XP_FLUSH_TASK: Optional[asyncio.Task] = None
 PERIODIC_ROLE_RECOVERY_TASK: Optional[asyncio.Task] = None
 RACE_SUPERVISOR_TASK: Optional[asyncio.Task] = None
 RUNTIME_STATUS_TASK: Optional[asyncio.Task] = None
+DRIVER_CACHE_VALIDATION_TASK: Optional[asyncio.Task] = None
 LOOP_HEARTBEATS: Dict[str, str] = {}
 LOOP_ERRORS: Dict[str, int] = {}
 
@@ -1865,18 +1866,40 @@ async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
 
 async def _openf1_driver_standings_pair() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Returns (current_standings, previous_standings).
-    Current is sorted by latest cached points; previous is sorted by the
-    pre-last-session snapshot so the ↑/↓ arrows reflect the most recent
-    points-scoring event (race or sprint).
-    previous is [] if no prior session snapshot exists yet.
+
+    Primary path: current = local cache sorted by points; previous = the
+    pre-last-session snapshot stored in the cache (prev_points).  This means
+    the ↑/↓ arrows show how each driver moved in the most recent race/sprint.
+
+    Fallback (cache was just seeded, no real prev_points yet): query the API
+    for the points-scoring session that came *before* the current one — i.e.
+    skip the session we already have as current and use the next distinct one.
+    This avoids comparing identical points (which would give all flat arrows).
     """
     await _refresh_driver_cache()
     current = _standings_from_cache(use_previous=False)
     previous = _standings_from_cache(use_previous=True)
-    # If every driver has prev_points == 0 the cache was just seeded and we
-    # have no real previous snapshot yet — return empty so deltas show "-".
-    if all(r["points"] == 0 for r in previous):
-        previous = []
+
+    # Detect "no real snapshot": every prev_points is still 0 (fresh cache).
+    if not previous or all(r["points"] == 0 for r in previous):
+        cache = _load_driver_cache()
+        current_key = str(cache.get("last_session_key") or "")
+        candidates = await _openf1_candidate_race_session_keys()
+        # Walk the list (most-recent-first) and take the first session that is
+        # different from the one we already used for current standings.
+        for session_key in candidates:
+            if str(session_key) == current_key:
+                continue
+            rows = await _fetch_champ_driver_rows(session_key)
+            if not rows:
+                continue
+            # Derive positions from points for consistency with the cache approach.
+            rows.sort(key=lambda x: int(x.get("points", 0) or 0), reverse=True)
+            for i, r in enumerate(rows):
+                r["position"] = i + 1
+            previous = rows
+            break
+
     return current, previous
 
 
@@ -3822,6 +3845,7 @@ async def on_ready():
     # F1 reminders loop
     _ensure_background_task("F1_REMINDER_TASK", f1_reminder_loop, "F1Reminder")
     _ensure_background_task("RUNTIME_STATUS_TASK", runtime_status_loop, "RuntimeStatus")
+    _ensure_background_task("DRIVER_CACHE_VALIDATION_TASK", driver_cache_validation_loop, "DriverCache")
 
     if not APP_COMMANDS_SYNCED:
         try:
@@ -5020,6 +5044,58 @@ async def race_thread_precreate_loop():
             logging.error(f"[RaceLive] Thread pre-creation loop error: {e}")
 
         await asyncio.sleep(6 * 3600)  # check every 6 hours
+
+async def driver_cache_validation_loop():
+    """Runs every 6 hours and sanity-checks the local driver cache.
+
+    Checks:
+    - At least 18 drivers present (full F1 grid).
+    - No driver is missing a name.
+    - No driver has negative points.
+    - At least one driver has points > 0 (catches a fully-zeroed cache).
+
+    If any check fails an ops notice is sent to every guild so you know
+    something has gone wrong without having to spot it yourself.
+    """
+    await bot.wait_until_ready()
+    logging.info("[DriverCache] Validation loop started")
+
+    while not bot.is_closed():
+        await asyncio.sleep(6 * 3600)
+        try:
+            cache = _load_driver_cache()
+            drivers = cache.get("drivers") or {}
+            issues: List[str] = []
+
+            driver_count = len(drivers)
+            if driver_count < 18:
+                issues.append(f"Only {driver_count} drivers in cache (expected ≥ 18).")
+
+            missing_names = [num for num, d in drivers.items() if not d.get("name")]
+            if missing_names:
+                issues.append(f"{len(missing_names)} driver(s) have no name: {', '.join(missing_names)}.")
+
+            negative_pts = [
+                d.get("name", f"#{num}")
+                for num, d in drivers.items()
+                if int(d.get("points", 0) or 0) < 0
+            ]
+            if negative_pts:
+                issues.append(f"Negative points detected for: {', '.join(negative_pts)}.")
+
+            all_zero = all(int(d.get("points", 0) or 0) == 0 for d in drivers.values())
+            if drivers and all_zero:
+                issues.append("All drivers have 0 points — cache may not have been populated yet.")
+
+            if issues:
+                msg = "⚠️ **Driver cache validation failed:**\n" + "\n".join(f"- {i}" for i in issues)
+                logging.warning(f"[DriverCache] Validation issues: {issues}")
+                for guild in bot.guilds:
+                    await _send_race_live_ops_notice(guild, msg)
+            else:
+                logging.info(f"[DriverCache] Validation OK ({driver_count} drivers).")
+        except Exception as e:
+            logging.error(f"[DriverCache] Validation loop error: {e}")
 
 async def race_supervisor_loop():
     await bot.wait_until_ready()
