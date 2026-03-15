@@ -1701,18 +1701,41 @@ async def _fetch_champ_driver_rows(session_key: Any) -> List[Dict[str, Any]]:
             "name": full_name,
             "team": team,
         })
-    out = [x for x in out if int(x.get("position", 0) or 0) > 0]
+    placed = [x for x in out if int(x.get("position", 0) or 0) > 0]
+    # Drivers with position=0 but real points are still championship entrants —
+    # the API just hasn't assigned them a standing yet (common at season start or
+    # for the most-recent race before data is fully populated).
+    unplaced = [
+        x for x in out
+        if int(x.get("position", 0) or 0) == 0 and int(x.get("points", 0) or 0) > 0
+    ]
+    if unplaced:
+        next_pos = max((int(x.get("position", 0) or 0) for x in placed), default=0) + 1
+        unplaced.sort(key=lambda x: int(x.get("points", 0) or 0), reverse=True)
+        for i, x in enumerate(unplaced):
+            x["position"] = next_pos + i
+        out = placed + unplaced
+    else:
+        out = placed
     out.sort(key=lambda x: int(x.get("position", 999) or 999))
     return out
 
 
 async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
     candidates = await _openf1_candidate_race_session_keys()
-    for session_key in candidates:
+    best_rows: List[Dict[str, Any]] = []
+    # Try up to the 3 most-recent candidate sessions and prefer whichever returns
+    # the most drivers — this avoids returning incomplete data when the latest
+    # race session hasn't finished populating (e.g. one team/driver missing).
+    for i, session_key in enumerate(candidates):
         rows = await _fetch_champ_driver_rows(session_key)
-        if rows:
-            return rows if not limit else rows[:int(limit)]
-    return []
+        if len(rows) > len(best_rows):
+            best_rows = rows
+        if len(best_rows) >= 20:
+            break
+        if i >= 2 and best_rows:
+            break
+    return best_rows if not limit else best_rows[:int(limit)]
 
 
 async def _openf1_driver_standings_pair() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -1720,14 +1743,26 @@ async def _openf1_driver_standings_pair() -> Tuple[List[Dict[str, Any]], List[Di
     candidates = await _openf1_candidate_race_session_keys()
     current: List[Dict[str, Any]] = []
     previous: List[Dict[str, Any]] = []
+    # Collect sessions until we have a current (>=20 drivers or 3 attempts) and a previous.
+    # This mirrors the completeness logic in _openf1_driver_standings_rows so that a
+    # partially-populated latest session doesn't hide teams from the delta comparison.
+    attempts_for_current = 0
     for session_key in candidates:
         rows = await _fetch_champ_driver_rows(session_key)
         if not rows:
             continue
         if not current:
             current = rows
-        else:
+            attempts_for_current = 1
+        elif attempts_for_current < 3 and len(rows) > len(current):
+            # A slightly older session has more drivers — prefer it as "current".
+            previous = current
+            current = rows
+            attempts_for_current += 1
+        elif not previous:
             previous = rows
+            break
+        else:
             break
     return current, previous
 
@@ -1736,7 +1771,10 @@ def _build_constructor_rows(driver_rows: List[Dict[str, Any]]) -> List[Dict[str,
     team_pts: Dict[str, int] = {}
     for r in driver_rows:
         team = str(r.get("team") or "").strip()
-        if not team or team == "Unknown":
+        # Only skip if completely blank — "Unknown" is still a valid aggregation
+        # bucket and prevents real points (e.g. Ferrari with null team_name in the
+        # API) from being silently dropped from the constructor standings.
+        if not team:
             continue
         team_pts[team] = team_pts.get(team, 0) + int(r.get("points", 0) or 0)
     return [
@@ -4397,10 +4435,15 @@ async def _fetch_saved_race_thread(guild: discord.Guild, round_key: str) -> Opti
         fetched = await guild.fetch_channel(thread_id)
         if isinstance(fetched, discord.Thread):
             return fetched
+    except discord.NotFound:
+        # Thread was genuinely deleted — safe to forget it.
+        _clear_race_thread_record(round_key, guild.id)
     except Exception:
+        # Transient error (rate-limit, network, permissions issue) — keep the
+        # saved record so we can try again on the next supervisor tick rather
+        # than silently nuking it and creating a duplicate thread.
         pass
 
-    _clear_race_thread_record(round_key, guild.id)
     return None
 
 def _normalize_race_name_key(value: str) -> str:
@@ -4464,8 +4507,11 @@ async def _fetch_fallback_race_thread_for_guild(
             fetched = await guild.fetch_channel(thread_id)
             if isinstance(fetched, discord.Thread):
                 return round_key, fetched
-        except Exception:
+        except discord.NotFound:
             _clear_race_thread_record(round_key, guild.id)
+            continue
+        except Exception:
+            # Transient error — don't delete the record, just skip this candidate.
             continue
     return None
 
@@ -4543,6 +4589,18 @@ async def _ensure_live_thread(
             )
         _set_race_thread_weekend_state(round_key, guild.id, "active")
         return fallback_thread
+
+    # Guard: if the round_key looks like a fallback value it means the OpenF1
+    # schedule API was unavailable when the supervisor ran.  Creating a thread
+    # now would produce a garbage title like "2025-round-unknown - Live Weekend"
+    # and prevent the real pre-created thread from ever being found.  Raise so
+    # the supervisor skips this tick and retries once the API recovers.
+    if "unknown" in round_key.lower():
+        raise RuntimeError(
+            f"Refusing to create race thread: round key is '{round_key}' "
+            "(OpenF1 schedule API may be temporarily unavailable). "
+            "Will retry on the next supervisor tick."
+        )
 
     created = await _create_race_thread(
         guild=guild,
