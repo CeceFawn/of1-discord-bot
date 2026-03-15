@@ -13,6 +13,7 @@ runtime.db
 runtime.db-shm
 runtime.db-wal
 deploy_status.json
+driver_cache.json
 venv/
 .venv/
 
