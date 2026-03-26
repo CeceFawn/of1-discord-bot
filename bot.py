@@ -3852,8 +3852,9 @@ async def on_ready():
             _guild_id_str = os.getenv("DISCORD_GUILD_ID", "").strip()
             if _guild_id_str:
                 _guild_obj = discord.Object(id=int(_guild_id_str))
+                bot.tree.copy_global_to(guild=_guild_obj)
                 await bot.tree.sync(guild=_guild_obj)
-                logging.info(f"[Slash] Command tree synced to guild {_guild_id_str}")
+                logging.info(f"[Slash] Command tree synced to guild {_guild_id_str} (instant)")
             await bot.tree.sync()
             APP_COMMANDS_SYNCED = True
             logging.info("[Slash] Command tree synced globally")
