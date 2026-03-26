@@ -64,10 +64,31 @@
       100% { color: #ff0000; border-color: #ff000066; background-color: #ff000015; text-shadow: 0 0 8px #ff000088; }
     }
 
-    .party-logo  { animation: rgb-cycle  3s linear infinite; }
-    .party-badge { animation: rgb-badge  3s linear infinite; }
-    .party-card  { animation: rgb-shadow 3s linear infinite; }
-    .party-btn   { animation: rgb-btn    3s linear infinite; }
+    @keyframes rgb-social {
+      0%   { border-color: #ff000088; color: #ff0000; box-shadow: 0 0 10px #ff000044; }
+      16%  { border-color: #ff880088; color: #ff8800; box-shadow: 0 0 10px #ff880044; }
+      33%  { border-color: #ffff0088; color: #ffff00; box-shadow: 0 0 10px #ffff0044; }
+      50%  { border-color: #00ff8888; color: #00ff88; box-shadow: 0 0 10px #00ff8844; }
+      66%  { border-color: #00aaff88; color: #00aaff; box-shadow: 0 0 10px #00aaff44; }
+      83%  { border-color: #cc00ff88; color: #cc00ff; box-shadow: 0 0 10px #cc00ff44; }
+      100% { border-color: #ff000088; color: #ff0000; box-shadow: 0 0 10px #ff000044; }
+    }
+    @keyframes rgb-heart {
+      0%   { filter: drop-shadow(0 0 4px #ff0000); }
+      16%  { filter: drop-shadow(0 0 4px #ff8800); }
+      33%  { filter: drop-shadow(0 0 4px #ffff00); }
+      50%  { filter: drop-shadow(0 0 4px #00ff88); }
+      66%  { filter: drop-shadow(0 0 4px #00aaff); }
+      83%  { filter: drop-shadow(0 0 4px #cc00ff); }
+      100% { filter: drop-shadow(0 0 4px #ff0000); }
+    }
+
+    .party-logo   { animation: rgb-cycle  3s linear infinite; }
+    .party-badge  { animation: rgb-badge  3s linear infinite; }
+    .party-card   { animation: rgb-shadow 3s linear infinite; }
+    .party-btn    { animation: rgb-btn    3s linear infinite; }
+    .party-social-active { animation: rgb-social 3s linear infinite; }
+    .party-heart  { animation: rgb-heart  3s linear infinite; }
 
     #party-trigger {
       opacity: 0;
@@ -199,7 +220,7 @@
 
         <!-- Instagram -->
         <a href="https://www.instagram.com/orlandof1fans" target="_blank" rel="noopener"
-           class="flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+           class="party-social flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
             <circle cx="12" cy="12" r="4"/>
@@ -210,7 +231,7 @@
 
         <!-- Facebook -->
         <a href="https://www.facebook.com/orlandoF1fans" target="_blank" rel="noopener"
-           class="flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+           class="party-social flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
             <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>
           </svg>
@@ -219,7 +240,7 @@
 
         <!-- Linktree -->
         <a href="https://linktr.ee/orlandof1" target="_blank" rel="noopener"
-           class="flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+           class="party-social flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v13M8 7l4-4 4 4M6 11l6-3 6 3M9 17h6M10 21h4"/>
           </svg>
@@ -232,7 +253,7 @@
 
   <!-- ── FOOTER ────────────────────────────────────────────────── -->
   <footer class="border-t border-white/10 px-6 py-8 text-center text-white/20 text-sm">
-    Orlando F1 · Made with ❤️ for the community
+    Orlando F1 · Made with <span id="footer-heart">❤️</span> for the community
   </footer>
 
   <!-- ── LIGHTBOX ─────────────────────────────────────────────── -->
@@ -338,27 +359,23 @@
       const heroLogo  = document.getElementById('hero-logo');
       const heroBadge = document.getElementById('hero-badge');
       const card      = document.getElementById('watch-party-card');
+      const heart     = document.getElementById('footer-heart');
+      const socials   = document.querySelectorAll('.party-social');
       if (!trigger) return;
 
       let active = false;
 
       trigger.addEventListener('click', function() {
         active = !active;
-        if (active) {
-          trigger.style.opacity = '1';
-          trigger.classList.add('party-btn');
-          if (navLogo)   navLogo.classList.add('party-logo');
-          if (heroLogo)  heroLogo.classList.add('party-logo');
-          if (heroBadge) heroBadge.classList.add('party-badge');
-          if (card)      card.classList.add('party-card');
-        } else {
-          trigger.style.opacity = '';
-          trigger.classList.remove('party-btn');
-          if (navLogo)   navLogo.classList.remove('party-logo');
-          if (heroLogo)  heroLogo.classList.remove('party-logo');
-          if (heroBadge) heroBadge.classList.remove('party-badge');
-          if (card)      card.classList.remove('party-card');
-        }
+        const action = active ? 'add' : 'remove';
+        trigger.style.opacity = active ? '1' : '';
+        trigger.classList[action]('party-btn');
+        if (navLogo)   navLogo.classList[action]('party-logo');
+        if (heroLogo)  heroLogo.classList[action]('party-logo');
+        if (heroBadge) heroBadge.classList[action]('party-badge');
+        if (card)      card.classList[action]('party-card');
+        if (heart)     heart.classList[action]('party-heart');
+        socials.forEach(el => el.classList[action]('party-social-active'));
       });
     })();
   </script>
