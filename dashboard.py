@@ -1490,6 +1490,35 @@ def watch_party_editor():
         <span style="color:#555;font-size:12px;margin-left:8px;">(fixed — always shown on the website)</span>
       </div>
 
+      <!-- Schedule flyer uploads -->
+      <div style="margin-top:16px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;">Schedule Flyers</div>
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div>
+            <div style="color:#eee;font-size:13px;font-weight:600;margin-bottom:6px;">Half Barrel Beer Project</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <label style="background:#1f6f3f;color:#fff;border:1px solid #2a8f52;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px;">
+                Choose PNG
+                <input type="file" accept="image/png" style="display:none;"
+                  onchange="wpUploadFlyer(this, 'halfbarrel')" />
+              </label>
+              <span id="flyer-status-halfbarrel" style="font-size:12px;color:#555;">No file chosen</span>
+            </div>
+          </div>
+          <div>
+            <div style="color:#eee;font-size:13px;font-weight:600;margin-bottom:6px;">Hourglass Brewing Longwood</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <label style="background:#1f6f3f;color:#fff;border:1px solid #2a8f52;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px;">
+                Choose PNG
+                <input type="file" accept="image/png" style="display:none;"
+                  onchange="wpUploadFlyer(this, 'hourglass')" />
+              </label>
+              <span id="flyer-status-hourglass" style="font-size:12px;color:#555;">No file chosen</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Status toast -->
       <div id="wp-toast" style="display:none;margin-top:14px;padding:10px 14px;border-radius:10px;font-size:14px;"></div>
 
@@ -1563,10 +1592,73 @@ def watch_party_editor():
             toast(d.ok ? 'Venues & location saved.' : ('Error: ' + d.error), d.ok);
           }} catch(e) {{ toast('Request failed.', false); }}
         }};
+
+        window.wpUploadFlyer = async function(input, key) {{
+          const statusEl = document.getElementById('flyer-status-' + key);
+          const file = input.files[0];
+          if (!file) return;
+          if (!file.name.toLowerCase().endsWith('.png')) {{
+            statusEl.style.color = '#f88';
+            statusEl.textContent = 'Must be a PNG file.';
+            return;
+          }}
+          if (file.size > 10 * 1024 * 1024) {{
+            statusEl.style.color = '#f88';
+            statusEl.textContent = 'File too large (max 10 MB).';
+            return;
+          }}
+          statusEl.style.color = '#aaa';
+          statusEl.textContent = 'Uploading...';
+          const fd = new FormData();
+          fd.append('_csrf', csrf());
+          fd.append('file', file);
+          fd.append('key', key);
+          try {{
+            const r = await fetch('/watch_party/upload_flyer', {{ method: 'POST', body: fd, credentials: 'same-origin' }});
+            const d = await r.json();
+            if (d.ok) {{
+              statusEl.style.color = '#6f6';
+              statusEl.textContent = 'Uploaded successfully.';
+              toast('Flyer updated. Reload the website to see it.', true);
+            }} else {{
+              statusEl.style.color = '#f88';
+              statusEl.textContent = 'Error: ' + d.error;
+            }}
+          }} catch(e) {{
+            statusEl.style.color = '#f88';
+            statusEl.textContent = 'Upload failed.';
+          }}
+          input.value = '';
+        }};
       }})();
       </script>
     """
     return _render(page)
+
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+_ALLOWED_FLYER_KEYS = {"halfbarrel", "hourglass"}
+
+@app.route("/watch_party/upload_flyer", methods=["POST"])
+@login_required
+def wp_upload_flyer():
+    key = (request.form.get("key") or "").strip()
+    if key not in _ALLOWED_FLYER_KEYS:
+        return jsonify({"ok": False, "error": "Invalid flyer key"}), 400
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "No file provided"}), 400
+    if not f.filename.lower().endswith(".png"):
+        return jsonify({"ok": False, "error": "Only PNG files are allowed"}), 400
+    dest = os.path.join(_STATIC_DIR, f"schedule_{key}.png")
+    try:
+        os.makedirs(_STATIC_DIR, exist_ok=True)
+        tmp = dest + ".tmp"
+        f.save(tmp)
+        os.replace(tmp, dest)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/watch_party/toggle_override", methods=["POST"])

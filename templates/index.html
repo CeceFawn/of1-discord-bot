@@ -4,7 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OF1 — Orlando F1</title>
-  <meta name="description" content="Orlando's F1 community. Watch parties, standings, and more." />
+  <meta name="description" content="Orlando's home for F1 fans. Watch parties, race coverage, and community." />
+
+  <!-- Open Graph / Social sharing -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:title"       content="OF1 — Orlando F1" />
+  <meta property="og:description" content="Orlando's home for F1 fans. Watch parties, race coverage, and community." />
+  <meta property="og:image"       content="/static/schedule_halfbarrel.png" />
+  <meta property="og:site_name"   content="Orlando F1" />
+
+  <!-- Twitter card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="OF1 — Orlando F1" />
+  <meta name="twitter:description" content="Orlando's home for F1 fans. Watch parties, race coverage, and community." />
+  <meta name="twitter:image"       content="/static/schedule_halfbarrel.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -191,7 +204,12 @@
         {% if watch_party.get('details') %}
         <p class="mt-4 text-white/60 text-sm leading-relaxed">{{ watch_party.details }}</p>
         {% endif %}
-        <div class="mt-6 text-f1red text-sm font-semibold">Join in Discord →</div>
+        <div class="mt-6 flex items-center justify-between flex-wrap gap-2">
+          <span class="text-f1red text-sm font-semibold">Join in Discord →</span>
+          {% if member_count %}
+          <span class="text-white/30 text-xs">{{ "{:,}".format(member_count) }} members</span>
+          {% endif %}
+        </div>
       </a>
     </div>
   </section>

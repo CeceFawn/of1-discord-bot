@@ -24,7 +24,9 @@ INSTAGRAM_URL   = os.getenv("INSTAGRAM_URL", "")
 TWITTER_URL     = os.getenv("TWITTER_URL", "")
 TIKTOK_URL      = os.getenv("TIKTOK_URL", "")
 
-WATCH_PARTY_PATH = os.path.join(os.path.dirname(__file__), "watch_party.json")
+WATCH_PARTY_PATH  = os.path.join(os.path.dirname(__file__), "watch_party.json")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+DISCORD_GUILD_ID  = os.getenv("DISCORD_GUILD_ID", "").strip()
 
 OPENF1_BASE = "https://api.openf1.org/v1"
 PRE_HOURS  = 24
@@ -277,6 +279,34 @@ def _meeting_info(sessions: list) -> dict:
     }
 
 
+_member_count_cache: dict = {}  # {count, fetched_at}
+_MEMBER_COUNT_TTL = 300  # refresh every 5 minutes
+
+def get_member_count() -> int | None:
+    """Fetch approximate member count for the Discord guild via bot token."""
+    if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
+        return None
+    now_ts = time.time()
+    cached = _member_count_cache
+    if cached.get("fetched_at") and now_ts - cached["fetched_at"] < _MEMBER_COUNT_TTL:
+        return cached.get("count")
+    try:
+        resp = requests.get(
+            f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}?with_counts=true",
+            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "User-Agent": "OF1-Website"},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            count = resp.json().get("approximate_member_count")
+            if count is not None:
+                _member_count_cache["count"] = int(count)
+                _member_count_cache["fetched_at"] = now_ts
+                return int(count)
+    except Exception:
+        pass
+    return cached.get("count")  # return stale cache on failure
+
+
 def get_current_race_weekend() -> dict | None:
     """Return the active or next upcoming race weekend by scanning the full year schedule.
 
@@ -433,6 +463,7 @@ def index():
         watch_party=watch_party,
         next_race=get_next_race(),
         next_session=get_next_session(),
+        member_count=get_member_count(),
         discord_invite=DISCORD_INVITE,
         instagram_url=INSTAGRAM_URL,
         twitter_url=TWITTER_URL,
