@@ -236,133 +236,224 @@ def _csrf_protect():
 # ----------------------------
 BASE_TEMPLATE = """
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>OF1 Bot Dashboard</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-  </head>
-  <body style="background:#111;color:#eee;padding:16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
-      <a style="color:#9cf;" href="{{ url_for('logs') }}">Logs</a>
-      <a style="color:#9cf;" href="{{ url_for('status') }}">Status</a>
-      <a style="color:#9cf;" href="{{ url_for('config') }}">Config</a>
-      <a style="color:#9cf;" href="{{ url_for('state') }}">State</a>
-      <a style="color:#9cf;" href="{{ url_for('watch_party_editor') }}">Watch Party</a>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>OF1 Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [x-cloak] { display: none; }
+    .nav-link.active { background: #1f1f1f; color: #fff; }
+  </style>
+</head>
+<body class="bg-[#0a0a0a] text-gray-200 min-h-screen">
 
-      <!-- Split button: Restart + dropdown -->
-      <div style="display:inline-flex;align-items:stretch;gap:0;margin-left:12px;">
-        <form data-async-refresh="1" action="{{ url_for('bot_action', action='restart') }}" method="post" style="display:inline;margin:0;">
-          {{ csrf_input|safe }}
-          <button style="background:#300;color:#f88;border:1px solid #822;padding:6px 10px;border-radius:8px 0 0 8px;cursor:pointer;">
-            Restart
-          </button>
-        </form>
+  <!-- Mobile top bar -->
+  <header class="lg:hidden fixed top-0 inset-x-0 z-40 bg-[#111] border-b border-[#222] flex items-center gap-3 px-4 h-14">
+    <button id="menuBtn" class="text-gray-400 hover:text-white p-1 rounded">
+      <svg id="menuIcon" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+      </svg>
+    </button>
+    <span class="font-bold text-white tracking-wide">OF1 Dashboard</span>
+    {% if bot_name %}
+      <span class="ml-auto text-xs text-gray-500 truncate max-w-[140px]">{{ bot_name }}</span>
+    {% endif %}
+  </header>
 
-        <div style="position:relative;display:inline-block;">
-          <button id="actionsBtn"
-            type="button"
-            style="background:#300;color:#f88;border:1px solid #822;border-left:none;padding:6px 10px;border-radius:0 8px 8px 0;cursor:pointer;">
-            ▼
-          </button>
+  <!-- Sidebar overlay -->
+  <div id="sidebarOverlay" class="lg:hidden fixed inset-0 z-30 bg-black/60 hidden"></div>
 
-          <div id="actionsMenu"
-            style="display:none;position:absolute;z-index:50;right:0;top:110%;background:#1a1a1a;border:1px solid #333;border-radius:10px;min-width:220px;box-shadow:0 12px 40px rgba(0,0,0,.35);padding:6px;">
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='start') }}" method="post" style="margin:0;">
-              {{ csrf_input|safe }}
-              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Start bot
-              </button>
-            </form>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='stop') }}" method="post" style="margin:0;">
-              {{ csrf_input|safe }}
-              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Stop bot
-              </button>
-            </form>
-            <div style="height:1px;background:#2a2a2a;margin:6px 0;"></div>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploybot') }}" method="post" style="margin:0;">
-              {{ csrf_input|safe }}
-              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Deploy bot update
-              </button>
-            </form>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploydashboard') }}" method="post" style="margin:0;">
-              {{ csrf_input|safe }}
-              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Deploy dashboard update
-              </button>
-            </form>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploywebsite') }}" method="post" style="margin:0;">
-              {{ csrf_input|safe }}
-              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Deploy website update
-              </button>
-            </form>
-            <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployall') }}" method="post" style="margin:0;">
-              {{ csrf_input|safe }}
-              <button style="width:100%;text-align:left;background:transparent;color:#eee;border:none;padding:10px;border-radius:8px;cursor:pointer;">
-                Deploy all (bot + dashboard + website)
-              </button>
-            </form>
-          </div>
-        </div>
+  <!-- Sidebar -->
+  <aside id="sidebar"
+    class="fixed top-0 left-0 h-full w-56 bg-[#111] border-r border-[#222] z-40 flex flex-col
+           transition-transform duration-200 -translate-x-full lg:translate-x-0">
+
+    <!-- Sidebar header -->
+    <div class="flex items-center gap-2 px-5 py-4 border-b border-[#222]">
+      <div>
+        <div class="font-extrabold text-white text-lg leading-none">OF1</div>
+        <div class="text-xs text-gray-500">Dashboard</div>
       </div>
+      {% if bot_name %}
+        <div class="ml-auto text-xs text-gray-600 truncate max-w-[80px]" title="{{ bot_name }}">{{ bot_name }}</div>
+      {% endif %}
+    </div>
 
-      <script>
-        (function(){
-          const btn = document.getElementById('actionsBtn');
-          const menu = document.getElementById('actionsMenu');
-          function close() { menu.style.display = 'none'; }
-          function toggle() { menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none'; }
+    <!-- Nav links -->
+    <nav class="flex-1 overflow-y-auto p-2 space-y-0.5">
+      <a href="{{ url_for('logs') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h10"/>
+        </svg>
+        Logs
+      </a>
+      <a href="{{ url_for('status') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        Status
+      </a>
+      <a href="{{ url_for('watch_party_editor') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        Watch Party
+      </a>
+    </nav>
 
-          btn.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); toggle(); });
-          document.addEventListener('click', function(){ close(); });
-          menu.addEventListener('click', function(e){ e.stopPropagation(); });
+    <!-- Bot controls -->
+    <div class="p-2 border-t border-[#222] space-y-0.5">
+      <p class="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Bot Controls</p>
 
-          document.querySelectorAll('form[data-async-refresh="1"]').forEach(function(form){
-            form.addEventListener('submit', async function(e){
-              e.preventDefault();
-              const btnEl = form.querySelector('button');
-              if (btnEl) btnEl.disabled = true;
-              try {
-                await fetch(form.action, {
-                  method: 'POST',
-                  body: new FormData(form),
-                  credentials: 'same-origin',
-                });
-              } catch (_err) {
-                // Fall back to normal navigation if fetch fails.
-                form.submit();
-                return;
-              }
-              window.location.reload();
-            });
-          });
-        })();
-      </script>
-
-      <form action="{{ url_for('logout') }}" method="post" style="display:inline;margin-left:6px;">
+      <form data-async-refresh="1" action="{{ url_for('bot_action', action='restart') }}" method="post">
         {{ csrf_input|safe }}
-        <button style="background:#222;color:#eee;border:1px solid #333;padding:6px 10px;border-radius:8px;cursor:pointer;">
-          Logout
+        <button class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-red-400 hover:bg-[#1a1a1a] text-sm transition-colors cursor-pointer">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Restart Bot
         </button>
       </form>
 
-      <div style="margin-left:auto;color:#aaa;font-size:13px;">
-        {% if bot_name %}Bot: <b style="color:#eee;">{{ bot_name }}</b> · {% endif %}
-        {{ now }}
+      <!-- Deploy dropdown -->
+      <div class="relative" id="deployWrap">
+        <button id="deployBtn" type="button"
+          class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+          </svg>
+          Deploy
+          <svg class="w-3 h-3 ml-auto" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <div id="deployMenu" class="hidden absolute bottom-full left-0 right-0 mb-1 bg-[#181818] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden z-50 py-1">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployall') }}" method="post">
+            {{ csrf_input|safe }}
+            <button class="w-full text-left px-4 py-2 text-gray-300 hover:bg-[#222] text-sm">Deploy All</button>
+          </form>
+          <div class="my-1 border-t border-[#2a2a2a]"></div>
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploybot') }}" method="post">
+            {{ csrf_input|safe }}
+            <button class="w-full text-left px-4 py-2 text-gray-400 hover:bg-[#222] text-sm">Bot only</button>
+          </form>
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploywebsite') }}" method="post">
+            {{ csrf_input|safe }}
+            <button class="w-full text-left px-4 py-2 text-gray-400 hover:bg-[#222] text-sm">Website only</button>
+          </form>
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploydashboard') }}" method="post">
+            {{ csrf_input|safe }}
+            <button class="w-full text-left px-4 py-2 text-gray-400 hover:bg-[#222] text-sm">Dashboard only</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Start / Stop -->
+      <div class="relative" id="moreWrap">
+        <button id="moreBtn" type="button"
+          class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-500 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h.01M12 12h.01M19 12h.01"/>
+          </svg>
+          More
+          <svg class="w-3 h-3 ml-auto" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <div id="moreMenu" class="hidden absolute bottom-full left-0 right-0 mb-1 bg-[#181818] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden z-50 py-1">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='start') }}" method="post">
+            {{ csrf_input|safe }}
+            <button class="w-full text-left px-4 py-2 text-gray-300 hover:bg-[#222] text-sm">Start Bot</button>
+          </form>
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='stop') }}" method="post">
+            {{ csrf_input|safe }}
+            <button class="w-full text-left px-4 py-2 text-gray-300 hover:bg-[#222] text-sm">Stop Bot</button>
+          </form>
+        </div>
       </div>
     </div>
 
-    {% if flash %}
-      <div style="margin-bottom:12px;padding:10px;border-radius:10px;background:#1a1a1a;border:1px solid #333;">
-        {{ flash|safe }}
-      </div>
-    {% endif %}
+    <!-- Footer: time + sign out -->
+    <div class="p-2 border-t border-[#222]">
+      <div class="px-3 py-1 text-[11px] text-gray-600">{{ now }}</div>
+      <form action="{{ url_for('logout') }}" method="post">
+        {{ csrf_input|safe }}
+        <button class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-600 hover:bg-[#1a1a1a] hover:text-gray-300 text-sm transition-colors">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+          Sign out
+        </button>
+      </form>
+    </div>
+  </aside>
 
-    {{ body|safe }}
-  </body>
+  <!-- Main content -->
+  <main class="lg:ml-56 pt-14 lg:pt-0 min-h-screen">
+    {% if flash %}
+      <div class="mx-4 mt-4 p-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl text-sm">{{ flash|safe }}</div>
+    {% endif %}
+    <div class="p-4 lg:p-6">
+      {{ body|safe }}
+    </div>
+  </main>
+
+  <script>
+  (function(){
+    // --- Sidebar toggle (mobile) ---
+    const menuBtn = document.getElementById('menuBtn');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+
+    function openSidebar() {
+      sidebar.classList.remove('-translate-x-full');
+      overlay.classList.remove('hidden');
+    }
+    function closeSidebar() {
+      sidebar.classList.add('-translate-x-full');
+      overlay.classList.add('hidden');
+    }
+    menuBtn && menuBtn.addEventListener('click', function(){ sidebar.classList.contains('-translate-x-full') ? openSidebar() : closeSidebar(); });
+    overlay && overlay.addEventListener('click', closeSidebar);
+
+    // --- Dropdown menus ---
+    function makeDropdown(btnId, menuId) {
+      const btn = document.getElementById(btnId);
+      const menu = document.getElementById(menuId);
+      if (!btn || !menu) return;
+      btn.addEventListener('click', function(e){ e.stopPropagation(); menu.classList.toggle('hidden'); });
+      document.addEventListener('click', function(){ menu.classList.add('hidden'); });
+      menu.addEventListener('click', function(e){ e.stopPropagation(); });
+    }
+    makeDropdown('deployBtn', 'deployMenu');
+    makeDropdown('moreBtn', 'moreMenu');
+
+    // --- Async form submit ---
+    document.querySelectorAll('form[data-async-refresh="1"]').forEach(function(form){
+      form.addEventListener('submit', async function(e){
+        e.preventDefault();
+        const btn = form.querySelector('button');
+        if (btn) btn.disabled = true;
+        try {
+          await fetch(form.action, { method:'POST', body: new FormData(form), credentials:'same-origin' });
+        } catch(_) { form.submit(); return; }
+        window.location.reload();
+      });
+    });
+
+    // --- Active nav link ---
+    var path = window.location.pathname;
+    document.querySelectorAll('.nav-link').forEach(function(a){
+      if (a.getAttribute('href') === path) a.classList.add('active');
+    });
+  })();
+  </script>
+</body>
 </html>
 """
 
@@ -384,35 +475,6 @@ def _render(body: str, flash: str = ""):
         flash=flash,
         bot_name=bot_name,
         now=now,
-        csrf_input=_csrf_input(),
-    )
-
-def _json_editor(title: str, obj) -> str:
-    pretty = json.dumps(obj, indent=2, ensure_ascii=False)
-    return render_template_string(
-        """
-        <h2 style="margin:0 0 10px 0;">{{ title }}</h2>
-
-        <form method="post" style="display:flex;flex-direction:column;gap:10px;">
-          {{ csrf_input|safe }}
-          <textarea name="json" rows="28"
-            style="width:100%;max-width:1200px;background:#000;color:#0f0;padding:12px;border-radius:10px;border:1px solid #333;white-space:pre;"
-          >{{ pretty }}</textarea>
-
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <button type="submit"
-              style="background:#1f6f3f;color:#fff;border:1px solid #2a8f52;padding:8px 12px;border-radius:10px;cursor:pointer;">
-              Save
-            </button>
-
-            <span style="color:#aaa;font-size:13px;">
-              Tip: If you break JSON, it won’t save.
-            </span>
-          </div>
-        </form>
-        """,
-        title=title,
-        pretty=pretty,
         csrf_input=_csrf_input(),
     )
 
@@ -850,26 +912,78 @@ def login():
 
     discord_login_url = url_for("login_discord") if DISCORD_OAUTH_ENABLED else None
     return render_template_string("""
-    <html><body style="background:#111;color:#eee;font-family:system-ui;padding:30px;">
-      <h2>Dashboard Login</h2>
-      {% if err %}<div style="color:#f66;margin:10px 0;">{{ err }}</div>{% endif %}
-      {% if discord_login_url %}
-        <a href="{{ discord_login_url }}"
-           style="display:inline-block;margin:8px 0 14px 0;padding:10px 14px;border-radius:10px;background:#5865F2;color:#fff;text-decoration:none;font-weight:600;">
-          Login with Discord
-        </a>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>OF1 Dashboard — Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0a0a0a] min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-sm">
+
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <div class="text-4xl font-extrabold text-white tracking-tight">OF1</div>
+      <div class="text-sm text-gray-500 mt-1">Dashboard</div>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-[#111] border border-[#222] rounded-2xl p-7 shadow-2xl space-y-5">
+
+      {% if err %}
+        <div class="bg-red-950/50 border border-red-800/60 text-red-300 text-sm rounded-xl px-4 py-3">
+          {{ err }}
+        </div>
       {% endif %}
+
       {% if password_login_enabled %}
-      <form method="post" style="display:flex;flex-direction:column;gap:10px;max-width:320px;">
+      <form method="post" class="space-y-3">
         {{ csrf_input|safe }}
-        <input name="username" placeholder="Username" style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
-        <input name="password" type="password" placeholder="Password" style="padding:10px;border-radius:10px;border:1px solid #333;background:#000;color:#eee;" />
-        <button type="submit" style="padding:10px;border-radius:10px;border:1px solid #333;background:#222;color:#eee;cursor:pointer;">Login</button>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5 font-medium">Username</label>
+          <input name="username" type="text" autocomplete="username" placeholder="your username"
+            class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-100 placeholder-gray-600
+                   rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-gray-500 transition-colors" />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1.5 font-medium">Password</label>
+          <input name="password" type="password" autocomplete="current-password" placeholder="••••••••"
+            class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-100 placeholder-gray-600
+                   rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-gray-500 transition-colors" />
+        </div>
+        <button type="submit"
+          class="w-full bg-white text-black font-semibold rounded-xl py-2.5 text-sm hover:bg-gray-100 transition-colors mt-1">
+          Sign in
+        </button>
       </form>
       {% elif not discord_login_url %}
-        <div style="color:#f66;margin-top:12px;">No login method is configured.</div>
+        <div class="text-red-400 text-sm text-center">No login method is configured.</div>
       {% endif %}
-    </body></html>
+
+      {% if discord_login_url %}
+        {% if password_login_enabled %}
+          <div class="flex items-center gap-3">
+            <div class="flex-1 h-px bg-[#222]"></div>
+            <span class="text-xs text-gray-600">or</span>
+            <div class="flex-1 h-px bg-[#222]"></div>
+          </div>
+        {% endif %}
+        <a href="{{ discord_login_url }}"
+           class="flex items-center justify-center gap-2.5 w-full bg-[#5865F2] hover:bg-[#4752c4]
+                  text-white font-semibold rounded-xl py-2.5 text-sm transition-colors">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/>
+          </svg>
+          Continue with Discord
+        </a>
+      {% endif %}
+
+    </div>
+  </div>
+</body>
+</html>
     """, err=err, csrf_input=_csrf_input(), discord_login_url=discord_login_url, password_login_enabled=PASSWORD_LOGIN_ENABLED)
 
 @app.route("/login/discord")
@@ -1244,40 +1358,6 @@ def status():
         """
     )
     return _render(page)
-
-@app.route("/config", methods=["GET", "POST"])
-@login_required
-def config():
-    cfg = load_config() or {}
-    if request.method == "POST":
-        raw = request.form.get("json", "")
-        try:
-            parsed = json.loads(raw)
-            _backup_file(CONFIG_PATH)
-            save_config(parsed)
-            return redirect(url_for("config"))
-        except Exception as e:
-            flash = f"<div style='color:#f66;'><b>Invalid JSON:</b> {_escape(str(e))}</div>"
-            return _render(_json_editor("config.json", cfg), flash=flash)
-
-    return _render(_json_editor("config.json", cfg))
-
-@app.route("/state", methods=["GET", "POST"])
-@login_required
-def state():
-    st = load_state() or {}
-    if request.method == "POST":
-        raw = request.form.get("json", "")
-        try:
-            parsed = json.loads(raw)
-            _backup_file(STATE_PATH)
-            save_state(parsed)
-            return redirect(url_for("state"))
-        except Exception as e:
-            flash = f"<div style='color:#f66;'><b>Invalid JSON:</b> {_escape(str(e))}</div>"
-            return _render(_json_editor("state.json", st), flash=flash)
-
-    return _render(_json_editor("state.json", st))
 
 # ----------------------------
 # Bot action routes
