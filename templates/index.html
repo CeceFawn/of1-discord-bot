@@ -25,6 +25,49 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
     .red-glow { box-shadow: 0 0 40px rgba(232, 0, 45, 0.15); }
+
+    @keyframes rgb-cycle {
+      0%   { color: #ff0000; text-shadow: 0 0 12px #ff0000, 0 0 24px #ff000088; }
+      16%  { color: #ff8800; text-shadow: 0 0 12px #ff8800, 0 0 24px #ff880088; }
+      33%  { color: #ffff00; text-shadow: 0 0 12px #ffff00, 0 0 24px #ffff0088; }
+      50%  { color: #00ff88; text-shadow: 0 0 12px #00ff88, 0 0 24px #00ff8888; }
+      66%  { color: #00aaff; text-shadow: 0 0 12px #00aaff, 0 0 24px #00aaff88; }
+      83%  { color: #cc00ff; text-shadow: 0 0 12px #cc00ff, 0 0 24px #cc00ff88; }
+      100% { color: #ff0000; text-shadow: 0 0 12px #ff0000, 0 0 24px #ff000088; }
+    }
+    @keyframes rgb-shadow {
+      0%   { box-shadow: 0 8px 40px #ff000066, 0 0 0 1px #ff000033; }
+      16%  { box-shadow: 0 8px 40px #ff880066, 0 0 0 1px #ff880033; }
+      33%  { box-shadow: 0 8px 40px #ffff0066, 0 0 0 1px #ffff0033; }
+      50%  { box-shadow: 0 8px 40px #00ff8866, 0 0 0 1px #00ff8833; }
+      66%  { box-shadow: 0 8px 40px #00aaff66, 0 0 0 1px #00aaff33; }
+      83%  { box-shadow: 0 8px 40px #cc00ff66, 0 0 0 1px #cc00ff33; }
+      100% { box-shadow: 0 8px 40px #ff000066, 0 0 0 1px #ff000033; }
+    }
+    @keyframes rgb-btn {
+      0%   { box-shadow: 0 0 8px #ff0000, 0 0 16px #ff000066; border-color: #ff0000; color: #ff0000; }
+      16%  { box-shadow: 0 0 8px #ff8800, 0 0 16px #ff880066; border-color: #ff8800; color: #ff8800; }
+      33%  { box-shadow: 0 0 8px #ffff00, 0 0 16px #ffff0066; border-color: #ffff00; color: #ffff00; }
+      50%  { box-shadow: 0 0 8px #00ff88, 0 0 16px #00ff8866; border-color: #00ff88; color: #00ff88; }
+      66%  { box-shadow: 0 0 8px #00aaff, 0 0 16px #00aaff66; border-color: #00aaff; color: #00aaff; }
+      83%  { box-shadow: 0 0 8px #cc00ff, 0 0 16px #cc00ff66; border-color: #cc00ff; color: #cc00ff; }
+      100% { box-shadow: 0 0 8px #ff0000, 0 0 16px #ff000066; border-color: #ff0000; color: #ff0000; }
+    }
+
+    .party-logo  { animation: rgb-cycle  3s linear infinite; }
+    .party-card  { animation: rgb-shadow 3s linear infinite; }
+    .party-btn   { animation: rgb-btn    3s linear infinite; }
+
+    #party-trigger {
+      opacity: 0;
+      cursor: pointer;
+      font-size: 18px;
+      transition: opacity 0.3s;
+      user-select: none;
+      padding: 4px 6px;
+      border-radius: 6px;
+    }
+    #party-trigger:hover { opacity: 0.4 !important; }
   </style>
 </head>
 
@@ -34,13 +77,16 @@
   <nav class="fixed top-0 left-0 right-0 z-50 bg-f1dark/90 backdrop-blur border-b border-white/10">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2">
-        <span class="text-f1red font-black text-2xl tracking-tight">OF1</span>
+        <span id="of1-logo" class="text-f1red font-black text-2xl tracking-tight">OF1</span>
         <span class="text-white/40 text-sm font-medium hidden sm:block">Orlando F1</span>
       </a>
       {% if next_session %}
-      <div class="flex flex-col items-end">
-        <span class="text-white/40 text-xs uppercase tracking-widest">{{ next_session.session_name }}{% if next_session.meeting_name %} · {{ next_session.meeting_name }}{% endif %}</span>
-        <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}">--:--:--</span>
+      <div class="flex items-center gap-3">
+        <span id="party-trigger" title="">🏎️</span>
+        <div class="flex flex-col items-end">
+          <span class="text-white/40 text-xs uppercase tracking-widest">{{ next_session.session_name }}{% if next_session.meeting_name %} · {{ next_session.meeting_name }}{% endif %}</span>
+          <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}">--:--:--</span>
+        </div>
       </div>
       {% endif %}
     </div>
@@ -65,7 +111,7 @@
   {% if watch_party and watch_party.get('active') %}
   <section class="px-6 pb-24">
     <div class="max-w-2xl mx-auto">
-      <a href="{{ discord_invite }}" target="_blank" rel="noopener"
+      <a id="watch-party-card" href="{{ discord_invite }}" target="_blank" rel="noopener"
          class="block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
         <div class="flex items-center gap-2 text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">
           🏁 Watch Party
@@ -267,6 +313,33 @@
         img.addEventListener('click', function() {
           openLightbox(img.src, img.alt);
         });
+      });
+    })();
+  </script>
+
+  <!-- ── PARTY MODE ───────────────────────────────────────────── -->
+  <script>
+    (function() {
+      const trigger  = document.getElementById('party-trigger');
+      const logo     = document.getElementById('of1-logo');
+      const card     = document.getElementById('watch-party-card');
+      if (!trigger) return;
+
+      let active = false;
+
+      trigger.addEventListener('click', function() {
+        active = !active;
+        if (active) {
+          trigger.style.opacity = '1';
+          trigger.classList.add('party-btn');
+          if (logo) logo.classList.add('party-logo');
+          if (card) card.classList.add('party-card');
+        } else {
+          trigger.style.opacity = '';
+          trigger.classList.remove('party-btn');
+          if (logo) logo.classList.remove('party-logo');
+          if (card) card.classList.remove('party-card');
+        }
       });
     })();
   </script>
