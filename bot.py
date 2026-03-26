@@ -3854,10 +3854,12 @@ async def on_ready():
                 _guild_obj = discord.Object(id=int(_guild_id_str))
                 bot.tree.copy_global_to(guild=_guild_obj)
                 await bot.tree.sync(guild=_guild_obj)
-                logging.info(f"[Slash] Command tree synced to guild {_guild_id_str} (instant)")
+                logging.info(f"[Slash] Command tree synced to guild {_guild_id_str}")
+            # Clear global commands so nothing shows up twice
+            bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
             APP_COMMANDS_SYNCED = True
-            logging.info("[Slash] Command tree synced globally")
+            logging.info("[Slash] Global commands cleared (guild-only mode)")
         except Exception as e:
             logging.error(f"[Slash] Command tree sync failed: {e}")
 
