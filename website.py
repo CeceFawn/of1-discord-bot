@@ -279,17 +279,17 @@ def _meeting_info(sessions: list) -> dict:
     }
 
 
-_member_count_cache: dict = {}  # {count, fetched_at}
+_member_count_cache: dict = {}  # {total, online, fetched_at}
 _MEMBER_COUNT_TTL = 300  # refresh every 5 minutes
 
-def get_member_count() -> int | None:
-    """Fetch approximate member count for the Discord guild via bot token."""
+def get_member_counts() -> dict | None:
+    """Fetch approximate member + online counts for the Discord guild via bot token."""
     if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
         return None
     now_ts = time.time()
     cached = _member_count_cache
     if cached.get("fetched_at") and now_ts - cached["fetched_at"] < _MEMBER_COUNT_TTL:
-        return cached.get("count")
+        return {"total": cached.get("total"), "online": cached.get("online")} if cached.get("total") else None
     try:
         resp = requests.get(
             f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}?with_counts=true",
@@ -297,14 +297,16 @@ def get_member_count() -> int | None:
             timeout=8,
         )
         if resp.status_code == 200:
-            count = resp.json().get("approximate_member_count")
-            if count is not None:
-                _member_count_cache["count"] = int(count)
-                _member_count_cache["fetched_at"] = now_ts
-                return int(count)
+            data = resp.json()
+            total  = data.get("approximate_member_count")
+            online = data.get("approximate_presence_count")
+            if total is not None:
+                _member_count_cache.update({"total": int(total), "online": int(online or 0), "fetched_at": now_ts})
+                return {"total": int(total), "online": int(online or 0)}
     except Exception:
         pass
-    return cached.get("count")  # return stale cache on failure
+    # return stale cache on failure
+    return {"total": cached["total"], "online": cached.get("online", 0)} if cached.get("total") else None
 
 
 def get_current_race_weekend() -> dict | None:
@@ -463,7 +465,7 @@ def index():
         watch_party=watch_party,
         next_race=get_next_race(),
         next_session=get_next_session(),
-        member_count=get_member_count(),
+        member_counts=get_member_counts(),
         discord_invite=DISCORD_INVITE,
         instagram_url=INSTAGRAM_URL,
         twitter_url=TWITTER_URL,

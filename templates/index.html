@@ -206,8 +206,15 @@
         {% endif %}
         <div class="mt-6 flex items-center justify-between flex-wrap gap-2">
           <span class="text-f1red text-sm font-semibold">Join in Discord →</span>
-          {% if member_count %}
-          <span class="text-white/30 text-xs">{{ "{:,}".format(member_count) }} members</span>
+          {% if member_counts %}
+          <span class="flex items-center gap-2 text-xs text-white/40">
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+              {{ "{:,}".format(member_counts.online) }}
+            </span>
+            <span class="text-white/20">|</span>
+            <span>{{ "{:,}".format(member_counts.total) }}</span>
+          </span>
           {% endif %}
         </div>
       </a>
