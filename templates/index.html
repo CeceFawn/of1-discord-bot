@@ -45,16 +45,27 @@
       100% { box-shadow: 0 8px 40px #ff000066, 0 0 0 1px #ff000033; }
     }
     @keyframes rgb-btn {
-      0%   { box-shadow: 0 0 8px #ff0000, 0 0 16px #ff000066; border-color: #ff0000; color: #ff0000; }
-      16%  { box-shadow: 0 0 8px #ff8800, 0 0 16px #ff880066; border-color: #ff8800; color: #ff8800; }
-      33%  { box-shadow: 0 0 8px #ffff00, 0 0 16px #ffff0066; border-color: #ffff00; color: #ffff00; }
-      50%  { box-shadow: 0 0 8px #00ff88, 0 0 16px #00ff8866; border-color: #00ff88; color: #00ff88; }
-      66%  { box-shadow: 0 0 8px #00aaff, 0 0 16px #00aaff66; border-color: #00aaff; color: #00aaff; }
-      83%  { box-shadow: 0 0 8px #cc00ff, 0 0 16px #cc00ff66; border-color: #cc00ff; color: #cc00ff; }
-      100% { box-shadow: 0 0 8px #ff0000, 0 0 16px #ff000066; border-color: #ff0000; color: #ff0000; }
+      0%   { filter: drop-shadow(0 0 6px #ff0000) drop-shadow(0 0 12px #ff000099); }
+      16%  { filter: drop-shadow(0 0 6px #ff8800) drop-shadow(0 0 12px #ff880099); }
+      33%  { filter: drop-shadow(0 0 6px #ffff00) drop-shadow(0 0 12px #ffff0099); }
+      50%  { filter: drop-shadow(0 0 6px #00ff88) drop-shadow(0 0 12px #00ff8899); }
+      66%  { filter: drop-shadow(0 0 6px #00aaff) drop-shadow(0 0 12px #00aaff99); }
+      83%  { filter: drop-shadow(0 0 6px #cc00ff) drop-shadow(0 0 12px #cc00ff99); }
+      100% { filter: drop-shadow(0 0 6px #ff0000) drop-shadow(0 0 12px #ff000099); }
+    }
+
+    @keyframes rgb-badge {
+      0%   { color: #ff0000; border-color: #ff000066; background-color: #ff000015; text-shadow: 0 0 8px #ff000088; }
+      16%  { color: #ff8800; border-color: #ff880066; background-color: #ff880015; text-shadow: 0 0 8px #ff880088; }
+      33%  { color: #ffff00; border-color: #ffff0066; background-color: #ffff0015; text-shadow: 0 0 8px #ffff0088; }
+      50%  { color: #00ff88; border-color: #00ff8866; background-color: #00ff8815; text-shadow: 0 0 8px #00ff8888; }
+      66%  { color: #00aaff; border-color: #00aaff66; background-color: #00aaff15; text-shadow: 0 0 8px #00aaff88; }
+      83%  { color: #cc00ff; border-color: #cc00ff66; background-color: #cc00ff15; text-shadow: 0 0 8px #cc00ff88; }
+      100% { color: #ff0000; border-color: #ff000066; background-color: #ff000015; text-shadow: 0 0 8px #ff000088; }
     }
 
     .party-logo  { animation: rgb-cycle  3s linear infinite; }
+    .party-badge { animation: rgb-badge  3s linear infinite; }
     .party-card  { animation: rgb-shadow 3s linear infinite; }
     .party-btn   { animation: rgb-btn    3s linear infinite; }
 
@@ -64,8 +75,10 @@
       font-size: 18px;
       transition: opacity 0.3s;
       user-select: none;
-      padding: 4px 6px;
-      border-radius: 6px;
+      background: none;
+      border: none;
+      padding: 2px;
+      line-height: 1;
     }
     #party-trigger:hover { opacity: 0.4 !important; }
   </style>
@@ -95,11 +108,11 @@
   <!-- ── HERO ─────────────────────────────────────────────────── -->
   <section class="pt-32 pb-20 px-6 text-center">
     <div class="max-w-3xl mx-auto">
-      <div class="inline-block bg-f1red/10 border border-f1red/30 text-f1red text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
+      <div id="hero-badge" class="inline-block bg-f1red/10 border border-f1red/30 text-f1red text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
         Orlando's F1 Community
       </div>
       <h1 class="text-6xl sm:text-8xl font-black tracking-tighter mb-4">
-        <span class="text-f1red">OF1</span>
+        <span id="hero-logo" class="text-f1red">OF1</span>
       </h1>
       <p class="text-white/50 text-lg sm:text-xl max-w-xl mx-auto">
         Watch parties, race coverage, and the best F1 community in Orlando.
@@ -320,9 +333,11 @@
   <!-- ── PARTY MODE ───────────────────────────────────────────── -->
   <script>
     (function() {
-      const trigger  = document.getElementById('party-trigger');
-      const logo     = document.getElementById('of1-logo');
-      const card     = document.getElementById('watch-party-card');
+      const trigger   = document.getElementById('party-trigger');
+      const navLogo   = document.getElementById('of1-logo');
+      const heroLogo  = document.getElementById('hero-logo');
+      const heroBadge = document.getElementById('hero-badge');
+      const card      = document.getElementById('watch-party-card');
       if (!trigger) return;
 
       let active = false;
@@ -332,13 +347,17 @@
         if (active) {
           trigger.style.opacity = '1';
           trigger.classList.add('party-btn');
-          if (logo) logo.classList.add('party-logo');
-          if (card) card.classList.add('party-card');
+          if (navLogo)   navLogo.classList.add('party-logo');
+          if (heroLogo)  heroLogo.classList.add('party-logo');
+          if (heroBadge) heroBadge.classList.add('party-badge');
+          if (card)      card.classList.add('party-card');
         } else {
           trigger.style.opacity = '';
           trigger.classList.remove('party-btn');
-          if (logo) logo.classList.remove('party-logo');
-          if (card) card.classList.remove('party-card');
+          if (navLogo)   navLogo.classList.remove('party-logo');
+          if (heroLogo)  heroLogo.classList.remove('party-logo');
+          if (heroBadge) heroBadge.classList.remove('party-badge');
+          if (card)      card.classList.remove('party-card');
         }
       });
     })();
