@@ -17,7 +17,7 @@ import psutil
 import requests
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
 
-from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH
+from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH, WATCH_PARTY_PATH
 from storage import load_config, save_config, load_state, save_state
 from runtime_store import get_runtime_status, list_alerts, init_runtime_db
 
@@ -245,6 +245,7 @@ BASE_TEMPLATE = """
       <a style="color:#9cf;" href="{{ url_for('status') }}">Status</a>
       <a style="color:#9cf;" href="{{ url_for('config') }}">Config</a>
       <a style="color:#9cf;" href="{{ url_for('state') }}">State</a>
+      <a style="color:#9cf;" href="{{ url_for('watch_party_editor') }}">Watch Party</a>
 
       <!-- Split button: Restart + dropdown -->
       <div style="display:inline-flex;align-items:stretch;gap:0;margin-left:12px;">
@@ -1329,6 +1330,293 @@ def restart():
     ok, out = _sudo_systemctl("restart")
     _set_last_action("restart", ok, out or ("OK" if ok else "FAILED"))
     return redirect(url_for("logs"))
+
+# ----------------------------
+# Watch Party editor
+# ----------------------------
+_WATCH_PARTY_LOCK = threading.Lock()
+
+_WP_DEFAULT: dict = {
+    "active": True,
+    "override": False,
+    "title": "",
+    "date": "",
+    "time": "",
+    "location": "",
+    "details": "Join us live as we watch the race together! React in real time, make predictions, and enjoy the chaos.",
+    "_venues": [
+        {"name": "", "address": ""},
+        {"name": "", "address": ""},
+    ],
+    "_active_venues": [],
+}
+
+def _load_wp() -> dict:
+    try:
+        with open(WATCH_PARTY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return dict(_WP_DEFAULT)
+
+def _save_wp(data: dict) -> None:
+    tmp = WATCH_PARTY_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, WATCH_PARTY_PATH)
+
+# Auto-filled fields that have a Reset button (clears to "" to let auto-detect take over)
+_AUTO_FIELDS = {"title", "date", "time"}
+# Fields that are always manual (no reset)
+_MANUAL_FIELDS = {"details", "location"}
+
+
+@app.route("/watch_party")
+@login_required
+def watch_party_editor():
+    wp = _load_wp()
+    venues = wp.get("_venues") or [{"name": "", "address": ""}, {"name": "", "address": ""}]
+    # Ensure always exactly 2 venue slots
+    while len(venues) < 2:
+        venues.append({"name": "", "address": ""})
+    active_venues = set(wp.get("_active_venues") or [])
+    override = bool(wp.get("override"))
+
+    def _val(k):
+        return _escape(str(wp.get(k) or ""))
+
+    def _field_row(label, key, auto=True):
+        reset_btn = ""
+        if auto:
+            reset_btn = f"""
+              <button type="button" onclick="wpReset('{key}')"
+                style="background:#222;color:#aaa;border:1px solid #444;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">
+                Reset
+              </button>"""
+        return f"""
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            <label style="width:70px;color:#aaa;font-size:13px;">{label}</label>
+            <input id="wp_{key}" name="{key}" value="{_val(key)}"
+              style="flex:1;min-width:200px;background:#000;color:#eee;border:1px solid #333;padding:7px 10px;border-radius:8px;font-size:14px;" />
+            <button type="button" onclick="wpSave('{key}')"
+              style="background:#1f6f3f;color:#fff;border:1px solid #2a8f52;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">
+              Save
+            </button>
+            {reset_btn}
+          </div>"""
+
+    venue_rows = ""
+    for i, v in enumerate(venues[:2]):
+        checked = "checked" if v.get("name") in active_venues else ""
+        vname = _escape(str(v.get("name") or ""))
+        vaddr = _escape(str(v.get("address") or ""))
+        venue_rows += f"""
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            <input type="checkbox" id="venue_check_{i}" name="venue_active_{i}" {checked}
+              style="width:16px;height:16px;accent-color:#2a8f52;cursor:pointer;" />
+            <input id="venue_name_{i}" placeholder="Venue name"
+              value="{vname}"
+              style="width:160px;background:#000;color:#eee;border:1px solid #333;padding:7px 10px;border-radius:8px;font-size:14px;" />
+            <input id="venue_addr_{i}" placeholder="Full address"
+              value="{vaddr}"
+              style="flex:1;min-width:200px;background:#000;color:#eee;border:1px solid #333;padding:7px 10px;border-radius:8px;font-size:14px;" />
+          </div>"""
+
+    override_color = "#8f2a2a" if override else "#1f6f3f"
+    override_border = "#c44" if override else "#2a8f52"
+    override_label = "ON — using manual values" if override else "OFF — auto-detecting from schedule"
+
+    page = f"""
+      <h2 style="margin:0 0 16px 0;">Watch Party</h2>
+      <meta name="wp-csrf" content="{_csrf_token()}" />
+
+      <!-- Override toggle -->
+      <div style="margin-bottom:20px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">Override</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button id="overrideBtn" type="button" onclick="wpToggleOverride()"
+            style="background:{override_color};color:#fff;border:1px solid {override_border};padding:8px 16px;border-radius:10px;cursor:pointer;font-weight:600;">
+            {override_label}
+          </button>
+          <span style="color:#666;font-size:13px;">
+            When OFF, title/date/time are filled from the F1 schedule. When ON, all fields below are used as-is.
+          </span>
+        </div>
+      </div>
+
+      <!-- Auto-filled fields -->
+      <div style="margin-bottom:20px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;">
+          Auto-filled fields
+          <span style="color:#555;font-weight:normal;text-transform:none;"> — leave blank to auto-detect, or fill in to override just this field</span>
+        </div>
+        {_field_row("Title", "title", auto=True)}
+        {_field_row("Date", "date", auto=True)}
+        {_field_row("Time", "time", auto=True)}
+      </div>
+
+      <!-- Manual fields -->
+      <div style="margin-bottom:20px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;">Always manual</div>
+        {_field_row("Details", "details", auto=False)}
+      </div>
+
+      <!-- Venues -->
+      <div style="margin-bottom:20px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Venues</div>
+        <div style="color:#555;font-size:12px;margin-bottom:12px;">
+          Check the venues that are active for this watch party, then click Save Location.
+          The address(es) of the checked venue(s) will be shown on the website.
+        </div>
+        {venue_rows}
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button type="button" onclick="wpSaveVenues()"
+            style="background:#1f6f3f;color:#fff;border:1px solid #2a8f52;padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:600;">
+            Save Venues &amp; Location
+          </button>
+        </div>
+      </div>
+
+      <!-- Discord channel (fixed) -->
+      <div style="padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Discord Channel</div>
+        <span style="color:#eee;font-size:14px;">#race-thread</span>
+        <span style="color:#555;font-size:12px;margin-left:8px;">(fixed — always shown on the website)</span>
+      </div>
+
+      <!-- Status toast -->
+      <div id="wp-toast" style="display:none;margin-top:14px;padding:10px 14px;border-radius:10px;font-size:14px;"></div>
+
+      <script>
+      (function(){{
+        function csrf() {{
+          return document.querySelector('meta[name="wp-csrf"]').content;
+        }}
+
+        function toast(msg, ok) {{
+          const el = document.getElementById('wp-toast');
+          el.textContent = msg;
+          el.style.display = 'block';
+          el.style.background = ok ? '#0d3320' : '#3a0d0d';
+          el.style.border = '1px solid ' + (ok ? '#2a8f52' : '#8f2a2a');
+          el.style.color = ok ? '#6f6' : '#f88';
+          clearTimeout(el._t);
+          el._t = setTimeout(() => {{ el.style.display = 'none'; }}, 3500);
+        }}
+
+        async function post(url, body) {{
+          const fd = new FormData();
+          fd.append('_csrf', csrf());
+          for (const [k, v] of Object.entries(body)) fd.append(k, v);
+          const r = await fetch(url, {{ method: 'POST', body: fd, credentials: 'same-origin' }});
+          return r.json();
+        }}
+
+        window.wpSave = async function(field) {{
+          const val = document.getElementById('wp_' + field).value;
+          try {{
+            const d = await post('/watch_party/field', {{ field, value: val }});
+            toast(d.ok ? field + ' saved.' : ('Error: ' + d.error), d.ok);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
+        window.wpReset = async function(field) {{
+          document.getElementById('wp_' + field).value = '';
+          try {{
+            const d = await post('/watch_party/field', {{ field, value: '' }});
+            toast(d.ok ? field + ' reset to auto.' : ('Error: ' + d.error), d.ok);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
+        window.wpToggleOverride = async function() {{
+          try {{
+            const d = await post('/watch_party/toggle_override', {{}});
+            if (d.ok) window.location.reload();
+            else toast('Error: ' + d.error, false);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
+        window.wpSaveVenues = async function() {{
+          const venues = [];
+          const active = [];
+          for (let i = 0; i < 2; i++) {{
+            const name = document.getElementById('venue_name_' + i).value.trim();
+            const addr = document.getElementById('venue_addr_' + i).value.trim();
+            venues.push(JSON.stringify({{ name, address: addr }}));
+            if (document.getElementById('venue_check_' + i).checked && name) {{
+              active.push(name);
+            }}
+          }}
+          try {{
+            const fd = new FormData();
+            fd.append('_csrf', csrf());
+            venues.forEach(v => fd.append('venues[]', v));
+            active.forEach(a => fd.append('active[]', a));
+            const r = await fetch('/watch_party/venues', {{ method: 'POST', body: fd, credentials: 'same-origin' }});
+            const d = await r.json();
+            toast(d.ok ? 'Venues & location saved.' : ('Error: ' + d.error), d.ok);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+      }})();
+      </script>
+    """
+    return _render(page)
+
+
+@app.route("/watch_party/toggle_override", methods=["POST"])
+@login_required
+def wp_toggle_override():
+    with _WATCH_PARTY_LOCK:
+        wp = _load_wp()
+        wp["override"] = not bool(wp.get("override"))
+        _save_wp(wp)
+    return jsonify({"ok": True, "override": wp["override"]})
+
+
+@app.route("/watch_party/field", methods=["POST"])
+@login_required
+def wp_save_field():
+    field = (request.form.get("field") or "").strip()
+    value = request.form.get("value", "")
+    allowed = _AUTO_FIELDS | _MANUAL_FIELDS
+    if field not in allowed:
+        return jsonify({"ok": False, "error": f"Unknown field '{field}'"}), 400
+    with _WATCH_PARTY_LOCK:
+        wp = _load_wp()
+        wp[field] = value
+        _save_wp(wp)
+    return jsonify({"ok": True})
+
+
+@app.route("/watch_party/venues", methods=["POST"])
+@login_required
+def wp_save_venues():
+    try:
+        raw_venues = request.form.getlist("venues[]")
+        active_names = request.form.getlist("active[]")
+        venues = []
+        for rv in raw_venues:
+            v = json.loads(rv)
+            if isinstance(v, dict):
+                venues.append({"name": str(v.get("name") or ""), "address": str(v.get("address") or "")})
+        with _WATCH_PARTY_LOCK:
+            wp = _load_wp()
+            wp["_venues"] = venues
+            wp["_active_venues"] = active_names
+            # Build the location string from checked venues' addresses
+            parts = []
+            for v in venues:
+                if v["name"] in active_names and v["address"]:
+                    parts.append(v["address"])
+            wp["location"] = " · ".join(parts)
+            _save_wp(wp)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
 
 def run_dashboard():
     try:
