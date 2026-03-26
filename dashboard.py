@@ -1609,12 +1609,12 @@ def wp_save_venues():
             wp = _load_wp()
             wp["_venues"] = venues
             wp["_active_venues"] = active_names
-            # Build the location string from checked venues' addresses
-            parts = []
+            # Build location lines as "Name — Address" per active venue
+            lines = []
             for v in venues:
                 if v["name"] in active_names and v["address"]:
-                    parts.append(v["address"])
-            wp["location"] = " · ".join(parts)
+                    lines.append(f"{v['name']} — {v['address']}")
+            wp["location"] = "\n".join(lines)
             _save_wp(wp)
         return jsonify({"ok": True})
     except Exception as e:
