@@ -23,3 +23,5 @@ bot.log.*
 # Claude Code local settings
 .claude/settings.local.json
 watch_party.json
+static/schedule_*.png
+static/schedule_*.jpg
