@@ -1,8 +1,9 @@
 {
   "active": true,
-  "title": "Bahrain Grand Prix Watch Party",
-  "date": "March 22, 2026",
-  "time": "11:00 AM ET",
+  "override": false,
+  "title": "",
+  "date": "",
+  "time": "",
   "location": "Discord — #watch-party",
   "details": "Join us live as we watch the race together! React in real time, make predictions, and enjoy the chaos."
 }
