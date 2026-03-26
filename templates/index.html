@@ -120,10 +120,10 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <img src="{{ url_for('static', filename='schedule_halfbarrel.png') }}"
              alt="Half Barrel Beer Project watch party schedule"
-             class="w-full rounded-2xl border border-white/10" />
+             class="w-full rounded-2xl border border-white/10 cursor-zoom-in lightbox-img" />
         <img src="{{ url_for('static', filename='schedule_hourglass.png') }}"
              alt="Hourglass Brewing Longwood watch party schedule"
-             class="w-full rounded-2xl border border-white/10" />
+             class="w-full rounded-2xl border border-white/10 cursor-zoom-in lightbox-img" />
       </div>
     </div>
   </section>
@@ -171,6 +171,101 @@
   <footer class="border-t border-white/10 px-6 py-8 text-center text-white/20 text-sm">
     Orlando F1 · Made with ❤️ for the community
   </footer>
+
+  <!-- ── LIGHTBOX ─────────────────────────────────────────────── -->
+  <div id="lightbox" style="display:none"
+       class="fixed inset-0 z-50 flex items-center justify-center">
+    <!-- backdrop -->
+    <div class="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
+    <!-- image wrapper — stops click propagating to backdrop -->
+    <div class="relative z-10 flex items-center justify-center w-full h-full p-4 sm:p-8"
+         onclick="event.stopPropagation()">
+      <img id="lightbox-img" src="" alt=""
+           class="max-h-full max-w-full rounded-xl shadow-2xl select-none"
+           style="object-fit:contain;transition:transform 0.15s ease;transform-origin:center center;" />
+    </div>
+    <!-- close button -->
+    <button onclick="closeLightbox()"
+            class="absolute top-4 right-4 z-20 text-white/70 hover:text-white bg-black/40 hover:bg-black/70 rounded-full w-10 h-10 flex items-center justify-center text-xl transition-colors">
+      ✕
+    </button>
+  </div>
+
+  <script>
+    (function() {
+      const lb    = document.getElementById('lightbox');
+      const lbImg = document.getElementById('lightbox-img');
+      let scale = 1;
+
+      function openLightbox(src, alt) {
+        lbImg.src = src;
+        lbImg.alt = alt;
+        scale = 1;
+        lbImg.style.transform = 'scale(1)';
+        lb.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      }
+
+      window.closeLightbox = function() {
+        lb.style.display = 'none';
+        document.body.style.overflow = '';
+        scale = 1;
+        lbImg.style.transform = 'scale(1)';
+      };
+
+      // Scroll to zoom (desktop)
+      lbImg.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        scale += e.deltaY < 0 ? 0.15 : -0.15;
+        scale = Math.min(Math.max(scale, 0.5), 4);
+        lbImg.style.transform = 'scale(' + scale + ')';
+      }, { passive: false });
+
+      // Pinch to zoom (mobile)
+      let initDist = null;
+      let initScale = 1;
+      lbImg.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 2) {
+          initDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          initScale = scale;
+        }
+      }, { passive: true });
+      lbImg.addEventListener('touchmove', function(e) {
+        if (e.touches.length === 2 && initDist) {
+          e.preventDefault();
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          scale = Math.min(Math.max(initScale * (dist / initDist), 0.5), 4);
+          lbImg.style.transform = 'scale(' + scale + ')';
+        }
+      }, { passive: false });
+      lbImg.addEventListener('touchend', function(e) {
+        if (e.touches.length < 2) initDist = null;
+      }, { passive: true });
+
+      // Close on Escape
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeLightbox();
+      });
+
+      // Click backdrop to close — only when not zoomed in
+      lb.addEventListener('click', function(e) {
+        if (e.target === lb && scale === 1) closeLightbox();
+      });
+
+      // Wire up all lightbox images
+      document.querySelectorAll('.lightbox-img').forEach(function(img) {
+        img.addEventListener('click', function() {
+          openLightbox(img.src, img.alt);
+        });
+      });
+    })();
+  </script>
 
   <!-- ── COUNTDOWN SCRIPTS ─────────────────────────────────────── -->
   <script>
