@@ -446,27 +446,6 @@ def api_next_race():
     return jsonify(get_next_race() or {})
 
 
-@app.route("/api/debug")
-def api_debug():
-    static_token = os.getenv("OPENF1_BEARER_TOKEN", "")
-    bearer = _get_bearer_token()
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    raw = requests.get(f"{OPENF1_BASE}/sessions", params={"session_key": "latest"},
-                       headers=_openf1_headers(), timeout=10).json()
-    return jsonify({
-        "static_token_set": bool(static_token),
-        "oauth_auth_url_set": bool(os.getenv("OPENF1_AUTH_URL")),
-        "oauth_credentials_set": bool(os.getenv("OPENF1_AUTH_USERNAME") and os.getenv("OPENF1_AUTH_PASSWORD")),
-        "bearer_token_active": bool(bearer),
-        "bearer_prefix": bearer[:8] + "..." if bearer else None,
-        "env_path": env_path,
-        "env_file_exists": os.path.exists(env_path),
-        "raw_latest_response": raw,
-        "next_session": get_next_session(),
-        "next_race": get_next_race(),
-        "current_race_weekend": get_current_race_weekend(),
-        "cache_keys": list(_cache.keys()),
-    })
 
 
 if __name__ == "__main__":

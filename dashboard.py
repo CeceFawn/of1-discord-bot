@@ -105,6 +105,9 @@ SECRET_KEY = (os.getenv("DASHBOARD_SECRET_KEY") or "").strip()
 if not SECRET_KEY:
     raise RuntimeError("DASHBOARD_SECRET_KEY missing in .env")
 app.secret_key = SECRET_KEY
+app.config["SESSION_COOKIE_SECURE"]   = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 RAW_USERS = (os.getenv("DASHBOARD_USERS_JSON") or "{}").strip()
 try:
