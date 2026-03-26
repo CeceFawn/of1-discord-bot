@@ -409,20 +409,24 @@ def get_next_race() -> dict | None:
 def index():
     watch_party = load_watch_party()
 
-    # If override is set in watch_party.json, skip auto-detection entirely.
-    # This lets you manually control the title/date/time for cancelled or
-    # rescheduled races — just set "override": true in watch_party.json.
+    # Auto-detect the current/upcoming race weekend and fill in any fields that
+    # aren't manually set in watch_party.json.  Setting "override": true skips
+    # auto-detection entirely.  Otherwise, a non-empty value for any individual
+    # field (title, date, time) in the JSON takes priority over the auto value,
+    # so you can override just the fields you need.
     if not watch_party.get("override"):
         race = get_current_race_weekend()
         if race:
             watch_party["active"] = True
-            watch_party["title"] = f"{race['race_name']} Watch Party"
-            if race.get("date_display"):
+            if not watch_party.get("title"):
+                watch_party["title"] = f"{race['race_name']} Watch Party"
+            if not watch_party.get("date") and race.get("date_display"):
                 watch_party["date"] = race["date_display"]
-            if race.get("time_display"):
-                watch_party["time"] = race["time_display"]
-            else:
-                watch_party.pop("time", None)
+            if not watch_party.get("time"):
+                if race.get("time_display"):
+                    watch_party["time"] = race["time_display"]
+                else:
+                    watch_party.pop("time", None)
 
     return render_template(
         "index.html",
