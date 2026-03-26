@@ -787,11 +787,11 @@ def _deploy_worker(target: str = "bot"):
                 services.append(("website", WEBSITE_SYSTEMD_SERVICE))
             elif target == "both":
                 services.append(("bot", BOT_SYSTEMD_SERVICE))
-                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
+                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))  # dashboard last so it doesn't kill the worker
             else:  # all
                 services.append(("bot", BOT_SYSTEMD_SERVICE))
-                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
                 services.append(("website", WEBSITE_SYSTEMD_SERVICE))
+                services.append(("dashboard", DASHBOARD_SYSTEMD_SERVICE))
 
             for label, svc in services:
                 ok, out = _sudo_systemctl("restart", svc)
