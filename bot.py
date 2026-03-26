@@ -5337,6 +5337,7 @@ async def raceliveopsclear(ctx):
     await ctx.send("✅ Race-live ops channel cleared.")
 
 @bot.tree.command(name="racethreadcheck", description="Check which thread the bot will post live race updates to.")
+@discord.app_commands.checks.has_permissions(administrator=True)
 async def racethreadcheck_slash(interaction: discord.Interaction):
     guild = interaction.guild
     if guild is None:
@@ -5368,6 +5369,7 @@ async def racethreadcheck_slash(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="racethreadset", description="Manually set which thread the bot will post live race updates to.")
+@discord.app_commands.checks.has_permissions(administrator=True)
 @discord.app_commands.describe(thread="The thread to redirect live race updates to.")
 async def racethreadset_slash(interaction: discord.Interaction, thread: discord.Thread):
     guild = interaction.guild
