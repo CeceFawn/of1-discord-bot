@@ -3849,9 +3849,14 @@ async def on_ready():
 
     if not APP_COMMANDS_SYNCED:
         try:
+            _guild_id_str = os.getenv("DISCORD_GUILD_ID", "").strip()
+            if _guild_id_str:
+                _guild_obj = discord.Object(id=int(_guild_id_str))
+                await bot.tree.sync(guild=_guild_obj)
+                logging.info(f"[Slash] Command tree synced to guild {_guild_id_str}")
             await bot.tree.sync()
             APP_COMMANDS_SYNCED = True
-            logging.info("[Slash] Command tree synced")
+            logging.info("[Slash] Command tree synced globally")
         except Exception as e:
             logging.error(f"[Slash] Command tree sync failed: {e}")
 
