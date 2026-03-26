@@ -113,6 +113,60 @@
   </section>
   {% endif %}
 
+  <!-- ── SCHEDULE FLYERS ──────────────────────────────────────── -->
+  <section class="px-6 pb-16">
+    <div class="max-w-2xl mx-auto">
+      <div class="text-white/40 text-xs font-semibold uppercase tracking-widest mb-4">2026 Watch Party Schedule</div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <img src="{{ url_for('static', filename='schedule_halfbarrel.jpg') }}"
+             alt="Half Barrel Beer Project watch party schedule"
+             class="w-full rounded-2xl border border-white/10" />
+        <img src="{{ url_for('static', filename='schedule_hourglass.jpg') }}"
+             alt="Hourglass Brewing Longwood watch party schedule"
+             class="w-full rounded-2xl border border-white/10" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SOCIALS ───────────────────────────────────────────────── -->
+  <section class="px-6 pb-24">
+    <div class="max-w-2xl mx-auto">
+      <div class="text-white/40 text-xs font-semibold uppercase tracking-widest mb-4">Find Us</div>
+      <div class="flex flex-wrap gap-3">
+
+        <!-- Instagram -->
+        <a href="https://www.instagram.com/orlandof1fans" target="_blank" rel="noopener"
+           class="flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+            <circle cx="12" cy="12" r="4"/>
+            <circle cx="17.5" cy="6.5" r="0.5" fill="currentColor" stroke="none"/>
+          </svg>
+          <span class="text-sm font-medium text-white/80">OrlandoF1fans</span>
+        </a>
+
+        <!-- Facebook -->
+        <a href="https://www.facebook.com/orlandoF1fans" target="_blank" rel="noopener"
+           class="flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>
+          </svg>
+          <span class="text-sm font-medium text-white/80">OrlandoF1fans</span>
+        </a>
+
+        <!-- Linktree -->
+        <a href="https://linktr.ee/orlandof1" target="_blank" rel="noopener"
+           class="flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v13M8 7l4-4 4 4M6 11l6-3 6 3M9 17h6M10 21h4"/>
+          </svg>
+          <span class="text-sm font-medium text-white/80">OrlandoF1</span>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
   <!-- ── FOOTER ────────────────────────────────────────────────── -->
   <footer class="border-t border-white/10 px-6 py-8 text-center text-white/20 text-sm">
     Orlando F1 · Made with ❤️ for the community
