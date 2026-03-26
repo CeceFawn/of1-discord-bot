@@ -5336,6 +5336,37 @@ async def raceliveopsclear(ctx):
     _set_race_live_ops_channel_id(0)
     await ctx.send("✅ Race-live ops channel cleared.")
 
+@bot.tree.command(name="racethreadcheck", description="Check which thread the bot will post live race updates to.")
+async def racethreadcheck_slash(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        round_meta = await current_or_next_round_meta()
+        round_key  = str(round_meta.get("key") or "unknown")
+        race_name  = str(round_meta.get("race_name") or "Next Race").strip()
+
+        thread = await _fetch_saved_race_thread(guild, round_key)
+        if thread is not None:
+            await interaction.followup.send(
+                f"For **{race_name}** (`{round_key}`), live updates will post to: {thread.mention}",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                f"No thread saved yet for **{race_name}** (`{round_key}`). "
+                f"One will be created automatically before the race, or use `/racethread` to create it now.",
+                ephemeral=True,
+            )
+    except Exception as e:
+        logging.error(f"[RaceThreadCheck] failed: {e}")
+        await interaction.followup.send(f"Check failed: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="racethread", description="Create the next race thread early with custom watchalong info.")
 @discord.app_commands.describe(
     message="Message text for the race thread",
