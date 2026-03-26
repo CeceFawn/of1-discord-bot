@@ -5367,6 +5367,46 @@ async def racethreadcheck_slash(interaction: discord.Interaction):
         await interaction.followup.send(f"Check failed: {e}", ephemeral=True)
 
 
+@bot.tree.command(name="racethreadset", description="Manually set which thread the bot will post live race updates to.")
+@discord.app_commands.describe(thread="The thread to redirect live race updates to.")
+async def racethreadset_slash(interaction: discord.Interaction, thread: discord.Thread):
+    guild = interaction.guild
+    member = interaction.user if isinstance(interaction.user, discord.Member) else None
+    if guild is None or member is None:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+
+    perms = member.guild_permissions
+    if not (perms.administrator or perms.manage_threads or perms.manage_channels):
+        await interaction.response.send_message(
+            "You need Manage Threads, Manage Channels, or Administrator permissions to use this command.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        round_meta = await current_or_next_round_meta()
+        round_key  = str(round_meta.get("key") or "unknown")
+        race_name  = str(round_meta.get("race_name") or "Next Race").strip()
+
+        _save_race_thread_record(
+            round_key=round_key,
+            race_name=race_name,
+            guild_id=guild.id,
+            thread=thread,
+            source="manual",
+        )
+        await interaction.followup.send(
+            f"Done. Live updates for **{race_name}** (`{round_key}`) will now post to {thread.mention}.",
+            ephemeral=True,
+        )
+    except Exception as e:
+        logging.error(f"[RaceThreadSet] failed: {e}")
+        await interaction.followup.send(f"Could not update race thread: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="racethread", description="Create the next race thread early with custom watchalong info.")
 @discord.app_commands.describe(
     message="Message text for the race thread",
