@@ -216,61 +216,99 @@
     });
   });
 
-  // ── Rotation state ──
-  let rotX = -0.26, rotY = 0;  // slight downward tilt initially
-  let velX = 0, velY = 0.003;
-  let autoSpin = true;
+  // ── Rotation state (quaternion trackball — true free rotation) ──
+  const currentQuat   = new THREE.Quaternion();
+  const autoSpinQuat  = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0), 0.003
+  );
+  let autoSpin      = true;
   let autoSpinTimer = null;
-
-  function applyRotation() {
-    sphereGrp.rotation.x = rotX;
-    sphereGrp.rotation.y = rotY;
-  }
+  let spinning      = false;
+  let spinAxis      = new THREE.Vector3(0, 1, 0);
+  let spinAngle     = 0;
 
   // ── Render loop ──
   function animate() {
     requestAnimationFrame(animate);
     if (!dragging) {
       if (autoSpin) {
-        rotY += velY;
-      } else {
-        velX *= 0.93; velY *= 0.93;
-        rotX += velX; rotY += velY;
-        if (Math.abs(velX) < 0.0001 && Math.abs(velY) < 0.0001) {
-          autoSpin = true; velX = 0; velY = 0.003;
+        currentQuat.premultiply(autoSpinQuat);
+      } else if (spinning) {
+        spinAngle *= 0.95;
+        if (spinAngle < 0.0002) {
+          spinning = false;
+          autoSpin = true;
+        } else {
+          currentQuat.premultiply(
+            new THREE.Quaternion().setFromAxisAngle(spinAxis, spinAngle)
+          );
         }
       }
     }
-    applyRotation();
+    sphereGrp.quaternion.copy(currentQuat);
     renderer.render(scene, camera);
+  }
+
+  // ── Virtual trackball helpers ──
+  // Maps a screen position onto a unit hemisphere facing the camera.
+  // Dragging across this virtual sphere computes the rotation naturally —
+  // no fixed world axis, so it stays consistent regardless of sphere orientation.
+  function toVirtualSphere(x, y) {
+    const nx = (x / window.innerWidth)  * 2 - 1;
+    const ny = -((y / window.innerHeight) * 2 - 1);
+    const d  = Math.sqrt(nx * nx + ny * ny);
+    // Inside the sphere: project onto hemisphere. Outside: project onto rim tangent.
+    const z  = d < 1 ? Math.sqrt(1 - d * d) : 0;
+    return new THREE.Vector3(nx, ny, z).normalize();
+  }
+
+  function rotationBetween(p1, p2) {
+    const axis = p1.clone().cross(p2);
+    if (axis.length() < 1e-7) return new THREE.Quaternion();
+    axis.normalize();
+    const angle = Math.acos(Math.max(-1, Math.min(1, p1.dot(p2))));
+    return new THREE.Quaternion().setFromAxisAngle(axis, angle);
   }
 
   // ── Drag ──
   const container = document.getElementById('canvas-container');
   let dragging = false;
-  let lastX = 0, lastY = 0, lastDX = 0, lastDY = 0;
+  let lastSpherePoint = null;
+  let lastDX = 0, lastDY = 0, lastX = 0, lastY = 0;
   let mouseDownX = 0, mouseDownY = 0;
+  // Last-frame rotation for momentum
+  let lastRotQuat = new THREE.Quaternion();
 
   function startDrag(x, y) {
-    dragging = true; autoSpin = false;
+    dragging = true; autoSpin = false; spinning = false;
     clearTimeout(autoSpinTimer);
+    lastSpherePoint = toVirtualSphere(x, y);
     lastX = x; lastY = y; lastDX = 0; lastDY = 0;
     mouseDownX = x; mouseDownY = y;
+    lastRotQuat.identity();
   }
   function moveDrag(x, y) {
-    if (!dragging) return;
+    if (!dragging || !lastSpherePoint) return;
     lastDX = x - lastX; lastDY = y - lastY;
-    rotY += lastDX * 0.005;
-    rotX += lastDY * 0.005;
+    const p2  = toVirtualSphere(x, y);
+    lastRotQuat = rotationBetween(lastSpherePoint, p2);
+    currentQuat.premultiply(lastRotQuat);
+    lastSpherePoint = p2;
     lastX = x; lastY = y;
   }
   function endDrag(x, y) {
     if (!dragging) return;
     dragging = false;
-    velY = lastDX * 0.005;
-    velX = -lastDY * 0.005;
-    autoSpinTimer = setTimeout(() => { autoSpin = true; velX = 0; velY = 0.003; }, 3000);
-    // Was it a click (barely moved)?
+    // Carry the last frame's rotation as momentum
+    const angle = 2 * Math.acos(Math.max(-1, Math.min(1, lastRotQuat.w)));
+    if (angle > 0.002) {
+      spinning  = true;
+      spinAxis  = new THREE.Vector3(lastRotQuat.x, lastRotQuat.y, lastRotQuat.z).normalize();
+      spinAngle = angle;
+      autoSpinTimer = setTimeout(() => { if (!dragging) { spinning = false; autoSpin = true; } }, 5000);
+    } else {
+      autoSpinTimer = setTimeout(() => { if (!dragging) autoSpin = true; }, 1500);
+    }
     const dist = Math.hypot(x - mouseDownX, y - mouseDownY);
     if (dist < 6) checkClick(x, y);
   }
