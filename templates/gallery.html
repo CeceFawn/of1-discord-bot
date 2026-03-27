@@ -52,37 +52,35 @@
       width: 120px;
       height: 120px;
       transform-origin: center center;
-      backface-visibility: hidden;
-      -webkit-backface-visibility: hidden;
-      border-radius: 8px;
-      overflow: hidden;
+      transform-style: preserve-3d;
       cursor: pointer;
-      border: 2px solid rgba(255,255,255,0.1);
-      transition: border-color 0.2s, box-shadow 0.2s;
+      border-radius: 8px;
       left: -60px;
       top: -60px;
     }
-    .panel:hover {
+    .panel:hover .panel-face {
       border-color: rgba(232,0,45,0.7);
       box-shadow: 0 0 20px rgba(232,0,45,0.4);
-      z-index: 9999;
     }
-    .panel img {
+    .panel-face {
+      position: absolute;
+      inset: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,0.1);
+      transition: border-color 0.2s, box-shadow 0.2s;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+    .panel-face.back {
+      transform: rotateY(180deg);
+    }
+    .panel-face img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
       pointer-events: none;
-    }
-
-    /* placeholder panel when no photos */
-    .panel-placeholder {
-      background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: rgba(255,255,255,0.15);
-      font-size: 28px;
     }
 
     /* ── Lightbox ── */
@@ -237,23 +235,28 @@
     const panel = document.createElement('div');
     panel.className = 'panel';
 
-    const img = document.createElement('img');
-    img.src = PHOTOS[i];
-    img.alt = '';
-    img.draggable = false;
-    panel.appendChild(img);
+    // Front face
+    const front = document.createElement('div');
+    front.className = 'panel-face';
+    const imgF = document.createElement('img');
+    imgF.src = PHOTOS[i]; imgF.alt = ''; imgF.draggable = false;
+    front.appendChild(imgF);
 
-    // 3D position
-    const x = pt.x * RADIUS;
-    const y = pt.y * RADIUS;
-    const z = pt.z * RADIUS;
+    // Back face (same image, rotated 180° so it reads correctly from behind)
+    const back = document.createElement('div');
+    back.className = 'panel-face back';
+    const imgB = document.createElement('img');
+    imgB.src = PHOTOS[i]; imgB.alt = ''; imgB.draggable = false;
+    back.appendChild(imgB);
 
-    // We position each panel at its 3D point and orient it to face outward
-    // using rotateY and rotateX angles derived from the sphere coordinates
-    const rotY = -Math.atan2(pt.x, pt.z) * (180 / Math.PI);
-    const rotX =  Math.asin(pt.y)         * (180 / Math.PI);
+    panel.appendChild(front);
+    panel.appendChild(back);
 
-    panel.style.transform = `translateX(${x}px) translateY(${y}px) translateZ(${z}px) rotateY(${rotY}deg) rotateX(${rotX}deg)`;
+    // Rotate to face outward, then push to RADIUS — correct sphere positioning
+    const theta = Math.atan2(pt.x, pt.z) * (180 / Math.PI); // azimuth around Y
+    const phi   = Math.asin(pt.y)         * (180 / Math.PI); // elevation
+
+    panel.style.transform = `rotateY(${theta}deg) rotateX(${-phi}deg) translateZ(${RADIUS}px)`;
 
     // Click handler — open lightbox for THIS panel
     panel.addEventListener('click', () => openLightbox(PHOTOS[i]));
