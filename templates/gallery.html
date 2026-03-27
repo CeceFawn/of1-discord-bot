@@ -138,12 +138,15 @@
   const PHOTOS = {{ photos | tojson }};
   const n = PHOTOS.length;
 
-  // ── Three.js setup ──
   const scene    = new THREE.Scene();
   const camera   = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 5000);
   camera.position.z = 900;
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    logarithmicDepthBuffer: true
+  });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('canvas-container').appendChild(renderer.domElement);
@@ -152,7 +155,6 @@
   const sphereGrp = new THREE.Group();
   scene.add(sphereGrp);
 
-  // ── Fibonacci sphere (unit vectors) ──
   function fibonacciSphere(n) {
     const golden = Math.PI * (3 - Math.sqrt(5));
     return Array.from({ length: n }, (_, i) => {
@@ -163,73 +165,85 @@
     });
   }
 
-  const pts      = fibonacciSphere(n);
+  const pts = fibonacciSphere(n);
 
-  // Reduced from 1.1 to 0.9 to cut down overlap between neighboring tiles
-  const patchAng = Math.sqrt(4 * Math.PI / n) * 0.9;
+  // Slightly smaller tiles to reduce overlap
+  const patchAng = Math.sqrt(4 * Math.PI / n) * 0.92;
 
-  const loader  = new THREE.TextureLoader();
-  const meshes  = [];
+  const loader = new THREE.TextureLoader();
+  const meshes = [];
 
-  // Tile size = arc length at equator — consistent across the whole sphere
   const tileSize = RADIUS * patchAng;
-  const SEGMENTS = 16; // subdivisions — more = smoother curve
+  const SEGMENTS = 16;
 
-  // Build a tile that starts as a flat plane but has its vertices projected
-  // onto the sphere surface. UVs stay from the flat plane → no distortion.
   function makeCurvedTile(pt, depthOffset = 0) {
     const outward = new THREE.Vector3(pt.x, pt.y, pt.z).normalize();
-    const quat    = new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 0, 1), outward
+    const quat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      outward
     );
-    const center  = outward.clone().multiplyScalar(RADIUS + depthOffset);
+    const center = outward.clone().multiplyScalar(RADIUS + depthOffset);
 
-    const geo     = new THREE.PlaneGeometry(tileSize, tileSize, SEGMENTS, SEGMENTS);
+    const geo = new THREE.PlaneGeometry(tileSize, tileSize, SEGMENTS, SEGMENTS);
     const posAttr = geo.attributes.position;
 
     for (let j = 0; j < posAttr.count; j++) {
-      const v = new THREE.Vector3(posAttr.getX(j), posAttr.getY(j), posAttr.getZ(j));
-      v.applyQuaternion(quat); // rotate plane to face outward
-      v.add(center);           // move to sphere surface
-      v.normalize().multiplyScalar(RADIUS + depthOffset); // project vertex onto sphere
+      const v = new THREE.Vector3(
+        posAttr.getX(j),
+        posAttr.getY(j),
+        posAttr.getZ(j)
+      );
+      v.applyQuaternion(quat);
+      v.add(center);
+      v.normalize().multiplyScalar(RADIUS + depthOffset);
       posAttr.setXYZ(j, v.x, v.y, v.z);
     }
+
     posAttr.needsUpdate = true;
     geo.computeVertexNormals();
     return geo;
   }
 
+  // Deterministic tiny offsets instead of random offsets
+  // Small enough to preserve the sphere look, enough to separate surfaces
+  function getDepthOffset(i) {
+    const layers = 7;      // number of distinct depth bands
+    const step   = 0.18;   // tiny separation per band
+    return (i % layers) * step;
+  }
+
   pts.forEach((pt, i) => {
-    // No random depth offset — keep everything on the same sphere
-    const depthOffset = 0;
+    const depthOffset = getDepthOffset(i);
 
     function addMesh(mat) {
       const mesh = new THREE.Mesh(makeCurvedTile(pt, depthOffset), mat);
       mesh.userData.photo = PHOTOS[i];
+      mesh.renderOrder = i; // helps make draw order stable
       sphereGrp.add(mesh);
       meshes.push(mesh);
     }
 
     loader.load(PHOTOS[i], (tex) => {
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
       addMesh(new THREE.MeshBasicMaterial({
         map: tex,
         side: THREE.DoubleSide,
         polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
       }));
     }, undefined, () => {
       addMesh(new THREE.MeshBasicMaterial({
         color: 0x330008,
         side: THREE.DoubleSide,
         polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
       }));
     });
   });
 
-  // ── Rotation state (quaternion trackball — true free rotation) ──
   const currentQuat   = new THREE.Quaternion();
   const autoSpinQuat  = new THREE.Quaternion().setFromAxisAngle(
     new THREE.Vector3(0, 1, 0), 0.003
@@ -240,7 +254,6 @@
   let spinAxis      = new THREE.Vector3(0, 1, 0);
   let spinAngle     = 0;
 
-  // ── Render loop ──
   function animate() {
     requestAnimationFrame(animate);
     if (!dragging) {
@@ -262,7 +275,6 @@
     renderer.render(scene, camera);
   }
 
-  // ── Virtual trackball helpers ──
   function toVirtualSphere(x, y) {
     const nx = (x / window.innerWidth)  * 2 - 1;
     const ny = -((y / window.innerHeight) * 2 - 1);
@@ -279,7 +291,6 @@
     return new THREE.Quaternion().setFromAxisAngle(axis, angle);
   }
 
-  // ── Drag ──
   const container = document.getElementById('canvas-container');
   let dragging = false;
   let lastSpherePoint = null;
@@ -295,64 +306,72 @@
     mouseDownX = x; mouseDownY = y;
     lastRotQuat.identity();
   }
+
   function moveDrag(x, y) {
     if (!dragging || !lastSpherePoint) return;
     lastDX = x - lastX; lastDY = y - lastY;
-    const p2  = toVirtualSphere(x, y);
+    const p2 = toVirtualSphere(x, y);
     lastRotQuat = rotationBetween(lastSpherePoint, p2);
     currentQuat.premultiply(lastRotQuat);
     lastSpherePoint = p2;
     lastX = x; lastY = y;
   }
+
   function endDrag(x, y) {
     if (!dragging) return;
     dragging = false;
     const angle = 2 * Math.acos(Math.max(-1, Math.min(1, lastRotQuat.w)));
     if (angle > 0.002) {
-      spinning  = true;
-      spinAxis  = new THREE.Vector3(lastRotQuat.x, lastRotQuat.y, lastRotQuat.z).normalize();
+      spinning = true;
+      spinAxis = new THREE.Vector3(lastRotQuat.x, lastRotQuat.y, lastRotQuat.z).normalize();
       spinAngle = angle;
-      autoSpinTimer = setTimeout(() => { if (!dragging) { spinning = false; autoSpin = true; } }, 5000);
+      autoSpinTimer = setTimeout(() => {
+        if (!dragging) { spinning = false; autoSpin = true; }
+      }, 5000);
     } else {
-      autoSpinTimer = setTimeout(() => { if (!dragging) autoSpin = true; }, 1500);
+      autoSpinTimer = setTimeout(() => {
+        if (!dragging) autoSpin = true;
+      }, 1500);
     }
     const dist = Math.hypot(x - mouseDownX, y - mouseDownY);
     if (dist < 6) checkClick(x, y);
   }
 
   container.addEventListener('mousedown', e => startDrag(e.clientX, e.clientY));
-  window.addEventListener('mousemove',    e => moveDrag(e.clientX, e.clientY));
-  window.addEventListener('mouseup',      e => endDrag(e.clientX, e.clientY));
+  window.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+  window.addEventListener('mouseup', e => endDrag(e.clientX, e.clientY));
 
   container.addEventListener('touchstart', e => {
     const t = e.touches[0];
     startDrag(t.clientX, t.clientY);
   }, { passive: true });
+
   container.addEventListener('touchmove', e => {
     const t = e.touches[0];
     moveDrag(t.clientX, t.clientY);
     e.preventDefault();
   }, { passive: false });
+
   container.addEventListener('touchend', e => {
     const t = e.changedTouches[0];
     endDrag(t.clientX, t.clientY);
   });
 
-  // ── Raycasting ──
   const raycaster = new THREE.Raycaster();
+
   function toNDC(x, y) {
     return new THREE.Vector2(
-      (x / window.innerWidth)  *  2 - 1,
+      (x / window.innerWidth) * 2 - 1,
       (y / window.innerHeight) * -2 + 1
     );
   }
+
   function checkClick(x, y) {
     raycaster.setFromCamera(toNDC(x, y), camera);
     const hits = raycaster.intersectObjects(meshes);
     if (hits.length > 0) openLightbox(hits[0].object.userData.photo);
   }
 
-  // Cursor change on hover
   window.addEventListener('mousemove', e => {
     if (dragging) return;
     raycaster.setFromCamera(toNDC(e.clientX, e.clientY), camera);
@@ -360,14 +379,12 @@
     container.style.cursor = hits.length > 0 ? 'pointer' : 'grab';
   });
 
-  // ── Resize ──
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // ── Lightbox ──
   const lightbox = document.getElementById('lightbox');
   const lbImg    = document.getElementById('lb-img');
   const lbClose  = document.getElementById('lb-close');
@@ -387,6 +404,7 @@
     lbReset();
     lightbox.classList.add('active');
   }
+
   function closeLightbox() {
     lightbox.classList.remove('active');
     lbImg.src = '';
@@ -401,13 +419,18 @@
     if (lbScale > 1) { lbDragging = true; lbImg.style.cursor = 'grabbing'; }
     e.stopPropagation(); e.preventDefault();
   });
+
   window.addEventListener('mousemove', e => {
     if (!lbDragging) return;
     lbTx = e.clientX - lbDragX; lbTy = e.clientY - lbDragY;
     lbDidDrag = true; lbApply();
   });
+
   window.addEventListener('mouseup', e => {
-    if (lbDragging) { lbDragging = false; lbImg.style.cursor = lbScale > 1 ? 'grab' : 'zoom-in'; }
+    if (lbDragging) {
+      lbDragging = false;
+      lbImg.style.cursor = lbScale > 1 ? 'grab' : 'zoom-in';
+    }
     if (!lbDidDrag && e.target === lbImg) {
       lbScale <= 1 ? (lbScale = 2.5, lbApply()) : lbReset();
     }
@@ -416,25 +439,35 @@
   lbImg.addEventListener('touchstart', e => {
     if (e.touches.length === 2) {
       lbPinching = true;
-      lbPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      lbPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
       lbPinchScale = lbScale;
     } else if (lbScale > 1) {
       lbDragging = true;
-      lbDragX = e.touches[0].clientX - lbTx; lbDragY = e.touches[0].clientY - lbTy;
+      lbDragX = e.touches[0].clientX - lbTx;
+      lbDragY = e.touches[0].clientY - lbTy;
     }
     e.preventDefault();
   }, { passive: false });
+
   lbImg.addEventListener('touchmove', e => {
     if (lbPinching && e.touches.length === 2) {
-      const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
       lbScale = Math.max(1, Math.min(5, lbPinchScale * (d / lbPinchDist)));
       lbApply();
     } else if (lbDragging) {
-      lbTx = e.touches[0].clientX - lbDragX; lbTy = e.touches[0].clientY - lbDragY;
+      lbTx = e.touches[0].clientX - lbDragX;
+      lbTy = e.touches[0].clientY - lbDragY;
       lbApply();
     }
     e.preventDefault();
   }, { passive: false });
+
   lbImg.addEventListener('touchend', e => {
     if (e.touches.length < 2) lbPinching = false;
     if (e.touches.length === 0) lbDragging = false;
@@ -445,7 +478,6 @@
   });
 
   animate();
-
 })();
 </script>
 
