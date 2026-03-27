@@ -1210,6 +1210,8 @@ def status():
     _rt_dt = _parse_iso_utc(str(runtime.get("ts") or ""))
     runtime_ts_unix = int(_rt_dt.timestamp()) if _rt_dt else 0
     dashboard_start_unix = int(DASHBOARD_STARTED_AT)
+    _bot_start_dt = _parse_iso_utc(str(runtime.get("bot_started_at") or ""))
+    bot_start_unix = int(_bot_start_dt.timestamp()) if _bot_start_dt else 0
 
     # race thread card
     if has_current:
@@ -1318,7 +1320,7 @@ def status():
   {"<div class='bg-yellow-950/40 border border-yellow-800/40 text-yellow-300 text-sm rounded-xl px-4 py-3'><b>Runtime read warning:</b> " + _escape(runtime_read_error) + "</div>" if runtime_read_error else ""}
 
   <!-- Metric cards -->
-  <div class="grid grid-cols-3 gap-3">
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
     <div class="bg-[#111] border border-[#222] rounded-xl p-4">
       <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">CPU</div>
       <div class="text-3xl font-bold text-white">{cpu}<span class="text-lg text-gray-500">%</span></div>
@@ -1328,8 +1330,12 @@ def status():
       <div class="text-3xl font-bold text-white">{ram}<span class="text-lg text-gray-500">%</span></div>
     </div>
     <div class="bg-[#111] border border-[#222] rounded-xl p-4">
-      <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">Uptime</div>
-      <div class="text-3xl font-bold text-white" id="stat-uptime" data-start="{dashboard_start_unix}">—</div>
+      <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">Bot Uptime</div>
+      <div class="text-2xl font-bold text-white" id="stat-bot-uptime" data-start="{bot_start_unix}">—</div>
+    </div>
+    <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+      <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">Dashboard Uptime</div>
+      <div class="text-2xl font-bold text-white" id="stat-uptime" data-start="{dashboard_start_unix}">—</div>
     </div>
   </div>
 
@@ -1460,6 +1466,12 @@ def status():
               var upEl = document.getElementById('stat-uptime');
               if (upEl && upEl.dataset.start) {
                 upEl.textContent = fmtDuration(now - parseFloat(upEl.dataset.start));
+              }
+              var botUpEl = document.getElementById('stat-bot-uptime');
+              if (botUpEl && botUpEl.dataset.start && parseFloat(botUpEl.dataset.start) > 0) {
+                botUpEl.textContent = fmtDuration(now - parseFloat(botUpEl.dataset.start));
+              } else if (botUpEl) {
+                botUpEl.textContent = '—';
               }
               var hbEl = document.getElementById('stat-hb-age');
               if (hbEl && hbEl.dataset.ts && parseFloat(hbEl.dataset.ts) > 0) {

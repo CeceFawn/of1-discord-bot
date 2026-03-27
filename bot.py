@@ -2906,8 +2906,10 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
     for gid, task in RACE_LIVE_TASKS.items():
         if _task_running(task):
             running_live_guilds.append(int(gid))
+    bot_started_at = getattr(bot, "launch_time", None)
     return {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "bot_started_at": bot_started_at.astimezone(timezone.utc).isoformat() if bot_started_at else None,
         "guild_count": len(bot.guilds),
         "loops": {
             "standings": _task_running(STANDINGS_TASK),
