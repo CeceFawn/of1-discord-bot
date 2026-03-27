@@ -172,33 +172,32 @@
   const meshes  = [];
 
   pts.forEach(({ phi, theta }, i) => {
-    loader.load(PHOTOS[i], (tex) => {
-      const thetaStart  = Math.max(0.001, theta - patchAng / 2);
-      const thetaLength = Math.min(Math.PI - thetaStart - 0.001, patchAng);
+    // Widen the phi span near poles so arc lengths match in both directions.
+    // phi arc = sin(theta) * phiLen * R  ;  theta arc = thetaLen * R
+    // Setting phiLen = patchAng / sin(theta) equalises them → no distortion.
+    // Cap at 3× patchAng so very polar tiles are at most 3:1 instead of extreme.
+    const sinC    = Math.max(0.33, Math.sin(theta));
+    const phiLen  = Math.min(patchAng / sinC, patchAng * 3);
+    const thetaStart  = Math.max(0.001, theta - patchAng / 2);
+    const thetaLength = Math.min(Math.PI - thetaStart - 0.001, patchAng);
 
-      const geo = new THREE.SphereGeometry(
-        RADIUS,
-        20, 20,                     // segments — more = smoother curve
-        phi - patchAng / 2,         // phiStart
-        patchAng,                   // phiLength
-        thetaStart,
-        thetaLength
+    function makePatchGeo() {
+      return new THREE.SphereGeometry(
+        RADIUS, 20, 20,
+        phi - phiLen / 2, phiLen,
+        thetaStart, thetaLength
       );
+    }
 
-      const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(geo, mat);
+    loader.load(PHOTOS[i], (tex) => {
+      const mat  = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(makePatchGeo(), mat);
       mesh.userData.photo = PHOTOS[i];
       sphereGrp.add(mesh);
       meshes.push(mesh);
     }, undefined, () => {
-      // Fallback: red tile so the sphere shape is still visible
-      const mat = new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(RADIUS, 20, 20, phi - patchAng/2, patchAng,
-          Math.max(0.001, theta - patchAng/2),
-          Math.min(Math.PI - Math.max(0.001, theta - patchAng/2) - 0.001, patchAng)),
-        mat
-      );
+      const mat  = new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(makePatchGeo(), mat);
       mesh.userData.photo = PHOTOS[i];
       sphereGrp.add(mesh);
       meshes.push(mesh);
@@ -225,7 +224,6 @@
       } else {
         velX *= 0.93; velY *= 0.93;
         rotX += velX; rotY += velY;
-        rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotX));
         if (Math.abs(velX) < 0.0001 && Math.abs(velY) < 0.0001) {
           autoSpin = true; velX = 0; velY = 0.003;
         }
@@ -251,8 +249,7 @@
     if (!dragging) return;
     lastDX = x - lastX; lastDY = y - lastY;
     rotY += lastDX * 0.005;
-    rotX -= lastDY * 0.005;
-    rotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotX));
+    rotX += lastDY * 0.005;
     lastX = x; lastY = y;
   }
   function endDrag(x, y) {
