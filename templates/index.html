@@ -115,6 +115,33 @@
       line-height: 1;
     }
     #party-trigger:hover { opacity: 0.4 !important; }
+
+    @keyframes sheen {
+      from { transform: translateX(-100%) skewX(-20deg); }
+      to   { transform: translateX(250%)  skewX(-20deg); }
+    }
+    .sheen-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .sheen-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        105deg,
+        transparent 40%,
+        rgba(255,255,255,0.06) 50%,
+        rgba(255,255,255,0.12) 55%,
+        rgba(255,255,255,0.06) 60%,
+        transparent 70%
+      );
+      transform: translateX(-100%) skewX(-20deg);
+      pointer-events: none;
+    }
+    .sheen-card:hover::before {
+      animation: sheen 0.65s ease forwards;
+    }
   </style>
 </head>
 
@@ -159,7 +186,7 @@
   <section class="px-6 pb-24">
     <div class="max-w-2xl mx-auto">
       <a id="watch-party-card" href="{{ discord_invite }}" target="_blank" rel="noopener"
-         class="block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
+         class="sheen-card block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
         <div class="flex items-center gap-2 text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">
           🏁 Watch Party
         </div>
