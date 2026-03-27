@@ -17,8 +17,8 @@ import psutil
 import requests
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
 
-from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH, WATCH_PARTY_PATH
-from storage import load_config, save_config, load_state, save_state
+from settings import LOG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH, WATCH_PARTY_PATH
+from storage import load_config, load_state
 from runtime_store import get_runtime_status, list_alerts, init_runtime_db
 
 app = Flask(__name__)
@@ -159,16 +159,6 @@ def _record_attempt():
 
 def _clear_attempts():
     LOGIN_ATTEMPTS.pop(_client_ip(), None)
-
-def _discord_authorize_url() -> str:
-    params = {
-        "client_id": DISCORD_CLIENT_ID,
-        "redirect_uri": DISCORD_REDIRECT_URI,
-        "response_type": "code",
-        "scope": "identify",
-        "prompt": "consent",
-    }
-    return f"{DISCORD_API_BASE}/oauth2/authorize?{urlencode(params)}"
 
 def _discord_exchange_code(code: str) -> tuple[bool, dict | str]:
     try:
@@ -478,15 +468,6 @@ def _render(body: str, flash: str = ""):
         now=now,
         csrf_input=_csrf_input(),
     )
-
-def _backup_file(path: str) -> None:
-    try:
-        if os.path.exists(path):
-            bak = path + ".bak"
-            with open(path, "rb") as src, open(bak, "wb") as dst:
-                dst.write(src.read())
-    except Exception:
-        pass
 
 def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
     cfg = load_config() or {}
@@ -1548,14 +1529,6 @@ def bot_action(action: str):
     return redirect(url_for("logs"))
 
 # Backwards-compat route name (your old template called /restart)
-@app.route("/restart", methods=["POST"])
-@login_required
-def restart():
-    # Now restarts the bot service, not the dashboard process
-    ok, out = _sudo_systemctl("restart")
-    _set_last_action("restart", ok, out or ("OK" if ok else "FAILED"))
-    return redirect(url_for("logs"))
-
 # ----------------------------
 # Watch Party editor
 # ----------------------------

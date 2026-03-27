@@ -1164,16 +1164,6 @@ def _prediction_category_session(category: str) -> str:
         return "race"
     return "race"
 
-def _prediction_category_display(category: str) -> str:
-    return {
-        "pole": "Pole",
-        "sprint_pole": "Sprint Pole",
-        "podium": "Podium",
-        "sprint_podium": "Sprint Podium",
-        "p10": "P10",
-        "sprint_p8": "Sprint P8",
-    }.get(category, category)
-
 def _pred_scored_sessions_for_guild(round_obj: Dict[str, Any], guild_id: int) -> Dict[str, bool]:
     scored = round_obj.setdefault("scored_sessions", {})
     gid = str(guild_id)
@@ -2544,7 +2534,6 @@ def _command_examples(prefix: str) -> Dict[str, str]:
         "xpset": f"{p}xpset @DriverName 2500",
         "xpreset": f"{p}xpreset @DriverName",
         "xpaudit": f"{p}xpaudit @DriverName",
-        "xpbackfillhistory": f"{p}xpbackfillhistory rebuild CONFIRM",
         "schedule": f"{p}schedule 8",
         "nextsession": f"{p}nextsession",
         "f1reminders": f"{p}f1reminders on #admin-channel",
@@ -2599,7 +2588,6 @@ def _command_descriptions() -> Dict[str, str]:
         "xpset": "Set a user's XP manually (admin).",
         "xpreset": "Reset a user's XP data (admin).",
         "xpaudit": "Audit XP stats and level math for a user.",
-        "xpbackfillhistory": "Rebuild XP from existing message history silently (admin).",
         "schedule": "Show upcoming F1 sessions from the current schedule.",
         "nextsession": "Show the next F1 session and countdown.",
         "f1reminders": "Configure or view automatic F1 session reminders (admin).",
@@ -5729,7 +5717,6 @@ def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
     logging.info(f"[RaceTest] Loading scenarios from: {path}")
 
     try:
-        import json
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
