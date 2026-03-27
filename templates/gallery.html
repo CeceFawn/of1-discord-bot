@@ -127,9 +127,14 @@
   <img id="lb-img" src="" alt="Gallery photo" />
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <script>
 (function () {
+  if (typeof THREE === 'undefined') {
+    document.body.innerHTML = '<div style="color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Inter,sans-serif">Failed to load 3D library. Check your connection.</div>';
+    return;
+  }
+
   const PHOTOS = {{ photos | tojson }};
   const n = PHOTOS.length;
 
@@ -168,8 +173,6 @@
 
   pts.forEach(({ phi, theta }, i) => {
     loader.load(PHOTOS[i], (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-
       const thetaStart  = Math.max(0.001, theta - patchAng / 2);
       const thetaLength = Math.min(Math.PI - thetaStart - 0.001, patchAng);
 
@@ -182,15 +185,20 @@
         thetaLength
       );
 
-      const mat = new THREE.MeshBasicMaterial({
-        map:           tex,
-        side:          THREE.DoubleSide,  // visible from inside too
-        polygonOffset: true,
-        polygonOffsetFactor: -i * 0.01,   // stagger to avoid z-fighting at edges
-        polygonOffsetUnits:  -1,
-      });
-
+      const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData.photo = PHOTOS[i];
+      sphereGrp.add(mesh);
+      meshes.push(mesh);
+    }, undefined, () => {
+      // Fallback: red tile so the sphere shape is still visible
+      const mat = new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(RADIUS, 20, 20, phi - patchAng/2, patchAng,
+          Math.max(0.001, theta - patchAng/2),
+          Math.min(Math.PI - Math.max(0.001, theta - patchAng/2) - 0.001, patchAng)),
+        mat
+      );
       mesh.userData.photo = PHOTOS[i];
       sphereGrp.add(mesh);
       meshes.push(mesh);
