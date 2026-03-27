@@ -509,25 +509,34 @@ def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
     deploy_status = _read_deploy_status()
     last_html = ""
     if last.get("ts"):
-        status = "OK" if last.get("ok") else "FAILED"
-        color = "#6f6" if last.get("ok") else "#f66"
-        last_html = f"""
-          <div style="margin:10px 0;padding:10px;border-radius:10px;background:#0b0b0b;border:1px solid #333;">
-            <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Last action: <b style="color:{color};">{_escape(str(last.get("action")))} · {status}</b> · {_escape(str(last.get("ts")))}</div>
-            <pre style="white-space:pre-wrap;margin:0;color:#ddd;">{_escape(last.get("output") or "")}</pre>
-          </div>
-        """
+        ok = last.get("ok")
+        badge = '<span class="text-green-400 font-semibold">OK</span>' if ok else '<span class="text-red-400 font-semibold">FAILED</span>'
+        last_html = (
+            f'<div class="bg-[#111] border border-[#222] rounded-xl p-4 mb-3">'
+            f'<div class="flex items-center gap-2 mb-2 text-xs text-gray-500">'
+            f'<span class="text-gray-300 font-medium">{_escape(str(last.get("action")))}</span>'
+            f'<span>·</span>{badge}<span>·</span>'
+            f'<span>{_escape(str(last.get("ts")))}</span>'
+            f'</div>'
+            f'<pre class="text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] rounded-lg p-3 overflow-x-auto">{_escape(last.get("output") or "")}</pre>'
+            f'</div>'
+        )
 
     deploy_html = ""
     if deploy_status.get("ts"):
-        status = "OK" if deploy_status.get("ok") else "FAILED"
-        color = "#6f6" if deploy_status.get("ok") else "#f66"
-        deploy_html = f"""
-          <div style="margin:10px 0;padding:10px;border-radius:10px;background:#0b0b0b;border:1px solid #333;">
-            <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Last deploy checkpoint: <b style="color:{color};">{_escape(str(deploy_status.get("action")))} · {status}</b> · {_escape(str(deploy_status.get("ts")))}</div>
-            <pre style="white-space:pre-wrap;margin:0;color:#ddd;">{_escape(str(deploy_status.get("output") or ""))}</pre>
-          </div>
-        """
+        ok = deploy_status.get("ok")
+        badge = '<span class="text-green-400 font-semibold">OK</span>' if ok else '<span class="text-red-400 font-semibold">FAILED</span>'
+        deploy_html = (
+            f'<div class="bg-[#111] border border-[#222] rounded-xl p-4 mb-3">'
+            f'<div class="flex items-center gap-2 mb-2 text-xs text-gray-500">'
+            f'<span class="text-gray-400">Last deploy:</span>'
+            f'<span class="text-gray-300 font-medium">{_escape(str(deploy_status.get("action")))}</span>'
+            f'<span>·</span>{badge}<span>·</span>'
+            f'<span>{_escape(str(deploy_status.get("ts")))}</span>'
+            f'</div>'
+            f'<pre class="text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] rounded-lg p-3 overflow-x-auto">{_escape(str(deploy_status.get("output") or ""))}</pre>'
+            f'</div>'
+        )
 
     return {
         "safe_logs": safe_logs,
@@ -1083,31 +1092,37 @@ def logs():
         return jsonify(data)
 
     controls = f"""
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <form method="get" style="display:flex;gap:8px;align-items:center;">
-          <label style="color:#aaa;font-size:13px;">Tail</label>
-          <input name="tail" value="{tail_n}" style="width:90px;background:#000;color:#eee;border:1px solid #333;border-radius:8px;padding:6px;" />
-
-          <label style="color:#aaa;font-size:13px;">Filtered</label>
-          <select name="filtered" style="background:#000;color:#eee;border:1px solid #333;border-radius:8px;padding:6px;">
+      <form method="get" class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-gray-500">Lines</label>
+          <input name="tail" value="{tail_n}"
+            class="w-20 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-gray-500">Filter</label>
+          <select name="filtered"
+            class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500">
             <option value="1" {"selected" if show_filtered else ""}>On</option>
             <option value="0" {"selected" if not show_filtered else ""}>Off</option>
           </select>
-
-          <button type="submit"
-            style="background:#222;color:#eee;border:1px solid #333;padding:7px 10px;border-radius:10px;cursor:pointer;">
-            Refresh
-          </button>
-        </form>
-      </div>
+        </div>
+        <button type="submit"
+          class="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 text-sm rounded-lg px-4 py-1.5 hover:bg-[#222] transition-colors">
+          Apply
+        </button>
+      </form>
     """
 
     body = (
-        "<h2 style='margin:0 0 10px 0;'>Logs</h2>"
+        '<div class="space-y-4 max-w-5xl">'
+        + '<div class="flex items-center justify-between flex-wrap gap-3">'
+        + '<h1 class="text-xl font-bold text-white">Logs</h1>'
         + controls
+        + '</div>'
         + f"<div id='lastActionBox'>{data['last_html']}</div>"
         + f"<div id='deployStatusBox'>{data.get('deploy_html','')}</div>"
-        + f"<pre id='liveLogsPre' style='white-space:pre-wrap;background:#000;padding:12px;border-radius:10px;border:1px solid #333;max-width:1200px;'>{data['safe_logs']}</pre>"
+        + f"<pre id='liveLogsPre' class='text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] border border-[#222] rounded-xl p-4 overflow-x-auto max-h-[70vh] overflow-y-auto'>{data['safe_logs']}</pre>"
+        + "</div>"
         + """
         <script>
           (function(){
