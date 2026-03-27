@@ -170,30 +170,46 @@
   const loader  = new THREE.TextureLoader();
   const meshes  = [];
 
-  // Flat tile size matches arc length at equator — same visual size everywhere
+  // Tile size = arc length at equator — consistent across the whole sphere
   const tileSize = RADIUS * patchAng;
+  const SEGMENTS = 16; // subdivisions — more = smoother curve
 
-  pts.forEach((pt, i) => {
+  // Build a tile that starts as a flat plane but has its vertices projected
+  // onto the sphere surface.  UVs stay from the flat plane → no distortion.
+  function makeCurvedTile(pt) {
     const outward = new THREE.Vector3(pt.x, pt.y, pt.z).normalize();
-    const position = outward.clone().multiplyScalar(RADIUS);
-    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+    const quat    = new THREE.Quaternion().setFromUnitVectors(
       new THREE.Vector3(0, 0, 1), outward
     );
+    const center  = outward.clone().multiplyScalar(RADIUS);
 
-    function makeMesh(mat) {
-      const geo  = new THREE.PlaneGeometry(tileSize, tileSize);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.copy(position);
-      mesh.quaternion.copy(quaternion);
+    const geo     = new THREE.PlaneGeometry(tileSize, tileSize, SEGMENTS, SEGMENTS);
+    const posAttr = geo.attributes.position;
+
+    for (let j = 0; j < posAttr.count; j++) {
+      const v = new THREE.Vector3(posAttr.getX(j), posAttr.getY(j), posAttr.getZ(j));
+      v.applyQuaternion(quat); // rotate plane to face outward
+      v.add(center);           // move to sphere surface
+      v.normalize().multiplyScalar(RADIUS); // project vertex onto sphere
+      posAttr.setXYZ(j, v.x, v.y, v.z);
+    }
+    posAttr.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  pts.forEach((pt, i) => {
+    function addMesh(mat) {
+      const mesh = new THREE.Mesh(makeCurvedTile(pt), mat);
       mesh.userData.photo = PHOTOS[i];
       sphereGrp.add(mesh);
       meshes.push(mesh);
     }
 
     loader.load(PHOTOS[i], (tex) => {
-      makeMesh(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+      addMesh(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
     }, undefined, () => {
-      makeMesh(new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide }));
+      addMesh(new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide }));
     });
   });
 
