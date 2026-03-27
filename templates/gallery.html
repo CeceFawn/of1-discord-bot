@@ -152,55 +152,48 @@
   const sphereGrp = new THREE.Group();
   scene.add(sphereGrp);
 
-  // ── Fibonacci sphere (phi/theta angles) ──
-  function fibonacciAngles(n) {
+  // ── Fibonacci sphere (unit vectors) ──
+  function fibonacciSphere(n) {
     const golden = Math.PI * (3 - Math.sqrt(5));
     return Array.from({ length: n }, (_, i) => {
-      const y     = 1 - (i / Math.max(n - 1, 1)) * 2;
-      const theta = Math.acos(Math.max(-1, Math.min(1, y)));   // polar  0…π
-      let   phi   = (golden * i) % (Math.PI * 2);               // azimuth 0…2π
-      if (phi < 0) phi += Math.PI * 2;
-      return { phi, theta };
+      const y   = 1 - (i / Math.max(n - 1, 1)) * 2;
+      const r   = Math.sqrt(1 - y * y);
+      const phi = golden * i;
+      return { x: Math.cos(phi) * r, y, z: Math.sin(phi) * r };
     });
   }
 
-  const pts      = fibonacciAngles(n);
-  // Angular size for each patch — root of solid angle per tile, with slight overlap
+  const pts      = fibonacciSphere(n);
+  // Tile angular size — arc length at equator = RADIUS * patchAng
   const patchAng = Math.sqrt(4 * Math.PI / n) * 1.1;
 
   const loader  = new THREE.TextureLoader();
   const meshes  = [];
 
-  pts.forEach(({ phi, theta }, i) => {
-    // Widen the phi span near poles so arc lengths match in both directions.
-    // phi arc = sin(theta) * phiLen * R  ;  theta arc = thetaLen * R
-    // Setting phiLen = patchAng / sin(theta) equalises them → no distortion.
-    // Cap at 3× patchAng so very polar tiles are at most 3:1 instead of extreme.
-    const sinC    = Math.max(0.33, Math.sin(theta));
-    const phiLen  = Math.min(patchAng / sinC, patchAng * 3);
-    const thetaStart  = Math.max(0.001, theta - patchAng / 2);
-    const thetaLength = Math.min(Math.PI - thetaStart - 0.001, patchAng);
+  // Flat tile size matches arc length at equator — same visual size everywhere
+  const tileSize = RADIUS * patchAng;
 
-    function makePatchGeo() {
-      return new THREE.SphereGeometry(
-        RADIUS, 20, 20,
-        phi - phiLen / 2, phiLen,
-        thetaStart, thetaLength
-      );
+  pts.forEach((pt, i) => {
+    const outward = new THREE.Vector3(pt.x, pt.y, pt.z).normalize();
+    const position = outward.clone().multiplyScalar(RADIUS);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), outward
+    );
+
+    function makeMesh(mat) {
+      const geo  = new THREE.PlaneGeometry(tileSize, tileSize);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(position);
+      mesh.quaternion.copy(quaternion);
+      mesh.userData.photo = PHOTOS[i];
+      sphereGrp.add(mesh);
+      meshes.push(mesh);
     }
 
     loader.load(PHOTOS[i], (tex) => {
-      const mat  = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(makePatchGeo(), mat);
-      mesh.userData.photo = PHOTOS[i];
-      sphereGrp.add(mesh);
-      meshes.push(mesh);
+      makeMesh(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
     }, undefined, () => {
-      const mat  = new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(makePatchGeo(), mat);
-      mesh.userData.photo = PHOTOS[i];
-      sphereGrp.add(mesh);
-      meshes.push(mesh);
+      makeMesh(new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide }));
     });
   });
 
