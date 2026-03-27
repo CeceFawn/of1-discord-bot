@@ -176,12 +176,12 @@
 
   // Build a tile that starts as a flat plane but has its vertices projected
   // onto the sphere surface.  UVs stay from the flat plane → no distortion.
-  function makeCurvedTile(pt) {
+  function makeCurvedTile(pt, depthOffset = 0) {
     const outward = new THREE.Vector3(pt.x, pt.y, pt.z).normalize();
     const quat    = new THREE.Quaternion().setFromUnitVectors(
       new THREE.Vector3(0, 0, 1), outward
     );
-    const center  = outward.clone().multiplyScalar(RADIUS);
+    const center  = outward.clone().multiplyScalar(RADIUS + depthOffset);
 
     const geo     = new THREE.PlaneGeometry(tileSize, tileSize, SEGMENTS, SEGMENTS);
     const posAttr = geo.attributes.position;
@@ -190,7 +190,7 @@
       const v = new THREE.Vector3(posAttr.getX(j), posAttr.getY(j), posAttr.getZ(j));
       v.applyQuaternion(quat); // rotate plane to face outward
       v.add(center);           // move to sphere surface
-      v.normalize().multiplyScalar(RADIUS); // project vertex onto sphere
+      v.normalize().multiplyScalar(RADIUS + depthOffset); // project vertex onto sphere
       posAttr.setXYZ(j, v.x, v.y, v.z);
     }
     posAttr.needsUpdate = true;
@@ -199,8 +199,11 @@
   }
 
   pts.forEach((pt, i) => {
+    // Random depth offset so overlapping tiles don't z-fight
+    const depthOffset = (Math.random() - 0.3) * 18; // roughly -5 to +12 units
+
     function addMesh(mat) {
-      const mesh = new THREE.Mesh(makeCurvedTile(pt), mat);
+      const mesh = new THREE.Mesh(makeCurvedTile(pt, depthOffset), mat);
       mesh.userData.photo = PHOTOS[i];
       sphereGrp.add(mesh);
       meshes.push(mesh);
