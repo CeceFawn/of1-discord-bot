@@ -1206,6 +1206,11 @@ def status():
     hb_txt = "text-green-400" if hb_fresh else "text-red-400"
     hb_age = str(runtime_age) + "s" if runtime_age is not None else "—"
 
+    # unix timestamps for client-side live tickers
+    _rt_dt = _parse_iso_utc(str(runtime.get("ts") or ""))
+    runtime_ts_unix = int(_rt_dt.timestamp()) if _rt_dt else 0
+    dashboard_start_unix = int(DASHBOARD_STARTED_AT)
+
     # race thread card
     if has_current:
         state_color = "text-green-400" if current_state == "active" else "text-yellow-400"
@@ -1306,7 +1311,7 @@ def status():
       <span class="inline-block w-2 h-2 rounded-full {hb_dot}"></span>
       <span class="{hb_txt} font-medium">{hb_label}</span>
       <span class="text-gray-700">·</span>
-      <span class="text-gray-500">{hb_age} &middot; {_escape(runtime_source)}</span>
+      <span class="text-gray-500"><span id="stat-hb-age" data-ts="{runtime_ts_unix}">{hb_age}</span> &middot; {_escape(runtime_source)}</span>
     </div>
   </div>
 
@@ -1324,7 +1329,7 @@ def status():
     </div>
     <div class="bg-[#111] border border-[#222] rounded-xl p-4">
       <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">Uptime</div>
-      <div class="text-3xl font-bold text-white">{proc_uptime_s}<span class="text-lg text-gray-500">s</span></div>
+      <div class="text-3xl font-bold text-white" id="stat-uptime" data-start="{dashboard_start_unix}">—</div>
     </div>
   </div>
 
@@ -1440,6 +1445,29 @@ def status():
               }
             }
             setInterval(tick, 15000);
+          })();
+        </script>
+        <script>
+          (function(){
+            function fmtDuration(secs) {
+              secs = Math.max(0, Math.floor(secs));
+              if (secs < 60)   return secs + 's';
+              if (secs < 3600) return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+              return Math.floor(secs / 3600) + 'h ' + Math.floor((secs % 3600) / 60) + 'm';
+            }
+            function tickLive() {
+              var now = Date.now() / 1000;
+              var upEl = document.getElementById('stat-uptime');
+              if (upEl && upEl.dataset.start) {
+                upEl.textContent = fmtDuration(now - parseFloat(upEl.dataset.start));
+              }
+              var hbEl = document.getElementById('stat-hb-age');
+              if (hbEl && hbEl.dataset.ts && parseFloat(hbEl.dataset.ts) > 0) {
+                hbEl.textContent = fmtDuration(now - parseFloat(hbEl.dataset.ts));
+              }
+            }
+            tickLive();
+            setInterval(tickLive, 1000);
           })();
         </script>
         """
