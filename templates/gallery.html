@@ -234,7 +234,6 @@
     applyRotation();
     renderer.render(scene, camera);
   }
-  animate();
 
   // ── Drag ──
   const container = document.getElementById('canvas-container');
@@ -390,6 +389,9 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && lightbox.classList.contains('active')) closeLightbox();
   });
+
+  // Start render loop after all variables are declared
+  animate();
 
 })();
 </script>
