@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OF1 Gallery</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            f1red: '#e8002d',
+            f1dark: '#0a0a0a',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <style>
+    body { background: #0a0a0a; margin: 0; overflow: hidden; }
+
+    /* ── Sphere ── */
+    #scene {
+      width: 100vw;
+      height: 100vh;
+      perspective: 1000px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      user-select: none;
+    }
+    #scene:active { cursor: grabbing; }
+
+    #sphere {
+      position: relative;
+      width: 0;
+      height: 0;
+      transform-style: preserve-3d;
+      transition: transform 0.05s linear;
+    }
+
+    .panel {
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      transform-origin: center center;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      border: 2px solid rgba(255,255,255,0.1);
+      transition: border-color 0.2s, box-shadow 0.2s;
+      left: -60px;
+      top: -60px;
+    }
+    .panel:hover {
+      border-color: rgba(232,0,45,0.7);
+      box-shadow: 0 0 20px rgba(232,0,45,0.4);
+      z-index: 9999;
+    }
+    .panel img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      pointer-events: none;
+    }
+
+    /* placeholder panel when no photos */
+    .panel-placeholder {
+      background: linear-gradient(135deg, #1a1a1a, #2a2a2a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.15);
+      font-size: 28px;
+    }
+
+    /* ── Lightbox ── */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0,0,0,0.92);
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    #lightbox.active { display: flex; }
+    #lb-img {
+      max-width: 90vw;
+      max-height: 90vh;
+      object-fit: contain;
+      border-radius: 6px;
+      cursor: zoom-in;
+      transform-origin: center center;
+      transition: transform 0.2s ease;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    #lb-close {
+      position: fixed;
+      top: 20px;
+      right: 24px;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.08);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 22px;
+      cursor: pointer;
+      z-index: 1001;
+      transition: background 0.2s;
+    }
+    #lb-close:hover { background: rgba(232,0,45,0.5); }
+
+    /* ── UI overlay ── */
+    #ui {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.3);
+      font-size: 12px;
+      font-family: Inter, sans-serif;
+      letter-spacing: 0.05em;
+      pointer-events: none;
+      text-align: center;
+    }
+    #title-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 20px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+    #title-bar a {
+      pointer-events: all;
+      color: rgba(255,255,255,0.4);
+      font-family: Inter, sans-serif;
+      font-size: 13px;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    #title-bar a:hover { color: #e8002d; }
+    #title-bar span {
+      color: rgba(255,255,255,0.6);
+      font-family: Inter, sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Empty state ── */
+    #empty-state {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.3);
+      font-family: Inter, sans-serif;
+      text-align: center;
+      gap: 12px;
+    }
+    #empty-state h2 { font-size: 20px; font-weight: 600; color: rgba(255,255,255,0.5); margin: 0; }
+    #empty-state p  { font-size: 13px; margin: 0; }
+  </style>
+</head>
+<body>
+
+<!-- Title bar -->
+<div id="title-bar">
+  <a href="/">← Back to OF1</a>
+  <span>OF1 GALLERY</span>
+  <span style="width:80px"></span>
+</div>
+
+{% set photos = photos %}
+
+{% if photos %}
+<!-- Sphere scene -->
+<div id="scene">
+  <div id="sphere"></div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <div id="lb-close" title="Close">✕</div>
+  <img id="lb-img" src="" alt="Gallery photo" />
+</div>
+
+<!-- Hint -->
+<div id="ui">Drag to spin &nbsp;·&nbsp; Click a photo to zoom</div>
+
+<script>
+(function() {
+  const PHOTOS = {{ photos | tojson }};
+  const RADIUS = Math.min(window.innerWidth, window.innerHeight) * 0.28;
+
+  // ── Fibonacci sphere distribution ──
+  function fibonacciSphere(n) {
+    const pts = [];
+    const golden = Math.PI * (3 - Math.sqrt(5)); // golden angle
+    for (let i = 0; i < n; i++) {
+      const y = 1 - (i / (n - 1)) * 2;          // y in [-1, 1]
+      const r = Math.sqrt(1 - y * y);
+      const theta = golden * i;
+      pts.push({ x: Math.cos(theta) * r, y, z: Math.sin(theta) * r });
+    }
+    return pts;
+  }
+
+  const n = PHOTOS.length;
+  const pts = fibonacciSphere(n);
+  const sphere = document.getElementById('sphere');
+
+  pts.forEach((pt, i) => {
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+
+    const img = document.createElement('img');
+    img.src = PHOTOS[i];
+    img.alt = '';
+    img.draggable = false;
+    panel.appendChild(img);
+
+    // 3D position
+    const x = pt.x * RADIUS;
+    const y = pt.y * RADIUS;
+    const z = pt.z * RADIUS;
+
+    // We position each panel at its 3D point and orient it to face outward
+    // using rotateY and rotateX angles derived from the sphere coordinates
+    const rotY = -Math.atan2(pt.x, pt.z) * (180 / Math.PI);
+    const rotX =  Math.asin(pt.y)         * (180 / Math.PI);
+
+    panel.style.transform = `translateX(${x}px) translateY(${y}px) translateZ(${z}px) rotateY(${rotY}deg) rotateX(${rotX}deg)`;
+
+    // Click handler — open lightbox for THIS panel
+    panel.addEventListener('click', () => openLightbox(PHOTOS[i]));
+
+    sphere.appendChild(panel);
+  });
+
+  // ── Rotation state ──
+  let rotX = -15, rotY = 0;
+  let velX = 0, velY = 0.2; // gentle auto-spin
+  let dragging = false;
+  let lastX = 0, lastY = 0;
+  let lastMoveX = 0, lastMoveY = 0;
+  let autoSpin = true;
+  let autoSpinTimeout = null;
+
+  function applyRotation() {
+    sphere.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+  }
+
+  // ── Animation loop ──
+  function tick() {
+    if (!dragging) {
+      if (autoSpin) {
+        rotY += velY;
+        rotX += velX;
+        // Clamp pitch gently
+        rotX = Math.max(-45, Math.min(45, rotX));
+      } else {
+        // Coast with friction after drag
+        velX *= 0.93;
+        velY *= 0.93;
+        rotX += velX;
+        rotY += velY;
+        if (Math.abs(velX) < 0.01 && Math.abs(velY) < 0.01) {
+          autoSpin = true;
+          velX = 0;
+          velY = 0.2;
+        }
+      }
+    }
+    applyRotation();
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(tick);
+
+  // ── Drag controls ──
+  const scene = document.getElementById('scene');
+
+  function startDrag(x, y) {
+    dragging = true;
+    autoSpin = false;
+    clearTimeout(autoSpinTimeout);
+    lastX = x; lastY = y;
+    lastMoveX = 0; lastMoveY = 0;
+  }
+  function moveDrag(x, y) {
+    if (!dragging) return;
+    const dx = x - lastX;
+    const dy = y - lastY;
+    rotY += dx * 0.35;
+    rotX -= dy * 0.35;
+    rotX = Math.max(-75, Math.min(75, rotX));
+    lastMoveX = dx; lastMoveY = dy;
+    lastX = x; lastY = y;
+  }
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    velY = lastMoveX * 0.35;
+    velX = -lastMoveY * 0.35;
+    // Resume auto-spin after 3s of inactivity
+    autoSpinTimeout = setTimeout(() => { autoSpin = true; velX = 0; velY = 0.2; }, 3000);
+  }
+
+  // Mouse
+  scene.addEventListener('mousedown', e => { if (e.target !== document.getElementById('lb-img')) startDrag(e.clientX, e.clientY); });
+  document.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+  document.addEventListener('mouseup', endDrag);
+
+  // Touch
+  scene.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: true });
+  scene.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+    e.preventDefault();
+  }, { passive: false });
+  scene.addEventListener('touchend', endDrag);
+
+  // ── Lightbox ──
+  const lightbox = document.getElementById('lightbox');
+  const lbImg    = document.getElementById('lb-img');
+  const lbClose  = document.getElementById('lb-close');
+
+  let lbScale = 1, lbTx = 0, lbTy = 0;
+  let lbDragging = false, lbDidDrag = false, lbDragX = 0, lbDragY = 0;
+  let lbPinching = false, lbPinchDist = 0, lbPinchScale = 1;
+
+  function lbApply() {
+    lbImg.style.transform = `translate(${lbTx}px, ${lbTy}px) scale(${lbScale})`;
+    lbImg.style.cursor = lbScale > 1 ? 'grab' : 'zoom-in';
+  }
+  function lbReset() {
+    lbScale = 1; lbTx = 0; lbTy = 0; lbApply();
+  }
+
+  function openLightbox(src) {
+    lbImg.src = src;
+    lbReset();
+    lightbox.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeLightbox() {
+    lightbox.classList.remove('active');
+    lbImg.src = '';
+    document.body.style.overflow = '';
+  }
+
+  lbClose.addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', e => {
+    if (e.target === lightbox) closeLightbox();
+  });
+
+  // Desktop pan + click-to-zoom
+  lbImg.addEventListener('mousedown', e => {
+    lbDidDrag = false;
+    lbDragX = e.clientX - lbTx;
+    lbDragY = e.clientY - lbTy;
+    if (lbScale > 1) { lbDragging = true; lbImg.style.cursor = 'grabbing'; }
+    e.stopPropagation();
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!lbDragging) return;
+    lbTx = e.clientX - lbDragX;
+    lbTy = e.clientY - lbDragY;
+    lbDidDrag = true;
+    lbApply();
+  });
+  document.addEventListener('mouseup', e => {
+    if (lbDragging) {
+      lbDragging = false;
+      lbImg.style.cursor = lbScale > 1 ? 'grab' : 'zoom-in';
+    }
+    if (!lbDidDrag && e.target === lbImg) {
+      if (lbScale <= 1) { lbScale = 2.5; lbApply(); }
+      else { lbReset(); }
+    }
+  });
+
+  // Touch pinch-to-zoom + pan
+  lbImg.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      lbPinching = true;
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      lbPinchDist = Math.hypot(dx, dy);
+      lbPinchScale = lbScale;
+    } else if (e.touches.length === 1 && lbScale > 1) {
+      lbDragging = true;
+      lbDragX = e.touches[0].clientX - lbTx;
+      lbDragY = e.touches[0].clientY - lbTy;
+    }
+    e.preventDefault();
+  }, { passive: false });
+  lbImg.addEventListener('touchmove', e => {
+    if (lbPinching && e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      lbScale = Math.max(1, Math.min(5, lbPinchScale * (dist / lbPinchDist)));
+      lbApply();
+    } else if (lbDragging && e.touches.length === 1) {
+      lbTx = e.touches[0].clientX - lbDragX;
+      lbTy = e.touches[0].clientY - lbDragY;
+      lbApply();
+    }
+    e.preventDefault();
+  }, { passive: false });
+  lbImg.addEventListener('touchend', e => {
+    if (e.touches.length < 2) lbPinching = false;
+    if (e.touches.length === 0) lbDragging = false;
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && lightbox.classList.contains('active')) closeLightbox();
+  });
+
+})();
+</script>
+
+{% else %}
+<!-- Empty state -->
+<div id="empty-state">
+  <h2>No photos yet</h2>
+  <p>Drop images into <code>static/gallery/</code> to populate the sphere.</p>
+</div>
+{% endif %}
+
+</body>
+</html>

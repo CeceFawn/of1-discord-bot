@@ -474,6 +474,18 @@ def index():
     )
 
 
+@app.route("/gallery")
+def gallery():
+    gallery_dir = os.path.join(os.path.dirname(__file__), "static", "gallery")
+    photos = []
+    if os.path.isdir(gallery_dir):
+        exts = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        for fname in sorted(os.listdir(gallery_dir)):
+            if os.path.splitext(fname)[1].lower() in exts:
+                photos.append(f"/static/gallery/{fname}")
+    return render_template("gallery.html", photos=photos)
+
+
 @app.route("/api/next-race")
 def api_next_race():
     return jsonify(get_next_race() or {})
