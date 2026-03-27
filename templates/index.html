@@ -172,7 +172,7 @@
       <div id="hero-badge" class="inline-block bg-f1red/10 border border-f1red/30 text-f1red text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
         Orlando's F1 Community
       </div>
-      <h1 class="select-none text-6xl sm:text-8xl font-black tracking-tighter mb-4">
+      <h1 class="text-6xl sm:text-8xl font-black tracking-tighter mb-4">
         <span id="hero-logo" class="text-f1red">OF1</span>
       </h1>
       <p class="text-white/50 text-lg sm:text-xl max-w-xl mx-auto">
@@ -272,7 +272,7 @@
 
         <!-- Instagram -->
         <a href="https://www.instagram.com/orlandof1fans" target="_blank" rel="noopener"
-           class="party-social flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+           class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
             <circle cx="12" cy="12" r="4"/>
@@ -283,7 +283,7 @@
 
         <!-- Facebook -->
         <a href="https://www.facebook.com/orlandoF1fans" target="_blank" rel="noopener"
-           class="party-social flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+           class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
             <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>
           </svg>
@@ -292,7 +292,7 @@
 
         <!-- Linktree -->
         <a href="https://linktr.ee/orlandof1" target="_blank" rel="noopener"
-           class="party-social flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+           class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v13M8 7l4-4 4 4M6 11l6-3 6 3M9 17h6M10 21h4"/>
           </svg>
@@ -367,26 +367,34 @@
         applyTransform();
       }, { passive: false });
 
-      // --- Desktop: drag to pan ---
-      let dragging = false, dragStartX, dragStartY;
+      // --- Desktop: click to toggle zoom, drag to pan ---
+      let dragging = false, didDrag = false, dragStartX, dragStartY;
       lbImg.addEventListener('mousedown', function(e) {
-        if (scale <= 1) return;
-        dragging = true;
+        didDrag = false;
         dragStartX = e.clientX - tx;
         dragStartY = e.clientY - ty;
-        lbImg.style.cursor = 'grabbing';
+        if (scale > 1) {
+          dragging = true;
+          lbImg.style.cursor = 'grabbing';
+        }
         e.preventDefault();
       });
       document.addEventListener('mousemove', function(e) {
         if (!dragging) return;
+        didDrag = true;
         tx = e.clientX - dragStartX;
         ty = e.clientY - dragStartY;
         lbImg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
       });
-      document.addEventListener('mouseup', function() {
-        if (!dragging) return;
-        dragging = false;
-        lbImg.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+      document.addEventListener('mouseup', function(e) {
+        if (dragging) {
+          dragging = false;
+          lbImg.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+        }
+        if (!didDrag && e.target === lbImg) {
+          if (scale <= 1) { scale = 2; applyTransform(); }
+          else { resetTransform(); }
+        }
       });
 
       // --- Mobile: pinch-to-zoom + single-finger pan ---
@@ -447,9 +455,9 @@
         if (e.key === 'Escape') closeLightbox();
       });
 
-      // Click backdrop to close — only when not zoomed in
+      // Click backdrop to close
       lb.addEventListener('click', function(e) {
-        if (e.target === lb && scale === 1) closeLightbox();
+        if (e.target === lb) closeLightbox();
       });
 
       // Wire up all lightbox images
