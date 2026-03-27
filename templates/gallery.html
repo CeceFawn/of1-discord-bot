@@ -198,6 +198,22 @@
     return geo;
   }
 
+  pts.forEach((pt, i) => {
+   
+
+    function addMesh(mat) {
+      const mesh = new THREE.Mesh(makeCurvedTile(pt, depthOffset), mat);
+      mesh.userData.photo = PHOTOS[i];
+      sphereGrp.add(mesh);
+      meshes.push(mesh);
+    }
+
+    loader.load(PHOTOS[i], (tex) => {
+      addMesh(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+    }, undefined, () => {
+      addMesh(new THREE.MeshBasicMaterial({ color: 0x330008, side: THREE.DoubleSide }));
+    });
+  });
 
   // ── Rotation state (quaternion trackball — true free rotation) ──
   const currentQuat   = new THREE.Quaternion();
