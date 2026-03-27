@@ -1168,10 +1168,25 @@ def status():
     runtime_source = str(data.get("runtime_source") or "none")
     runtime_read_error = str(data.get("runtime_read_error") or "")
 
-    def _badge(ok: bool, txt_ok: str = "Running", txt_no: str = "Stopped") -> str:
-        color = "#6f6" if ok else "#f66"
-        label = txt_ok if ok else txt_no
-        return f"<span style='display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid {color};color:{color};font-size:12px;'>{label}</span>"
+    def _dot_badge(ok: bool, label_ok: str = "Running", label_no: str = "Stopped") -> str:
+        dot = "bg-green-500" if ok else "bg-red-500"
+        txt = "text-green-400" if ok else "text-red-400"
+        label = label_ok if ok else label_no
+        return (
+            f'<span class="inline-flex items-center gap-1.5">'
+            f'<span class="inline-block w-1.5 h-1.5 rounded-full {dot}"></span>'
+            f'<span class="text-xs {txt}">{label}</span>'
+            f'</span>'
+        )
+
+    def _kv(label: str, value: str, mono: bool = False) -> str:
+        val_cls = "font-mono text-xs" if mono else "text-sm"
+        return (
+            f'<div class="flex items-start justify-between gap-4 py-1.5 border-b border-[#1a1a1a] last:border-0">'
+            f'<span class="text-gray-500 text-sm shrink-0">{label}</span>'
+            f'<span class="text-gray-300 {val_cls} text-right truncate max-w-[240px]">{value}</span>'
+            f'</div>'
+        )
 
     current_round_record = data.get("current_round_record") if isinstance(data.get("current_round_record"), dict) else None
     current_round_key = str(data.get("current_round_key") or "")
@@ -1184,143 +1199,214 @@ def status():
     recent_alerts = data.get("recent_alerts") if isinstance(data.get("recent_alerts"), list) else []
     log_alerts = data.get("recent_log_alerts") if isinstance(data.get("recent_log_alerts"), list) else []
 
-    active_line = "No active race thread."
+    # heartbeat indicator
+    hb_fresh = not runtime_stale
+    hb_dot = "bg-green-500 shadow-[0_0_6px_#22c55e]" if hb_fresh else "bg-red-500"
+    hb_label = "Live" if hb_fresh else "Stale"
+    hb_txt = "text-green-400" if hb_fresh else "text-red-400"
+    hb_age = str(runtime_age) + "s" if runtime_age is not None else "—"
+
+    # race thread card
+    if has_current:
+        state_color = "text-green-400" if current_state == "active" else "text-yellow-400"
+        thread_card_rows = (
+            _kv("Round", f"{_escape(current_round_name)} <span class='text-gray-600'>({_escape(current_round_key or '-')})</span>")
+            + _kv("Status", f'<span class="{state_color}">{_escape(current_state.title())}</span>')
+            + _kv("Thread", _escape(str(current_round_record.get("thread_name") or current_round_record.get("thread_id") or "-")))
+            + _kv("Created", _escape(_fmt_ts_utc(current_round_record.get("created_at"))) + f' <span class="text-gray-600">({_escape(_fmt_relative(current_round_record.get("created_at")))})</span>')
+            + _kv("Source", _escape(str(current_round_record.get("source") or "-")))
+        )
+        thread_card_title = "Current Round Thread"
+    else:
+        thread_card_rows = (
+            _kv("Round", f"{_escape(current_round_name)} <span class='text-gray-600'>({_escape(current_round_key or '-')})</span>")
+            + _kv("Status", '<span class="text-yellow-400">Queued</span>')
+            + _kv("Auto-create window", _escape(queued_eta))
+        )
+        thread_card_title = "Next Round"
+
+    # active / past thread summary
     if active_threads:
         t = active_threads[0]
         active_line = (
-            f"#{_escape(str(t.get('thread_name') or t.get('thread_id') or 'thread'))} "
-            f"(round {_escape(str(t.get('round_key') or '-'))}, created {_escape(_fmt_ts_utc(t.get('created_at')))})."
+            f"#{_escape(str(t.get('thread_name') or t.get('thread_id') or 'thread'))} &mdash; "
+            f"round {_escape(str(t.get('round_key') or '-'))}, "
+            f"created {_escape(_fmt_ts_utc(t.get('created_at')))}"
         )
+    else:
+        active_line = "<span class='text-gray-600'>None</span>"
 
-    prior_line = "No prior race thread marked as past yet."
     if past_threads:
         t = past_threads[0]
         prior_line = (
-            f"#{_escape(str(t.get('thread_name') or t.get('thread_id') or 'thread'))} "
-            f"(round {_escape(str(t.get('round_key') or '-'))}, past since {_escape(_fmt_ts_utc(t.get('past_at') or t.get('created_at')))})."
+            f"#{_escape(str(t.get('thread_name') or t.get('thread_id') or 'thread'))} &mdash; "
+            f"round {_escape(str(t.get('round_key') or '-'))}, "
+            f"past since {_escape(_fmt_ts_utc(t.get('past_at') or t.get('created_at')))}"
         )
-
-    if has_current:
-        current_card = f"""
-          <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-            <div style="font-weight:700;">Current Round Thread</div>
-            <div style="margin-top:6px;"><b>Round:</b> {_escape(current_round_name)} ({_escape(current_round_key or '-')})</div>
-            <div><b>Status:</b> {_escape(current_state.title())}</div>
-            <div><b>Thread:</b> {_escape(str(current_round_record.get("thread_name") or current_round_record.get("thread_id") or "-"))}</div>
-            <div><b>Created:</b> {_escape(_fmt_ts_utc(current_round_record.get("created_at")))} ({_escape(_fmt_relative(current_round_record.get("created_at")))})</div>
-            <div><b>Source:</b> {_escape(str(current_round_record.get("source") or "-"))}</div>
-          </div>
-        """
     else:
-        current_card = f"""
-          <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-            <div style="font-weight:700;">Next Round Queue</div>
-            <div style="margin-top:6px;"><b>Round:</b> {_escape(current_round_name)} ({_escape(current_round_key or '-')})</div>
-            <div><b>Status:</b> Queued (not created yet)</div>
-            <div><b>Expected auto-create window starts:</b> {_escape(queued_eta)}</div>
-          </div>
-        """
+        prior_line = "<span class='text-gray-600'>None</span>"
 
-    alert_items_html = ""
+    # alerts
     if recent_alerts:
-        rows = []
+        alert_rows = ""
         for a in reversed(recent_alerts[-10:]):
             ts = _fmt_ts_utc(str(a.get("ts") or ""))
-            kind = str(a.get("kind") or "alert")
-            msg = str(a.get("message") or "")
-            rows.append(f"<li><b>{_escape(kind)}</b> @ {_escape(ts)} - {_escape(msg)}</li>")
-        alert_items_html = "<ul>" + "".join(rows) + "</ul>"
+            kind = _escape(str(a.get("kind") or "alert"))
+            msg = _escape(str(a.get("message") or ""))
+            alert_rows += (
+                f'<div class="py-2 border-b border-[#1a1a1a] last:border-0">'
+                f'<div class="flex items-center gap-2">'
+                f'<span class="text-xs font-medium text-yellow-400">{kind}</span>'
+                f'<span class="text-xs text-gray-600">{_escape(ts)}</span>'
+                f'</div>'
+                f'<div class="text-sm text-gray-300 mt-0.5">{msg}</div>'
+                f'</div>'
+            )
+        alert_items_html = alert_rows
     else:
-        alert_items_html = "<div style='color:#aaa;'>No recorded state alerts yet.</div>"
+        alert_items_html = "<div class='text-sm text-gray-600 py-2'>No recorded state alerts yet.</div>"
 
-    log_alerts_html = ""
     if log_alerts:
-        log_alerts_html = "<pre style='white-space:pre-wrap;background:#000;padding:10px;border-radius:8px;border:1px solid #333;'>" + _escape("\n".join(log_alerts[-10:])) + "</pre>"
+        log_alerts_html = (
+            "<pre class='text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] rounded-lg p-3 mt-1 overflow-x-auto'>"
+            + _escape("\n".join(log_alerts[-10:]))
+            + "</pre>"
+        )
     else:
-        log_alerts_html = "<div style='color:#aaa;'>No recent error-like log lines detected.</div>"
+        log_alerts_html = "<div class='text-sm text-gray-600 py-2'>No recent error-like log lines.</div>"
+
+    # loop health modules
+    modules = [
+        ("Race Supervisor",   bool(loops.get("race_supervisor"))),
+        ("F1 Reminders",      bool(loops.get("f1_reminders"))),
+        ("Standings",         bool(loops.get("standings"))),
+        ("XP Flush",          bool(loops.get("xp_flush"))),
+        ("Role Recovery",     bool(loops.get("periodic_role_recovery"))),
+    ]
+    module_grid = ""
+    for name, ok in modules:
+        bg = "bg-[#0f1f0f]" if ok else "bg-[#1f0f0f]"
+        border = "border-green-900/40" if ok else "border-red-900/40"
+        module_grid += (
+            f'<div class="{bg} border {border} rounded-xl px-4 py-3 flex items-center justify-between">'
+            f'<span class="text-sm text-gray-300">{name}</span>'
+            f'{_dot_badge(ok)}'
+            f'</div>'
+        )
+
+    race_live = runtime.get("race_live") or {}
 
     body = f"""
-      <h2 style="margin:0 0 10px 0;">Status</h2>
-      <div style="margin-bottom:10px;">
-        <b>Bot heartbeat:</b> {'<span style="color:#f66;">STALE</span>' if runtime_stale else '<span style="color:#6f6;">FRESH</span>'}
-        ({_escape(str(runtime_age if runtime_age is not None else '-'))}s)
-        <span style="color:#aaa;">from {_escape(runtime_source)}</span>
+<div class="space-y-6 max-w-5xl">
+
+  <!-- Page header + heartbeat -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <h1 class="text-xl font-bold text-white">Status</h1>
+    <div class="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-[#111] border border-[#222] text-sm">
+      <span class="inline-block w-2 h-2 rounded-full {hb_dot}"></span>
+      <span class="{hb_txt} font-medium">{hb_label}</span>
+      <span class="text-gray-700">·</span>
+      <span class="text-gray-500">{hb_age} &middot; {_escape(runtime_source)}</span>
+    </div>
+  </div>
+
+  {"<div class='bg-yellow-950/40 border border-yellow-800/40 text-yellow-300 text-sm rounded-xl px-4 py-3'><b>Runtime read warning:</b> " + _escape(runtime_read_error) + "</div>" if runtime_read_error else ""}
+
+  <!-- Metric cards -->
+  <div class="grid grid-cols-3 gap-3">
+    <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+      <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">CPU</div>
+      <div class="text-3xl font-bold text-white">{cpu}<span class="text-lg text-gray-500">%</span></div>
+    </div>
+    <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+      <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">RAM</div>
+      <div class="text-3xl font-bold text-white">{ram}<span class="text-lg text-gray-500">%</span></div>
+    </div>
+    <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+      <div class="text-xs text-gray-500 mb-1 uppercase tracking-wider">Uptime</div>
+      <div class="text-3xl font-bold text-white">{proc_uptime_s}<span class="text-lg text-gray-500">s</span></div>
+    </div>
+  </div>
+
+  <!-- Host + Service info -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+      <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Host</div>
+      {_kv("Guilds", _escape(str(runtime.get("guild_count", "—"))))}
+      {_kv("Snapshot", _escape(_fmt_ts_utc(str(runtime.get("ts") or ""))))}
+      {_kv("Log path", _escape(LOG_PATH), mono=True)}
+    </div>
+    <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+      <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Services</div>
+      {_kv("Bot", _escape(BOT_SYSTEMD_SERVICE), mono=True)}
+      {_kv("Dashboard", _escape(DASHBOARD_SYSTEMD_SERVICE), mono=True)}
+      {_kv("Repo", _escape(BOT_REPO_DIR), mono=True)}
+    </div>
+  </div>
+
+  <!-- Race Thread Lifecycle -->
+  <div>
+    <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Race Thread Lifecycle</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+        <div class="text-sm font-semibold text-gray-300 mb-3">{thread_card_title}</div>
+        {thread_card_rows}
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:12px;">
-        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-          <div style="font-weight:700;">Host</div>
-          <div style="margin-top:6px;"><b>CPU:</b> {cpu}%</div>
-          <div><b>RAM:</b> {ram}%</div>
-          <div><b>Dashboard uptime:</b> {proc_uptime_s}s</div>
-          <div><b>Log path:</b> {_escape(LOG_PATH)}</div>
+      <div class="bg-[#111] border border-[#222] rounded-xl p-4 space-y-3">
+        <div>
+          <div class="text-xs text-gray-500 mb-1">Active thread</div>
+          <div class="text-sm text-gray-300">{active_line}</div>
         </div>
-        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-          <div style="font-weight:700;">Service</div>
-          <div style="margin-top:6px;"><b>Bot service:</b> {_escape(BOT_SYSTEMD_SERVICE)}</div>
-          <div><b>Dashboard service:</b> {_escape(DASHBOARD_SYSTEMD_SERVICE)}</div>
-          <div><b>Repo dir:</b> {_escape(BOT_REPO_DIR)}</div>
-          <div><b>Runtime DB path:</b> {_escape(RUNTIME_DB_PATH)}</div>
-          <div><b>Runtime file path:</b> {_escape(RUNTIME_STATUS_PATH)}</div>
-          <div><b>Bot connected guilds:</b> {_escape(str(runtime.get("guild_count", "-")))}</div>
-          <div><b>Snapshot time:</b> {_escape(_fmt_ts_utc(str(runtime.get("ts") or "")))}</div>
+        <div class="border-t border-[#1a1a1a] pt-3">
+          <div class="text-xs text-gray-500 mb-1">Prior thread</div>
+          <div class="text-sm text-gray-300">{prior_line}</div>
         </div>
-      </div>
-      {"<div style='color:#f99;margin-bottom:10px;'><b>Runtime read warning:</b> " + _escape(runtime_read_error) + "</div>" if runtime_read_error else ""}
-
-      <h3 style="margin:14px 0 8px 0;">Race Thread Lifecycle</h3>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-bottom:12px;">
-        {current_card}
-        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-          <div style="font-weight:700;">Active Race Thread</div>
-          <div style="margin-top:6px;">{active_line}</div>
-          <div style="margin-top:8px;font-weight:700;">Prior Race Weekend</div>
-          <div style="margin-top:6px;">{prior_line}</div>
-        </div>
-      </div>
-
-      <h3 style="margin:14px 0 8px 0;">Live Module Health</h3>
-      <ul>
-        <li><b>Race supervisor:</b> {_badge(bool(loops.get("race_supervisor")))} </li>
-        <li><b>F1 reminders loop:</b> {_badge(bool(loops.get("f1_reminders")))} </li>
-        <li><b>Standings loop:</b> {_badge(bool(loops.get("standings")))} </li>
-        <li><b>XP flush loop:</b> {_badge(bool(loops.get("xp_flush")))} </li>
-        <li><b>Role recovery loop:</b> {_badge(bool(loops.get("periodic_role_recovery")))} </li>
-      </ul>
-      <ul>
-        <li><b>Loop heartbeat timestamps:</b> {_escape(str(hb))}</li>
-        <li><b>Loop error counters:</b> {_escape(str(errs))}</li>
-      </ul>
-      <ul>
-        <li><b>Active race-live guild IDs:</b> {_escape(str((runtime.get("race_live") or {}).get("running_guild_ids", [])))}</li>
-        <li><b>Tracked race round keys:</b> {_escape(str((runtime.get("race_live") or {}).get("tracked_round_keys", {})))}</li>
-        <li><b>Live session kinds:</b> {_escape(str((runtime.get("race_live") or {}).get("session_kinds", {})))}</li>
-        <li><b>Last live event timestamps:</b> {_escape(str((runtime.get("race_live") or {}).get("last_event_ts", {})))}</li>
-        <li><b>Live spoiler delay:</b> {_escape(str((runtime.get("race_live") or {}).get("delay_seconds", 0)))}s</li>
-        <li><b>Live poll interval:</b> {_escape(str((runtime.get("race_live") or {}).get("poll_seconds", 3)))}s</li>
-        <li><b>OpenF1 pre-weekend buffer:</b> {_escape(str(openf1_window.get("pre_buffer_hours", 24)))}h</li>
-        <li><b>OpenF1 post-weekend buffer (auto-kill):</b> {_escape(str(openf1_window.get("post_buffer_hours", 12)))}h</li>
-      </ul>
-
-      <h3 style="margin:14px 0 8px 0;">Standings Health</h3>
-      <ul>
-        <li><b>Channel ID configured:</b> {_escape(str(standings.get("channel_id", 0)))}</li>
-        <li><b>Driver message ID:</b> {_escape(str(standings.get("driver_message_id", 0)))}</li>
-        <li><b>Constructor message ID:</b> {_escape(str(standings.get("constructor_message_id", 0)))}</li>
-        <li><b>Refresh every:</b> {_escape(str(standings.get("refresh_minutes", 5)))} minute(s)</li>
-      </ul>
-
-      <h3 style="margin:14px 0 8px 0;">Alerts</h3>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:10px;">
-        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-          <div style="font-weight:700;margin-bottom:6px;">Command/State Alerts</div>
-          {alert_items_html}
-        </div>
-        <div style="padding:10px;border:1px solid #333;border-radius:10px;background:#141414;">
-          <div style="font-weight:700;margin-bottom:6px;">Recent Error-like Logs</div>
-          {log_alerts_html}
+        <div class="border-t border-[#1a1a1a] pt-3">
+          <div class="text-xs text-gray-500 mb-1">Standings</div>
+          <div class="text-sm text-gray-300">
+            Refresh every {_escape(str(standings.get("refresh_minutes", 5)))}m &middot;
+            Channel {_escape(str(standings.get("channel_id", "—")))}
+          </div>
         </div>
       </div>
+    </div>
+  </div>
 
+  <!-- Module Health -->
+  <div>
+    <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Module Health</div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {module_grid}
+    </div>
+  </div>
+
+  <!-- Live Race Details -->
+  <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+    <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Live Race Config</div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+      {_kv("Spoiler delay", _escape(str(race_live.get("delay_seconds", 0))) + "s")}
+      {_kv("Poll interval", _escape(str(race_live.get("poll_seconds", 3))) + "s")}
+      {_kv("Pre-weekend buffer", _escape(str(openf1_window.get("pre_buffer_hours", 24))) + "h")}
+      {_kv("Post-weekend buffer", _escape(str(openf1_window.get("post_buffer_hours", 12))) + "h")}
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  <div>
+    <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Alerts</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+        <div class="text-sm font-semibold text-gray-300 mb-2">State Alerts</div>
+        {alert_items_html}
+      </div>
+      <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+        <div class="text-sm font-semibold text-gray-300 mb-2">Recent Errors in Logs</div>
+        {log_alerts_html}
+      </div>
+    </div>
+  </div>
+
+</div>
     """
     if request.args.get("ajax") == "1":
         return jsonify({"status_html": body})
