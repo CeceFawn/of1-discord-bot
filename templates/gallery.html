@@ -200,7 +200,7 @@
 
   pts.forEach((pt, i) => {
     // Random depth offset so overlapping tiles don't z-fight
-    const depthOffset = (Math.random() - 0.5) * 2; // roughly -5 to +12 units
+    const depthOffset = (Math.random() - 0.1) * 2; // roughly -5 to +12 units
 
     function addMesh(mat) {
       const mesh = new THREE.Mesh(makeCurvedTile(pt, depthOffset), mat);
