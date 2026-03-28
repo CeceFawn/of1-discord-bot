@@ -2236,9 +2236,16 @@ async def cardbgs(ctx):
     await ctx.send("🎨 **Available rank card backgrounds:**\n" + "\n".join(f"• `{k}`" for k in available))
 
 
+_xplb_invocation_count = 0
+
 @bot.command(name="xpleaderboard", aliases=["xptop"])
 async def xpleaderboard(ctx, limit: int = 10):
     """Top XP users in this server."""
+    global _xplb_invocation_count
+    _xplb_invocation_count += 1
+    invoc = _xplb_invocation_count
+    logging.info(f"[XP] xpleaderboard invoked (#{invoc}) by {ctx.author} in {ctx.channel}")
+
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
     limit = max(3, min(20, int(limit)))
@@ -2256,6 +2263,35 @@ async def xpleaderboard(ctx, limit: int = 10):
         lines.append(f"{i:>2}. {name} — **L{real_lvl}** ({xp} XP)")
 
     await ctx.send("\U0001F3C6 **XP Leaderboard**\n" + "\n".join(lines))
+
+
+@bot.command(name="xpdebug")
+@commands.has_permissions(administrator=True)
+async def xpdebug(ctx):
+    """Admin: trace XP state and leaderboard invocation info."""
+    if ctx.guild is None:
+        return await ctx.send("❌ Must be used in a server.")
+
+    gid = ctx.guild.id
+    uid = ctx.author.id
+    rec = get_user_record(XP_STATE, gid, uid)
+    total_xp   = int(rec.get("xp", 0) or 0)
+    stored_lvl = int(rec.get("level", 0) or 0)
+    real_lvl   = xp_level_from_total(total_xp)
+    cd         = xp_cooldown_seconds()
+    on_cd      = is_on_cooldown(XP_STATE, gid, uid, cd)
+    guild_data = (XP_STATE.get("guilds") or {}).get(str(gid), {})
+    user_count = len(guild_data.get("users") or {})
+
+    lines = [
+        f"🔧 **XP Debug**",
+        f"• Leaderboard invocations this session: **{_xplb_invocation_count}**",
+        f"• Your XP: **{total_xp}** | stored level: **L{stored_lvl}** | computed level: **L{real_lvl}**",
+        f"• Cooldown: **{cd}s** | you are {'✅ on cooldown' if on_cd else '⚠️ NOT on cooldown (message will award XP)'}",
+        f"• Users with XP data in this guild: **{user_count}**",
+        f"• XP_DIRTY flag: **{XP_DIRTY}**",
+    ]
+    await ctx.send("\n".join(lines))
 
 @bot.hybrid_command(name="xpset")
 @commands.has_permissions(administrator=True)
