@@ -1923,7 +1923,7 @@ def wp_save_venues():
 
 _DISCORD_BOT_TOKEN      = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
 _DISCORD_GUILD_ID        = (os.getenv("DISCORD_GUILD_ID") or "").strip()
-_WATCH_PARTY_VOICE_CH_ID = (os.getenv("WATCH_PARTY_VOICE_CHANNEL_ID") or "").strip()
+_WATCH_PARTY_VOICE_CH_ID = (os.getenv("WATCH_PARTY_VOICE_CHANNEL_ID") or "1028490296482344971").strip()
 _EASTERN                 = ZoneInfo("America/New_York")
 
 _DISCORD_EVENT_LOCATIONS = {
@@ -1935,7 +1935,6 @@ _DISCORD_EVENT_LOCATIONS = {
 @app.route("/discord_events")
 @login_required
 def discord_events():
-    voice_configured = bool(_WATCH_PARTY_VOICE_CH_ID)
     page = f"""
       <h2 style="margin:0 0 4px 0;">Create Discord Event</h2>
       <p style="color:#666;font-size:13px;margin:0 0 20px 0;">
@@ -1956,20 +1955,20 @@ def discord_events():
 
         <!-- Location -->
         <div style="padding:16px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
-          <div style="color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">Location</div>
+          <div style="color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Location</div>
+          <div style="color:#555;font-size:11px;margin-bottom:12px;">Select all that apply</div>
           <div style="display:flex;flex-direction:column;gap:8px;" id="de-locations">
 
-            {"" if not voice_configured else '''
             <label id="loc-voice-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #333;cursor:pointer;transition:border-color .15s;">
-              <input type="radio" name="de-location" value="voice" style="margin-top:2px;accent-color:#5865F2;" />
+              <input type="checkbox" class="de-loc-cb" value="voice" style="margin-top:2px;accent-color:#5865F2;" />
               <div>
-                <div style="font-size:13px;font-weight:600;color:#eee;">🎙️ Voice Channel</div>
+                <div style="font-size:13px;font-weight:600;color:#eee;">🎙️ Watchalong Voice Channel</div>
                 <div style="font-size:12px;color:#555;margin-top:2px;">Discord voice channel event</div>
               </div>
-            </label>'''}
+            </label>
 
-            <label id="loc-hb-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #555;cursor:pointer;transition:border-color .15s;">
-              <input type="radio" name="de-location" value="halfbarrel" checked style="margin-top:2px;accent-color:#5865F2;" />
+            <label id="loc-hb-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #333;cursor:pointer;transition:border-color .15s;">
+              <input type="checkbox" class="de-loc-cb" value="halfbarrel" style="margin-top:2px;accent-color:#5865F2;" />
               <div>
                 <div style="font-size:13px;font-weight:600;color:#eee;">🍺 Half Barrel Brewing</div>
                 <div style="font-size:12px;color:#555;margin-top:2px;">9650 Universal Blvd Ste 143, Orlando, FL 32819</div>
@@ -1977,7 +1976,7 @@ def discord_events():
             </label>
 
             <label id="loc-hg-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #333;cursor:pointer;transition:border-color .15s;">
-              <input type="radio" name="de-location" value="hourglass" style="margin-top:2px;accent-color:#5865F2;" />
+              <input type="checkbox" class="de-loc-cb" value="hourglass" style="margin-top:2px;accent-color:#5865F2;" />
               <div>
                 <div style="font-size:13px;font-weight:600;color:#eee;">⏳ Hourglass Brewing Longwood</div>
                 <div style="font-size:12px;color:#555;margin-top:2px;">480 S Ronald Reagan Blvd Ste 1020, Longwood, FL 32750</div>
@@ -2052,16 +2051,12 @@ def discord_events():
         const pad = n => String(n).padStart(2,'0');
         document.getElementById('de-date').value = `${{d.getFullYear()}}-${{pad(d.getMonth()+1)}}-${{pad(d.getDate())}}`;
 
-        // Radio card highlight
-        document.querySelectorAll('input[name="de-location"]').forEach(function(r) {{
-          r.addEventListener('change', function() {{
-            document.querySelectorAll('#de-locations label').forEach(l => l.style.borderColor = '#333');
-            r.closest('label').style.borderColor = '#555';
+        // Checkbox card highlight
+        document.querySelectorAll('.de-loc-cb').forEach(function(cb) {{
+          cb.addEventListener('change', function() {{
+            cb.closest('label').style.borderColor = cb.checked ? '#5865F2' : '#333';
           }});
         }});
-        // init
-        const checked = document.querySelector('input[name="de-location"]:checked');
-        if (checked) checked.closest('label').style.borderColor = '#555';
 
         // Banner drag/drop
         const drop = document.getElementById('de-drop');
@@ -2115,15 +2110,16 @@ def discord_events():
         // Submit
         window.deSubmit = async function() {{
           const name  = document.getElementById('de-name').value.trim();
-          const loc   = document.querySelector('input[name="de-location"]:checked')?.value;
+          const locs  = Array.from(document.querySelectorAll('.de-loc-cb:checked')).map(c => c.value);
           const date  = document.getElementById('de-date').value;
           const start = document.getElementById('de-start').value;
           const end   = document.getElementById('de-end').value;
 
-          if (!name)  return deToast('Please enter an event name.', false);
-          if (!date)  return deToast('Please choose a date.', false);
-          if (!start) return deToast('Please set a start time.', false);
-          if (!end)   return deToast('Please set an end time.', false);
+          if (!name)        return deToast('Please enter an event name.', false);
+          if (!locs.length) return deToast('Please select at least one location.', false);
+          if (!date)        return deToast('Please choose a date.', false);
+          if (!start)       return deToast('Please set a start time.', false);
+          if (!end)         return deToast('Please set an end time.', false);
 
           const btn = document.getElementById('de-submit');
           btn.disabled = true; btn.textContent = 'Creating…';
@@ -2133,7 +2129,7 @@ def discord_events():
             const fd = new FormData();
             fd.append('_csrf', csrf);
             fd.append('name', name);
-            fd.append('location', loc);
+            locs.forEach(l => fd.append('locations', l));
             fd.append('date', date);
             fd.append('start_time', start);
             fd.append('end_time', end);
@@ -2168,14 +2164,16 @@ def discord_events_create():
     _csrf_protect()
 
     name      = (request.form.get("name") or "").strip()
-    location  = (request.form.get("location") or "").strip()
+    locations = request.form.getlist("locations")
     date_str  = (request.form.get("date") or "").strip()
     start_str = (request.form.get("start_time") or "").strip()
     end_str   = (request.form.get("end_time") or "").strip()
     banner    = request.files.get("banner")
 
-    if not all([name, location, date_str, start_str, end_str]):
+    if not all([name, date_str, start_str, end_str]):
         return jsonify({"ok": False, "error": "All fields are required."}), 400
+    if not locations:
+        return jsonify({"ok": False, "error": "Please select at least one location."}), 400
 
     try:
         start_dt = datetime.fromisoformat(f"{date_str}T{start_str}:00").replace(tzinfo=_EASTERN)
@@ -2193,14 +2191,21 @@ def discord_events_create():
         "scheduled_end_time":   end_dt.isoformat(),
     }
 
-    if location == "voice":
-        if not _WATCH_PARTY_VOICE_CH_ID:
-            return jsonify({"ok": False, "error": "WATCH_PARTY_VOICE_CHANNEL_ID not configured."}), 500
+    venue_keys   = [l for l in locations if l in _DISCORD_EVENT_LOCATIONS]
+    voice_chosen = "voice" in locations
+    invalid      = [l for l in locations if l not in _DISCORD_EVENT_LOCATIONS and l != "voice"]
+    if invalid:
+        return jsonify({"ok": False, "error": f"Invalid location(s): {', '.join(invalid)}"}), 400
+
+    if venue_keys:
+        # External event — combine all selected venue strings
+        combined = " & ".join(_DISCORD_EVENT_LOCATIONS[k] for k in venue_keys)
+        payload["entity_type"]     = 3
+        payload["entity_metadata"] = {"location": combined}
+    elif voice_chosen:
+        # Voice-only event
         payload["entity_type"] = 2
         payload["channel_id"]  = _WATCH_PARTY_VOICE_CH_ID
-    elif location in _DISCORD_EVENT_LOCATIONS:
-        payload["entity_type"]     = 3
-        payload["entity_metadata"] = {"location": _DISCORD_EVENT_LOCATIONS[location]}
     else:
         return jsonify({"ok": False, "error": "Invalid location."}), 400
 
