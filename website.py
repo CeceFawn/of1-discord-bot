@@ -7,7 +7,7 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, Response
 from dotenv import load_dotenv
 
 EASTERN = ZoneInfo("America/New_York")
@@ -484,6 +484,34 @@ def gallery():
             if os.path.splitext(fname)[1].lower() in exts:
                 photos.append(f"/static/gallery/{fname}")
     return render_template("gallery.html", photos=photos)
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.orlandof1.com/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://www.orlandof1.com/gallery</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+</urlset>"""
+    return Response(xml, mimetype="application/xml")
+
+
+@app.route("/robots.txt")
+def robots():
+    txt = """User-agent: *
+Allow: /
+
+Sitemap: https://www.orlandof1.com/sitemap.xml
+"""
+    return Response(txt, mimetype="text/plain")
 
 
 @app.route("/api/next-race")
