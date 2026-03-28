@@ -2262,7 +2262,7 @@ async def xpleaderboard(ctx, limit: int = 10):
         real_lvl = xp_level_from_total(xp)
         lines.append(f"{i:>2}. {name} — **L{real_lvl}** ({xp} XP)")
 
-    await ctx.send("\U0001F3C6 **XP Leaderboard**\n" + "\n".join(lines))
+    await ctx.send(f"\U0001F3C6 **XP Leaderboard** `[#{invoc}]`\n" + "\n".join(lines))
 
 
 @bot.command(name="xpdebug")
