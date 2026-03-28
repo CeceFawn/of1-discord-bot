@@ -2250,7 +2250,7 @@ def run_dashboard():
     except Exception:
         pass
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, threaded=True)
 
 def start_dashboard_thread():
     thread = threading.Thread(target=run_dashboard, daemon=True)
