@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -9,6 +10,7 @@ import subprocess
 import secrets
 import hmac
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from functools import wraps
 from urllib.parse import urlencode
 
@@ -294,6 +296,13 @@ BASE_TEMPLATE = """
           <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
         </svg>
         Watch Party
+      </a>
+      <a href="{{ url_for('discord_events') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        Discord Events
       </a>
     </nav>
 
@@ -1906,6 +1915,319 @@ def wp_save_venues():
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+
+# ----------------------------
+# Discord Events
+# ----------------------------
+
+_DISCORD_BOT_TOKEN      = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
+_DISCORD_GUILD_ID        = (os.getenv("DISCORD_GUILD_ID") or "").strip()
+_WATCH_PARTY_VOICE_CH_ID = (os.getenv("WATCH_PARTY_VOICE_CHANNEL_ID") or "").strip()
+_EASTERN                 = ZoneInfo("America/New_York")
+
+_DISCORD_EVENT_LOCATIONS = {
+    "halfbarrel": "Half Barrel Brewing — 9650 Universal Blvd Ste 143, Orlando, FL 32819",
+    "hourglass":  "Hourglass Brewing Longwood — 480 South Ronald Reagan Blvd Ste 1020, Longwood, FL 32750",
+}
+
+
+@app.route("/discord_events")
+@login_required
+def discord_events():
+    voice_configured = bool(_WATCH_PARTY_VOICE_CH_ID)
+    page = f"""
+      <h2 style="margin:0 0 4px 0;">Create Discord Event</h2>
+      <p style="color:#666;font-size:13px;margin:0 0 20px 0;">
+        Creates a scheduled event in the Discord server. Times are Eastern.
+      </p>
+      <meta name="de-csrf" content="{_csrf_token()}" />
+
+      <div style="display:flex;flex-direction:column;gap:16px;max-width:560px;">
+
+        <!-- Name -->
+        <div style="padding:16px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+          <label style="display:block;color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
+            Event Name
+          </label>
+          <input id="de-name" type="text" placeholder="Japan GP Watch Party"
+            style="width:100%;box-sizing:border-box;background:#000;color:#eee;border:1px solid #333;padding:9px 12px;border-radius:8px;font-size:14px;outline:none;" />
+        </div>
+
+        <!-- Location -->
+        <div style="padding:16px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+          <div style="color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">Location</div>
+          <div style="display:flex;flex-direction:column;gap:8px;" id="de-locations">
+
+            {"" if not voice_configured else '''
+            <label id="loc-voice-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #333;cursor:pointer;transition:border-color .15s;">
+              <input type="radio" name="de-location" value="voice" style="margin-top:2px;accent-color:#5865F2;" />
+              <div>
+                <div style="font-size:13px;font-weight:600;color:#eee;">🎙️ Voice Channel</div>
+                <div style="font-size:12px;color:#555;margin-top:2px;">Discord voice channel event</div>
+              </div>
+            </label>'''}
+
+            <label id="loc-hb-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #555;cursor:pointer;transition:border-color .15s;">
+              <input type="radio" name="de-location" value="halfbarrel" checked style="margin-top:2px;accent-color:#5865F2;" />
+              <div>
+                <div style="font-size:13px;font-weight:600;color:#eee;">🍺 Half Barrel Brewing</div>
+                <div style="font-size:12px;color:#555;margin-top:2px;">9650 Universal Blvd Ste 143, Orlando, FL 32819</div>
+              </div>
+            </label>
+
+            <label id="loc-hg-wrap" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:9px;border:1px solid #333;cursor:pointer;transition:border-color .15s;">
+              <input type="radio" name="de-location" value="hourglass" style="margin-top:2px;accent-color:#5865F2;" />
+              <div>
+                <div style="font-size:13px;font-weight:600;color:#eee;">⏳ Hourglass Brewing Longwood</div>
+                <div style="font-size:12px;color:#555;margin-top:2px;">480 S Ronald Reagan Blvd Ste 1020, Longwood, FL 32750</div>
+              </div>
+            </label>
+
+          </div>
+        </div>
+
+        <!-- Date -->
+        <div style="padding:16px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+          <label style="display:block;color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
+            Date
+          </label>
+          <input id="de-date" type="date"
+            style="width:100%;box-sizing:border-box;background:#000;color:#eee;border:1px solid #333;padding:9px 12px;border-radius:8px;font-size:14px;outline:none;color-scheme:dark;" />
+        </div>
+
+        <!-- Times -->
+        <div style="padding:16px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+          <div style="color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">
+            Time <span style="color:#555;text-transform:none;font-size:11px;">(Eastern)</span>
+          </div>
+          <div style="display:flex;gap:12px;">
+            <div style="flex:1;">
+              <label style="display:block;color:#666;font-size:11px;margin-bottom:6px;">Start</label>
+              <input id="de-start" type="time"
+                style="width:100%;box-sizing:border-box;background:#000;color:#eee;border:1px solid #333;padding:9px 12px;border-radius:8px;font-size:14px;outline:none;color-scheme:dark;" />
+            </div>
+            <div style="flex:1;">
+              <label style="display:block;color:#666;font-size:11px;margin-bottom:6px;">End</label>
+              <input id="de-end" type="time"
+                style="width:100%;box-sizing:border-box;background:#000;color:#eee;border:1px solid #333;padding:9px 12px;border-radius:8px;font-size:14px;outline:none;color-scheme:dark;" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Banner -->
+        <div style="padding:16px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
+          <div style="color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">
+            Banner Image <span style="color:#555;text-transform:none;">(optional)</span>
+          </div>
+          <div id="de-drop"
+            style="border:2px dashed #333;border-radius:9px;padding:20px;text-align:center;cursor:pointer;transition:border-color .2s;"
+            onclick="document.getElementById('de-file').click()">
+            <img id="de-preview" src="" alt=""
+              style="display:none;width:100%;max-height:160px;object-fit:cover;border-radius:6px;margin-bottom:10px;" />
+            <div id="de-drop-label" style="color:#555;font-size:13px;">Click or drag &amp; drop an image</div>
+            <input id="de-file" type="file" accept="image/*" style="display:none;" />
+          </div>
+          <button id="de-clear-banner" onclick="deClearBanner()"
+            style="display:none;margin-top:8px;background:none;border:none;color:#555;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;">
+            Remove image
+          </button>
+        </div>
+
+        <!-- Submit -->
+        <button id="de-submit" onclick="deSubmit()"
+          style="background:#2a8f52;color:#fff;border:1px solid #38b567;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s;">
+          Create Discord Event
+        </button>
+
+        <!-- Status -->
+        <div id="de-toast" style="display:none;padding:10px 14px;border-radius:10px;font-size:14px;"></div>
+
+      </div>
+
+      <script>
+      (function(){{
+        // Set default date to today
+        const d = new Date();
+        const pad = n => String(n).padStart(2,'0');
+        document.getElementById('de-date').value = `${{d.getFullYear()}}-${{pad(d.getMonth()+1)}}-${{pad(d.getDate())}}`;
+
+        // Radio card highlight
+        document.querySelectorAll('input[name="de-location"]').forEach(function(r) {{
+          r.addEventListener('change', function() {{
+            document.querySelectorAll('#de-locations label').forEach(l => l.style.borderColor = '#333');
+            r.closest('label').style.borderColor = '#555';
+          }});
+        }});
+        // init
+        const checked = document.querySelector('input[name="de-location"]:checked');
+        if (checked) checked.closest('label').style.borderColor = '#555';
+
+        // Banner drag/drop
+        const drop = document.getElementById('de-drop');
+        const fileIn = document.getElementById('de-file');
+        const preview = document.getElementById('de-preview');
+        const dropLabel = document.getElementById('de-drop-label');
+        const clearBtn = document.getElementById('de-clear-banner');
+
+        drop.addEventListener('dragover', e => {{ e.preventDefault(); drop.style.borderColor='#5865F2'; }});
+        drop.addEventListener('dragleave', () => {{ drop.style.borderColor='#333'; }});
+        drop.addEventListener('drop', e => {{
+          e.preventDefault(); drop.style.borderColor='#333';
+          const f = e.dataTransfer.files[0];
+          if (f && f.type.startsWith('image/')) deSetBanner(f);
+        }});
+        fileIn.addEventListener('change', () => {{ if (fileIn.files[0]) deSetBanner(fileIn.files[0]); }});
+
+        window.deSetBanner = function(file) {{
+          const reader = new FileReader();
+          reader.onload = ev => {{
+            preview.src = ev.target.result;
+            preview.style.display = 'block';
+            dropLabel.style.display = 'none';
+            clearBtn.style.display = 'block';
+            if (!fileIn.files[0]) {{
+              const dt = new DataTransfer(); dt.items.add(file); fileIn.files = dt.files;
+            }}
+          }};
+          reader.readAsDataURL(file);
+        }};
+
+        window.deClearBanner = function() {{
+          fileIn.value = '';
+          preview.style.display = 'none';
+          dropLabel.style.display = '';
+          clearBtn.style.display = 'none';
+        }};
+
+        // Toast
+        window.deToast = function(msg, ok) {{
+          const el = document.getElementById('de-toast');
+          el.textContent = msg;
+          el.style.display = 'block';
+          el.style.background = ok ? '#0d3320' : '#3a0d0d';
+          el.style.border = '1px solid ' + (ok ? '#2a8f52' : '#8f2a2a');
+          el.style.color = ok ? '#6f6' : '#f88';
+          clearTimeout(el._t);
+          el._t = setTimeout(() => {{ el.style.display = 'none'; }}, 5000);
+        }};
+
+        // Submit
+        window.deSubmit = async function() {{
+          const name  = document.getElementById('de-name').value.trim();
+          const loc   = document.querySelector('input[name="de-location"]:checked')?.value;
+          const date  = document.getElementById('de-date').value;
+          const start = document.getElementById('de-start').value;
+          const end   = document.getElementById('de-end').value;
+
+          if (!name)  return deToast('Please enter an event name.', false);
+          if (!date)  return deToast('Please choose a date.', false);
+          if (!start) return deToast('Please set a start time.', false);
+          if (!end)   return deToast('Please set an end time.', false);
+
+          const btn = document.getElementById('de-submit');
+          btn.disabled = true; btn.textContent = 'Creating…';
+
+          try {{
+            const csrf = document.querySelector('meta[name="de-csrf"]').content;
+            const fd = new FormData();
+            fd.append('_csrf', csrf);
+            fd.append('name', name);
+            fd.append('location', loc);
+            fd.append('date', date);
+            fd.append('start_time', start);
+            fd.append('end_time', end);
+            const bannerFile = document.getElementById('de-file').files[0];
+            if (bannerFile) fd.append('banner', bannerFile);
+
+            const r = await fetch('/discord_events/create', {{method:'POST', body:fd, credentials:'same-origin'}});
+            const data = await r.json();
+            if (data.ok) {{
+              deToast('✅ Event created: ' + data.name, true);
+              document.getElementById('de-name').value = '';
+              deClearBanner();
+            }} else {{
+              deToast('❌ ' + data.error, false);
+            }}
+          }} catch(e) {{
+            deToast('❌ Network error: ' + e.message, false);
+          }} finally {{
+            btn.disabled = false; btn.textContent = 'Create Discord Event';
+          }}
+        }};
+
+      }})();
+      </script>
+    """
+    return _render(page)
+
+
+@app.route("/discord_events/create", methods=["POST"])
+@login_required
+def discord_events_create():
+    _csrf_protect()
+
+    name      = (request.form.get("name") or "").strip()
+    location  = (request.form.get("location") or "").strip()
+    date_str  = (request.form.get("date") or "").strip()
+    start_str = (request.form.get("start_time") or "").strip()
+    end_str   = (request.form.get("end_time") or "").strip()
+    banner    = request.files.get("banner")
+
+    if not all([name, location, date_str, start_str, end_str]):
+        return jsonify({"ok": False, "error": "All fields are required."}), 400
+
+    try:
+        start_dt = datetime.fromisoformat(f"{date_str}T{start_str}:00").replace(tzinfo=_EASTERN)
+        end_dt   = datetime.fromisoformat(f"{date_str}T{end_str}:00").replace(tzinfo=_EASTERN)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": f"Invalid date/time: {e}"}), 400
+
+    if end_dt <= start_dt:
+        return jsonify({"ok": False, "error": "End time must be after start time."}), 400
+
+    payload: dict = {
+        "name":                 name,
+        "privacy_level":        2,
+        "scheduled_start_time": start_dt.isoformat(),
+        "scheduled_end_time":   end_dt.isoformat(),
+    }
+
+    if location == "voice":
+        if not _WATCH_PARTY_VOICE_CH_ID:
+            return jsonify({"ok": False, "error": "WATCH_PARTY_VOICE_CHANNEL_ID not configured."}), 500
+        payload["entity_type"] = 2
+        payload["channel_id"]  = _WATCH_PARTY_VOICE_CH_ID
+    elif location in _DISCORD_EVENT_LOCATIONS:
+        payload["entity_type"]     = 3
+        payload["entity_metadata"] = {"location": _DISCORD_EVENT_LOCATIONS[location]}
+    else:
+        return jsonify({"ok": False, "error": "Invalid location."}), 400
+
+    if banner and banner.filename:
+        try:
+            b64 = base64.b64encode(banner.read()).decode("utf-8")
+            payload["image"] = f"data:{banner.mimetype or 'image/jpeg'};base64,{b64}"
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Banner error: {e}"}), 400
+
+    if not _DISCORD_BOT_TOKEN or not _DISCORD_GUILD_ID:
+        return jsonify({"ok": False, "error": "Bot token or guild ID not configured."}), 500
+
+    try:
+        resp = requests.post(
+            f"https://discord.com/api/v10/guilds/{_DISCORD_GUILD_ID}/scheduled-events",
+            headers={"Authorization": f"Bot {_DISCORD_BOT_TOKEN}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": f"Network error: {e}"}), 502
+
+    if resp.status_code in (200, 201):
+        ev = resp.json()
+        return jsonify({"ok": True, "event_id": ev.get("id"), "name": ev.get("name")})
+    return jsonify({"ok": False, "error": f"Discord API {resp.status_code}: {resp.text}"}), 502
 
 
 def run_dashboard():
