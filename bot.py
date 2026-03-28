@@ -4703,10 +4703,20 @@ async def _ensure_live_thread(
     race_name: str,
     title: str,
 ) -> discord.Thread:
+    has_saved_record = bool(_race_thread_record(round_key, guild.id))
     existing = await _fetch_saved_race_thread(guild, round_key)
     if existing is not None:
         _set_race_thread_weekend_state(round_key, guild.id, "active")
         return existing
+
+    # If a record existed for this round_key but we couldn't reach the thread,
+    # it's a transient error (rate-limit, network hiccup).  Raise so the
+    # supervisor retries on the next tick rather than creating a duplicate thread.
+    if has_saved_record:
+        raise RuntimeError(
+            f"Saved thread record exists for {round_key} but thread is temporarily "
+            "unreachable (rate-limit or network). Will retry on the next supervisor tick."
+        )
 
     fallback = await _fetch_fallback_race_thread_for_guild(guild, race_name)
     if fallback is not None:
@@ -4790,6 +4800,38 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     meta = relevant[0]
     return window_start, window_end, meta, relevant
 
+async def _post_deferred_quali_boundary(
+    gid: int,
+    thread: discord.Thread,
+    http: aiohttp.ClientSession,
+    session_key: int,
+    session_kind: str,
+    current_quali_seg: str,
+    posted_segment_summaries: set,
+    seen_session_end: bool,
+    driver_map: dict,
+) -> None:
+    """Post a qualifying boundary summary that was waiting for SESSION STARTED but never fired."""
+    if not (session_kind in {"QUALI", "SPRINT_QUALI"} and seen_session_end and current_quali_seg not in {"Q3", "SQ3"}):
+        return
+    key = f"{current_quali_seg}:end"
+    if key in posted_segment_summaries:
+        return
+    posted_segment_summaries.add(key)
+    _racelog(gid, f"posting deferred boundary for {current_quali_seg}")
+    try:
+        await _post_quali_boundary_summary(
+            thread=thread,
+            http=http,
+            session_key=session_key,
+            session_kind=session_kind,
+            segment=current_quali_seg,
+            driver_map=driver_map,
+        )
+    except Exception as e:
+        _racelog(gid, f"deferred boundary failed for {current_quali_seg}: {e}")
+
+
 async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_key: int, session_type: str = ""):
     gid = guild.id
     RACE_LIVE_ENABLED[gid] = True
@@ -4824,6 +4866,34 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
         # SESSION FINISHED before CHEQUERED FLAG was ever processed.
         _seen_session_end_since_last_boundary: bool = False
         pred_reminders_posted: set[str] = set()  # tracks which lock reminders we've sent
+
+        # For qualifying sessions, scan historical race_control once at loop start
+        # to initialize segment state.  This handles late-start cases where the loop
+        # begins mid-session and some segment transitions already occurred with
+        # timestamps that would be filtered by loop_start_dt in the main loop.
+        # We don't post anything from this scan — state init only.
+        if session_kind in {"QUALI", "SPRINT_QUALI"}:
+            try:
+                _hist_rc = await _openf1_get(http, "race_control", {"session_key": session_key}, caller="race_live_quali_init")
+                for _hi in _hist_rc:
+                    _hm = str(_hi.get("message") or "").strip()
+                    if not _hm:
+                        continue
+                    _hu = _hm.upper()
+                    _hs = _extract_quali_segment(_hm)
+                    if _hs:
+                        current_quali_seg = _hs
+                    if "SESSION STARTED" in _hu:
+                        _seen_session_end_since_last_boundary = False
+                    if any(_k in _hu for _k in ("CHECKERED", "CHEQUERED", "SESSION END", "SESSION FINISHED")):
+                        if current_quali_seg not in {"Q3", "SQ3"}:
+                            _seen_session_end_since_last_boundary = True
+                        else:
+                            _seen_session_end_since_last_boundary = False
+                _racelog(gid, f"quali init: seg={current_quali_seg}, pending_boundary={_seen_session_end_since_last_boundary}")
+            except Exception as _e:
+                _racelog(gid, f"quali init scan failed (non-fatal): {_e}")
+
         while RACE_LIVE_ENABLED.get(gid, False):
             _loop_tick("race_live")
             try:
@@ -4997,11 +5067,22 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
 
             except asyncio.CancelledError:
                 _racelog(gid, "race_live_loop cancelled")
+                await _post_deferred_quali_boundary(
+                    gid, thread, http, session_key, session_kind, current_quali_seg,
+                    posted_segment_summaries, _seen_session_end_since_last_boundary, driver_map,
+                )
                 raise
             except Exception as e:
                 _loop_error("race_live")
                 _racelog(gid, f"ERROR {type(e).__name__}: {e}")
                 await asyncio.sleep(5)
+
+        # Natural exit (RACE_LIVE_ENABLED set to False by supervisor).
+        # Post any boundary that was waiting for SESSION STARTED.
+        await _post_deferred_quali_boundary(
+            gid, thread, http, session_key, session_kind, current_quali_seg,
+            posted_segment_summaries, _seen_session_end_since_last_boundary, driver_map,
+        )
 
     _racelog(gid, "race_live_loop exited")
 
