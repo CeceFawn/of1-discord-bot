@@ -17,7 +17,10 @@ from urllib.parse import urlencode
 import bcrypt
 import psutil
 import requests
+from dotenv import load_dotenv
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
+
+load_dotenv()
 
 from settings import LOG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH, WATCH_PARTY_PATH
 from storage import load_config, load_state
