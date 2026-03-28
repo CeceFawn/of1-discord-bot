@@ -3876,11 +3876,17 @@ async def on_ready():
     if not APP_COMMANDS_SYNCED:
         try:
             _guild_id_str = os.getenv("DISCORD_GUILD_ID", "").strip()
+            _local_cmds = [c.name for c in bot.tree.get_commands()]
+            logging.info(f"[Slash] Local tree commands before sync: {_local_cmds}")
             if _guild_id_str:
                 _guild_obj = discord.Object(id=int(_guild_id_str))
+                _remote_guild_cmds = await bot.tree.fetch_commands(guild=_guild_obj)
+                logging.info(f"[Slash] Remote guild commands before sync: {[c.name for c in _remote_guild_cmds]}")
                 bot.tree.copy_global_to(guild=_guild_obj)
                 await bot.tree.sync(guild=_guild_obj)
                 logging.info(f"[Slash] Command tree synced to guild {_guild_id_str}")
+            _remote_global_cmds = await bot.tree.fetch_commands()
+            logging.info(f"[Slash] Remote global commands before clear: {[c.name for c in _remote_global_cmds]}")
             # Clear global commands so nothing shows up twice
             bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
