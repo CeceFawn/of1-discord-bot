@@ -2137,6 +2137,15 @@ def discord_events():
             if (bannerFile) fd.append('banner', bannerFile);
 
             const r = await fetch('/discord_events/create', {{method:'POST', body:fd, credentials:'same-origin'}});
+            const ct = r.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) {{
+              if (r.status === 302 || r.redirected) {{
+                deToast('❌ Session expired — reload the page and log in again.', false);
+              }} else {{
+                deToast(`❌ Server error (HTTP ${{r.status}}) — check that you're still logged in.`, false);
+              }}
+              return;
+            }}
             const data = await r.json();
             if (data.ok) {{
               deToast('✅ Event created: ' + data.name, true);
@@ -2146,7 +2155,7 @@ def discord_events():
               deToast('❌ ' + data.error, false);
             }}
           }} catch(e) {{
-            deToast('❌ Network error: ' + e.message, false);
+            deToast('❌ Request failed: ' + e.message, false);
           }} finally {{
             btn.disabled = false; btn.textContent = 'Create Discord Event';
           }}
