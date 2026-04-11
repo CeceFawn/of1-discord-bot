@@ -1245,6 +1245,26 @@ def status():
             f'</div>'
         )
 
+    def _svc_row(label: str, svc_name: str, action_suffix: str) -> str:
+        """One row in the Services card: service name + start/restart/stop buttons."""
+        btn = lambda act, lbl, cls: (
+            f'<form data-async-refresh="1" action="{url_for("bot_action", action=act + action_suffix)}" method="post" style="margin:0;">'
+            f'<input type="hidden" name="_csrf" value="__CSRF__">'
+            f'<button class="text-xs px-2 py-1 rounded-md border cursor-pointer {cls}">{lbl}</button>'
+            f'</form>'
+        )
+        return (
+            f'<div class="flex items-center gap-2 py-1">'
+            f'<span class="text-gray-500 text-sm w-20 shrink-0">{_escape(label)}</span>'
+            f'<span class="font-mono text-xs text-gray-600 flex-1 truncate">{_escape(svc_name)}</span>'
+            f'<div class="flex gap-1.5 shrink-0">'
+            f'{btn("start", "Start", "bg-[#0f2a0f] text-green-400 border-green-900/50 hover:bg-[#14532d]")}'
+            f'{btn("restart", "Restart", "bg-[#1a1a0f] text-yellow-400 border-yellow-900/50 hover:bg-[#2a2a10]")}'
+            f'{btn("stop", "Stop", "bg-[#2a0f0f] text-red-400 border-red-900/50 hover:bg-[#3a1010]")}'
+            f'</div>'
+            f'</div>'
+        ).replace("__CSRF__", _csrf_token())
+
     current_round_record = data.get("current_round_record") if isinstance(data.get("current_round_record"), dict) else None
     current_round_key = str(data.get("current_round_key") or "")
     current_round_name = str(data.get("current_round_name") or "Next round")
@@ -1406,8 +1426,13 @@ def status():
     </div>
     <div class="bg-[#111] border border-[#222] rounded-xl p-4">
       <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Services</div>
-      {_kv("Bot", _escape(BOT_SYSTEMD_SERVICE), mono=True)}
-      {_kv("Dashboard", _escape(DASHBOARD_SYSTEMD_SERVICE), mono=True)}
+      <div class="space-y-2">
+        {''.join(_svc_row(label, svc, action_prefix) for label, svc, action_prefix in [
+          ("Bot",       BOT_SYSTEMD_SERVICE,       ""),
+          ("Dashboard", DASHBOARD_SYSTEMD_SERVICE, "_dashboard"),
+          ("Website",   WEBSITE_SYSTEMD_SERVICE,   "_website"),
+        ])}
+      </div>
       {_kv("Repo", _escape(BOT_REPO_DIR), mono=True)}
     </div>
   </div>
@@ -1551,15 +1576,32 @@ def status():
 def bot_action(action: str):
     global _DEPLOY_IN_PROGRESS
     action = (action or "").strip().lower()
-    allowed = {"start", "stop", "restart", "deploy", "deploybot", "deploydashboard", "deploywebsite", "deployboth", "deployall"}
+    allowed = {
+        "start", "stop", "restart",
+        "start_dashboard", "stop_dashboard", "restart_dashboard",
+        "start_website", "stop_website", "restart_website",
+        "deploy", "deploybot", "deploydashboard", "deploywebsite", "deployboth", "deployall",
+    }
     if action not in allowed:
         abort(404)
 
-    if action in {"start", "stop", "restart"}:
-        ok, out = _sudo_systemctl(action)
-        # Validate expected state so button outcomes are obvious in Logs.
-        expected_active = action in {"start", "restart"}
-        is_active, state_txt = _service_is_active(BOT_SYSTEMD_SERVICE)
+    # Per-service start/stop/restart
+    _svc_map = {
+        "start": (BOT_SYSTEMD_SERVICE, "start"),
+        "stop": (BOT_SYSTEMD_SERVICE, "stop"),
+        "restart": (BOT_SYSTEMD_SERVICE, "restart"),
+        "start_dashboard": (DASHBOARD_SYSTEMD_SERVICE, "start"),
+        "stop_dashboard": (DASHBOARD_SYSTEMD_SERVICE, "stop"),
+        "restart_dashboard": (DASHBOARD_SYSTEMD_SERVICE, "restart"),
+        "start_website": (WEBSITE_SYSTEMD_SERVICE, "start"),
+        "stop_website": (WEBSITE_SYSTEMD_SERVICE, "stop"),
+        "restart_website": (WEBSITE_SYSTEMD_SERVICE, "restart"),
+    }
+    if action in _svc_map:
+        svc, cmd = _svc_map[action]
+        ok, out = _sudo_systemctl(cmd, svc)
+        expected_active = cmd in {"start", "restart"}
+        is_active, state_txt = _service_is_active(svc)
         state_ok = (is_active == expected_active)
         final_ok = bool(ok and state_ok)
         combined = (out or "").strip()
@@ -2356,95 +2398,130 @@ def _race_snapshot_safe() -> dict:
 
 _RACE_LIVE_PAGE = """
 <style>
-  .rl-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px;margin-bottom:16px;}
-  .rl-label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
-  .rl-val{font-size:15px;font-weight:600;color:#eee;}
-  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;}
-  .badge-green{background:#1a3a1a;color:#4f4;border:1px solid #2a5a2a;}
-  .badge-red{background:#3a1a1a;color:#f77;border:1px solid #5a2a2a;}
-  .badge-yellow{background:#3a3a1a;color:#ff7;border:1px solid #5a5a2a;}
-  .badge-grey{background:#222;color:#888;border:1px solid #333;}
-  .feed-row{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid #222;font-size:13px;}
-  .feed-ts{color:#666;min-width:60px;font-family:monospace;}
-  .feed-status{min-width:90px;}
-  .feed-msg{color:#ccc;flex:1;}
-  .feed-emoji{min-width:24px;text-align:center;}
-  .status-posted{color:#4f4;}
-  .status-skipped{color:#666;}
-  .status-track_deletion{color:#fa0;}
-  .status-boundary{color:#8cf;}
-  .proc-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1e1e1e;}
-  .proc-name{color:#ccc;min-width:180px;font-family:monospace;font-size:13px;}
-  .proc-kind{color:#888;font-size:12px;min-width:120px;}
-  .proc-ts{color:#666;font-size:12px;font-family:monospace;}
-  .settings-row{display:flex;align-items:center;gap:10px;padding:6px 0;}
-  .settings-key{color:#aaa;font-size:13px;min-width:160px;font-family:monospace;}
-  .settings-val{color:#eee;font-size:13px;font-family:monospace;flex:1;}
-  input.edit-field{background:#111;border:1px solid #333;color:#eee;padding:4px 8px;border-radius:6px;font-size:13px;width:120px;}
-  button.btn{background:#222;color:#eee;border:1px solid #333;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;}
-  button.btn:hover{background:#2a2a2a;}
-  button.btn-red{background:#300;color:#f88;border-color:#822;}
-  button.btn-red:hover{background:#3a0000;}
-  button.btn-green{background:#130;color:#8f8;border-color:#282;}
-  button.btn-green:hover{background:#1a3a00;}
-  #send-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center;}
+  .rl-card{background:#111;border:1px solid #222;border-radius:12px;padding:16px;margin-bottom:16px;}
+  .rl-label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;font-weight:600;}
+  .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.03em;}
+  .badge-green{background:#0f2a0f;color:#4ade80;border:1px solid #166534;}
+  .badge-red{background:#2a0f0f;color:#f87171;border:1px solid #7f1d1d;}
+  .badge-yellow{background:#2a2a0f;color:#facc15;border:1px solid #713f12;}
+  .badge-grey{background:#1a1a1a;color:#666;border:1px solid #2a2a2a;}
+  /* Feed rows */
+  .feed-row{position:relative;display:flex;gap:8px;align-items:center;padding:6px 4px;border-bottom:1px solid #1a1a1a;font-size:13px;border-radius:6px;transition:background .1s;}
+  .feed-row:hover{background:rgba(255,255,255,.04);}
+  .feed-ts{color:#555;min-width:58px;font-family:monospace;font-size:12px;flex-shrink:0;}
+  .feed-emoji{min-width:20px;text-align:center;flex-shrink:0;}
+  .feed-msg{color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .feed-row:hover .feed-msg{white-space:normal;}
+  /* Hover reveal: status pill + override button */
+  .feed-hover{opacity:0;display:flex;align-items:center;gap:6px;flex-shrink:0;transition:opacity .15s;pointer-events:none;}
+  .feed-row:hover .feed-hover{opacity:1;pointer-events:auto;}
+  .feed-pill{font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;}
+  .pill-posted{background:#0f2a0f;color:#4ade80;border:1px solid #166534;}
+  .pill-skipped{background:#1a1a1a;color:#666;border:1px solid #2a2a2a;}
+  .pill-track_deletion{background:#2a1a00;color:#fb923c;border:1px solid #7c2d12;}
+  .pill-boundary{background:#0f1a2a;color:#60a5fa;border:1px solid #1e3a5f;}
+  .feed-override-btn{background:#1a2a1a;color:#86efac;border:1px solid #166534;padding:2px 8px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;}
+  .feed-override-btn:hover{background:#14532d;}
+  /* Process rows */
+  .proc-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #1a1a1a;}
+  .proc-row:last-child{border-bottom:none;}
+  /* Settings */
+  .settings-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a;}
+  .settings-row:last-child{border-bottom:none;}
+  .settings-key{color:#888;font-size:13px;min-width:170px;font-family:monospace;}
+  input.edit-field{background:#0a0a0a;border:1px solid #2a2a2a;color:#eee;padding:5px 10px;border-radius:6px;font-size:13px;width:110px;font-family:monospace;}
+  input.edit-field:focus{outline:none;border-color:#444;}
+  button.rl-btn{background:#1a1a1a;color:#ccc;border:1px solid #2a2a2a;padding:5px 12px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600;}
+  button.rl-btn:hover{background:#222;color:#eee;}
+  button.rl-btn-red{background:#2a0f0f;color:#f87171;border-color:#7f1d1d;}
+  button.rl-btn-red:hover{background:#3a1010;}
+  button.rl-btn-green{background:#0f2a0f;color:#86efac;border-color:#166534;}
+  button.rl-btn-green:hover{background:#14532d;}
+  /* Modal */
+  #send-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center;}
   #send-overlay.open{display:flex;}
-  .modal{background:#1a1a1a;border:1px solid #333;border-radius:14px;padding:24px;width:480px;max-width:95vw;}
-  .modal h3{margin:0 0 14px;color:#eee;}
-  .modal textarea{width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#eee;padding:8px;border-radius:8px;font-size:14px;resize:vertical;min-height:80px;}
+  .modal{background:#111;border:1px solid #2a2a2a;border-radius:14px;padding:24px;width:500px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  .modal h3{margin:0 0 6px;color:#eee;font-size:16px;}
+  .modal-sub{font-size:12px;color:#666;margin-bottom:14px;}
+  .modal-preview{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:8px;padding:10px 12px;font-size:13px;color:#aaa;margin-bottom:14px;font-family:monospace;white-space:pre-wrap;word-break:break-all;}
+  .modal textarea{width:100%;box-sizing:border-box;background:#0a0a0a;border:1px solid #2a2a2a;color:#eee;padding:10px;border-radius:8px;font-size:13px;resize:vertical;min-height:80px;font-family:monospace;}
+  .modal textarea:focus{outline:none;border-color:#444;}
   .modal .actions{margin-top:14px;display:flex;gap:10px;justify-content:flex-end;}
 </style>
 
-<h2 style="margin:0 0 16px;color:#fc6;">Race Live</h2>
+<h1 class="text-xl font-bold text-white mb-5">Race Live</h1>
 
 <!-- Process Tags -->
 <div class="rl-card">
-  <div class="rl-label">Background Processes</div>
-  <div id="proc-list" style="margin-top:8px;">Loading…</div>
+  <div class="rl-label">Active Guilds</div>
+  <div id="proc-list">Loading…</div>
 </div>
 
-<!-- Active Sessions -->
+<!-- Active Session -->
 <div class="rl-card">
-  <div class="rl-label" style="display:flex;align-items:center;justify-content:space-between;">
-    <span>Active Sessions</span>
-    <span id="session-ts" style="color:#555;font-size:11px;"></span>
+  <div class="rl-label" style="display:flex;justify-content:space-between;">
+    <span>Current Session</span>
+    <span id="session-ts" style="color:#444;font-size:11px;font-weight:400;"></span>
   </div>
-  <div id="session-list" style="margin-top:8px;">Loading…</div>
+  <div id="session-list">Loading…</div>
 </div>
 
 <!-- Message Feed -->
 <div class="rl-card">
-  <div class="rl-label" style="display:flex;align-items:center;justify-content:space-between;">
+  <div class="rl-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
     <span>Race Control Feed</span>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <label style="font-size:12px;color:#888;">Guild:
-        <select id="feed-guild" style="background:#111;color:#eee;border:1px solid #333;border-radius:6px;padding:3px 8px;font-size:12px;margin-left:4px;" onchange="renderFeed()">
+    <div style="display:flex;gap:12px;align-items:center;">
+      <label style="font-size:12px;color:#666;display:flex;align-items:center;gap:4px;">
+        <input type="checkbox" id="feed-skipped" checked onchange="renderFeed()">
+        <span>Show skipped</span>
+      </label>
+      <label style="font-size:12px;color:#666;">
+        Guild:
+        <select id="feed-guild" style="background:#0a0a0a;color:#ccc;border:1px solid #2a2a2a;border-radius:6px;padding:2px 6px;font-size:12px;margin-left:4px;" onchange="renderFeed()">
           <option value="">All</option>
         </select>
       </label>
-      <label style="font-size:12px;color:#888;display:flex;align-items:center;gap:4px;">
-        <input type="checkbox" id="feed-skipped" checked onchange="renderFeed()"> Show skipped
-      </label>
     </div>
   </div>
-  <div id="feed-list" style="margin-top:8px;max-height:400px;overflow-y:auto;">Loading…</div>
+  <div style="font-size:11px;color:#555;margin-bottom:8px;">Hover any row to see status and send controls.</div>
+  <div id="feed-list" style="max-height:420px;overflow-y:auto;">Loading…</div>
 </div>
 
 <!-- Settings -->
 <div class="rl-card">
   <div class="rl-label">Settings</div>
-  <div id="settings-panel" style="margin-top:8px;">Loading…</div>
+  <div id="settings-panel">
+    <div class="settings-row">
+      <span class="settings-key">delay_seconds</span>
+      <input class="edit-field" id="set-delay" type="number" step="0.5" min="0" placeholder="0">
+      <button class="rl-btn" onclick="applySetting('delay_seconds','set-delay')">Apply</button>
+      <span style="color:#555;font-size:12px;">Spoiler delay before posting messages</span>
+    </div>
+    <div class="settings-row">
+      <span class="settings-key">poll_seconds</span>
+      <input class="edit-field" id="set-poll" type="number" step="0.5" min="1" placeholder="3">
+      <button class="rl-btn" onclick="applySetting('poll_seconds','set-poll')">Apply</button>
+      <span style="color:#555;font-size:12px;">OpenF1 poll interval</span>
+    </div>
+    <div class="settings-row">
+      <span class="settings-key">ops_channel_id</span>
+      <input class="edit-field" id="set-ops" type="text" placeholder="channel ID">
+      <button class="rl-btn" onclick="applySetting('ops_channel_id','set-ops')">Apply</button>
+      <span style="color:#555;font-size:12px;">Ops notice channel</span>
+    </div>
+  </div>
 </div>
 
-<!-- Send override modal -->
+<!-- Send / override modal -->
 <div id="send-overlay">
   <div class="modal">
-    <h3>Send Message to Race Thread</h3>
-    <div style="font-size:12px;color:#888;margin-bottom:10px;">Guild: <span id="send-guild-label" style="color:#ccc;"></span></div>
+    <h3>Send to Race Thread</h3>
+    <div class="modal-sub">Guild: <span id="send-guild-label" style="color:#aaa;"></span></div>
+    <div id="send-preview" class="modal-preview" style="display:none;"></div>
     <textarea id="send-text" placeholder="Message text…"></textarea>
     <div class="actions">
-      <button class="btn" onclick="closeSendModal()">Cancel</button>
-      <button class="btn btn-green" onclick="confirmSend()">Send</button>
+      <button class="rl-btn" onclick="closeSendModal()">Cancel</button>
+      <button class="rl-btn rl-btn-green" onclick="confirmSend()">Send to Thread</button>
     </div>
   </div>
 </div>
@@ -2452,19 +2529,16 @@ _RACE_LIVE_PAGE = """
 <script>
 let _state = {};
 let _sendGuildId = null;
+let _settingsReady = false;
 
 const evtSource = new EventSource('/api/sse');
 evtSource.addEventListener('race_state', e => {
   _state = JSON.parse(e.data);
-  render();
-});
-
-function render() {
   renderProcs();
   renderSessions();
   renderFeed();
-  renderSettings();
-}
+  syncSettings();
+});
 
 // ── Process tags ──────────────────────────────────────────
 function renderProcs() {
@@ -2473,61 +2547,61 @@ function renderProcs() {
   for (const [gid, g] of Object.entries(guilds)) {
     const running = g.running;
     const kind = g.session_kind || '—';
-    const badge = running
+    const kindColor = {RACE:'#f87171',SPRINT:'#fb923c',QUALI:'#60a5fa',SPRINT_QUALI:'#a78bfa'}[kind] || '#888';
+    const statusBadge = running
       ? `<span class="badge badge-green">RUNNING</span>`
       : `<span class="badge badge-grey">STOPPED</span>`;
-    const hold = g.hold ? `<span class="badge badge-yellow" style="margin-left:4px;">HOLD</span>` : '';
-    const killBtn = running
-      ? `<button class="btn btn-red" onclick="killSession('${gid}')" style="padding:3px 10px;font-size:12px;">Kill</button>`
-      : `<button class="btn btn-green" onclick="startSession('${gid}')" style="padding:3px 10px;font-size:12px;">Clear Hold</button>`;
-    const sendBtn = running
-      ? `<button class="btn" onclick="openSendModal('${gid}')" style="padding:3px 10px;font-size:12px;">Send Msg</button>`
-      : '';
-    const thread = g.thread_name ? `<span style="color:#888;font-size:12px;">#${g.thread_name}</span>` : '';
-    const ts = g.last_event_ts ? `<span class="proc-ts">${g.last_event_ts.slice(11,19)} UTC</span>` : '';
+    const holdBadge = g.hold ? `<span class="badge badge-yellow">HOLD</span>` : '';
+    const ts = g.last_event_ts ? `<span style="color:#555;font-size:12px;font-family:monospace;">${g.last_event_ts.slice(11,19)} UTC</span>` : '';
+    const thread = g.thread_name ? `<span style="color:#666;font-size:12px;">#${escHtml(g.thread_name)}</span>` : '';
+    const actionBtns = running
+      ? `<button class="rl-btn" onclick="openSendModal('${gid}')" style="padding:3px 10px;">Send Msg</button>
+         <button class="rl-btn rl-btn-red" onclick="killSession('${gid}')" style="padding:3px 10px;">Kill</button>`
+      : `<button class="rl-btn rl-btn-green" onclick="startSession('${gid}')" style="padding:3px 10px;">Clear Hold</button>`;
     rows.push(`<div class="proc-row">
-      <span class="proc-name">Guild ${gid}</span>
-      <span class="proc-kind">${kind}</span>
-      ${badge}${hold}
+      <div style="min-width:130px;font-family:monospace;font-size:13px;color:#ccc;">Guild ${gid}</div>
+      <div style="min-width:110px;font-size:13px;font-weight:700;color:${kindColor};">${kind}</div>
+      ${statusBadge}
+      ${holdBadge}
       ${thread}
       ${ts}
-      <span style="margin-left:auto;display:flex;gap:6px;">${sendBtn}${killBtn}</span>
+      <div style="margin-left:auto;display:flex;gap:6px;">${actionBtns}</div>
     </div>`);
   }
-  document.getElementById('proc-list').innerHTML = rows.length ? rows.join('') : '<div style="color:#666;font-size:13px;">No guilds configured.</div>';
+  document.getElementById('proc-list').innerHTML = rows.length
+    ? rows.join('')
+    : '<div style="color:#555;font-size:13px;padding:4px 0;">No guilds configured or bot not connected.</div>';
 }
 
-// ── Sessions ──────────────────────────────────────────────
+// ── Session ───────────────────────────────────────────────
 function renderSessions() {
   const guilds = _state.guilds || {};
   const rows = [];
   for (const [gid, g] of Object.entries(guilds)) {
     if (!g.running && !g.session_key) continue;
-    const kindColor = {RACE:'#f88',SPRINT:'#fa8',QUALI:'#8cf',SPRINT_QUALI:'#acf'}[g.session_kind] || '#aaa';
-    rows.push(`<div style="display:flex;gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid #222;font-size:13px;">
-      <span style="color:#ccc;min-width:140px;">Guild ${gid}</span>
-      <span style="color:${kindColor};font-weight:700;">${g.session_kind || '—'}</span>
-      <span style="color:#888;">key: ${g.session_key || '—'}</span>
-      ${g.thread_name ? `<span style="color:#666;">#${g.thread_name}</span>` : ''}
+    const kindColor = {RACE:'#f87171',SPRINT:'#fb923c',QUALI:'#60a5fa',SPRINT_QUALI:'#a78bfa'}[g.session_kind] || '#888';
+    rows.push(`<div style="display:flex;gap:16px;align-items:center;padding:6px 0;border-bottom:1px solid #1a1a1a;font-size:13px;">
+      <span style="color:#aaa;min-width:130px;font-family:monospace;">Guild ${gid}</span>
+      <span style="color:${kindColor};font-weight:700;min-width:100px;">${g.session_kind || '—'}</span>
+      <span style="color:#555;">key: ${g.session_key || '—'}</span>
+      ${g.thread_name ? `<span style="color:#555;">#${escHtml(g.thread_name)}</span>` : ''}
     </div>`);
   }
-  document.getElementById('session-list').innerHTML = rows.length ? rows.join('') : '<div style="color:#666;font-size:13px;">No active sessions.</div>';
-  document.getElementById('session-ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  document.getElementById('session-list').innerHTML = rows.length
+    ? rows.join('')
+    : '<div style="color:#555;font-size:13px;padding:4px 0;">No active sessions.</div>';
+  document.getElementById('session-ts').textContent = new Date().toLocaleTimeString();
 }
 
 // ── Feed ─────────────────────────────────────────────────
 function renderFeed() {
   const guilds = _state.guilds || {};
-  // Rebuild guild selector
   const sel = document.getElementById('feed-guild');
-  const currentGuild = sel.value;
-  const gids = Object.keys(guilds);
-  // Only add options that aren't there yet
   const existing = Array.from(sel.options).map(o => o.value);
-  for (const gid of gids) {
+  for (const gid of Object.keys(guilds)) {
     if (!existing.includes(gid)) {
       const opt = document.createElement('option');
-      opt.value = gid; opt.textContent = `Guild ${gid}`;
+      opt.value = gid; opt.textContent = 'Guild ' + gid;
       sel.appendChild(opt);
     }
   }
@@ -2538,68 +2612,59 @@ function renderFeed() {
   let allRows = [];
   for (const [gid, g] of Object.entries(guilds)) {
     if (filterGuild && gid !== filterGuild) continue;
-    for (const item of (g.feed || [])) {
-      allRows.push({gid, ...item});
-    }
+    for (const item of (g.feed || [])) allRows.push({gid, ...item});
   }
-  // Sort by ts descending (most recent first)
   allRows.sort((a,b) => b.ts > a.ts ? 1 : -1);
 
-  const rows = [];
+  const html = [];
   for (const item of allRows) {
     if (!showSkipped && item.status === 'skipped') continue;
-    const statusCls = 'status-' + item.status;
-    const statusLabel = item.status === 'track_deletion' ? 'deleted' : item.status;
-    rows.push(`<div class="feed-row">
+    const pillCls = 'pill-' + item.status;
+    const pillLabel = {posted:'✓ posted', skipped:'skipped', track_deletion:'🚫 deleted', boundary:'boundary'}[item.status] || item.status;
+    const msgJson = JSON.stringify(item.msg || '');
+    const gidJs = JSON.stringify(item.gid);
+    const overrideBtn = `<button class="feed-override-btn" onclick="sendOverride(${gidJs},${msgJson})">Override →</button>`;
+    html.push(`<div class="feed-row">
       <span class="feed-ts">${item.ts || ''}</span>
       <span class="feed-emoji">${item.emoji || ''}</span>
-      <span class="feed-status ${statusCls}">${statusLabel}</span>
       <span class="feed-msg">${escHtml(item.msg || '')}</span>
-      ${item.status === 'skipped' ? `<button class="btn" onclick="sendOverride('${item.gid}',${JSON.stringify(item.msg).replace(/'/g,'\\x27')})" style="padding:2px 8px;font-size:11px;">Override</button>` : ''}
+      <span class="feed-hover">
+        <span class="feed-pill ${pillCls}">${pillLabel}</span>
+        ${overrideBtn}
+      </span>
     </div>`);
   }
-  document.getElementById('feed-list').innerHTML = rows.length ? rows.join('') : '<div style="color:#666;font-size:13px;">No messages yet.</div>';
+  document.getElementById('feed-list').innerHTML = html.length
+    ? html.join('')
+    : '<div style="color:#555;font-size:13px;padding:8px 0;">No messages yet — feed populates during an active race session.</div>';
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Settings ─────────────────────────────────────────────
-function renderSettings() {
-  const delay = _state.delay_seconds ?? '—';
-  const poll  = _state.poll_seconds  ?? '—';
-  const ops   = _state.ops_channel_id ?? '—';
-  document.getElementById('settings-panel').innerHTML = `
-    <div class="settings-row">
-      <span class="settings-key">delay_seconds</span>
-      <input class="edit-field" id="set-delay" type="number" step="0.5" min="0" value="${delay}">
-      <button class="btn" onclick="applySetting('delay_seconds', document.getElementById('set-delay').value)">Apply</button>
-      <span style="color:#666;font-size:12px;">Spoiler delay before posting messages</span>
-    </div>
-    <div class="settings-row">
-      <span class="settings-key">poll_seconds</span>
-      <input class="edit-field" id="set-poll" type="number" step="0.5" min="1" value="${poll}">
-      <button class="btn" onclick="applySetting('poll_seconds', document.getElementById('set-poll').value)">Apply</button>
-      <span style="color:#666;font-size:12px;">OpenF1 poll interval</span>
-    </div>
-    <div class="settings-row">
-      <span class="settings-key">ops_channel_id</span>
-      <input class="edit-field" id="set-ops" type="text" value="${ops}">
-      <button class="btn" onclick="applySetting('ops_channel_id', document.getElementById('set-ops').value)">Apply</button>
-      <span style="color:#666;font-size:12px;">Ops notice channel</span>
-    </div>
-  `;
+// ── Settings (pre-fill inputs; don't clobber while user is typing) ─────────
+function syncSettings() {
+  const fields = [
+    ['set-delay', _state.delay_seconds],
+    ['set-poll',  _state.poll_seconds],
+    ['set-ops',   _state.ops_channel_id],
+  ];
+  for (const [id, val] of fields) {
+    const el = document.getElementById(id);
+    if (!el || document.activeElement === el) continue;
+    if (val !== undefined && val !== null) el.value = val;
+  }
 }
 
 // ── Actions ───────────────────────────────────────────────
 async function _post(url, body) {
-  const resp = await fetch(url, {
+  const r = await fetch(url, {
     method: 'POST',
-    headers: {'Content-Type':'application/json', 'X-CSRFToken': getCsrf()},
+    headers: {'Content-Type':'application/json','X-CSRFToken':getCsrf()},
     body: JSON.stringify(body),
   });
-  return resp.json();
+  return r.json();
 }
 
 function getCsrf() {
@@ -2608,7 +2673,7 @@ function getCsrf() {
 }
 
 async function killSession(gid) {
-  if (!confirm('Kill race live for guild ' + gid + '?')) return;
+  if (!confirm('Kill race live for guild ' + gid + '? This sets a hold — use Clear Hold to re-enable.')) return;
   const r = await _post('/api/race/kill', {guild_id: gid});
   alert(r.message || (r.ok ? 'Done' : 'Error'));
 }
@@ -2622,13 +2687,18 @@ function openSendModal(gid) {
   _sendGuildId = gid;
   document.getElementById('send-guild-label').textContent = 'Guild ' + gid;
   document.getElementById('send-text').value = '';
+  document.getElementById('send-preview').style.display = 'none';
   document.getElementById('send-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('send-text').focus(), 50);
 }
 
 function sendOverride(gid, msg) {
   _sendGuildId = gid;
   document.getElementById('send-guild-label').textContent = 'Guild ' + gid;
   document.getElementById('send-text').value = msg;
+  const prev = document.getElementById('send-preview');
+  prev.textContent = msg;
+  prev.style.display = 'block';
   document.getElementById('send-overlay').classList.add('open');
 }
 
@@ -2642,14 +2712,24 @@ async function confirmSend() {
   if (!msg || !_sendGuildId) return;
   closeSendModal();
   const r = await _post('/api/race/send', {guild_id: _sendGuildId, message: msg});
-  if (!r.ok) alert('Error: ' + (r.message || 'unknown'));
+  if (!r.ok) alert('Send failed: ' + (r.message || 'unknown error'));
 }
 
-async function applySetting(key, value) {
+async function applySetting(key, inputId) {
+  const value = document.getElementById(inputId).value;
   const r = await _post('/api/race/settings', {key, value});
   if (!r.ok) alert('Error: ' + (r.message || 'unknown'));
-  else alert(r.message || 'Applied');
+  else {
+    const el = document.getElementById(inputId);
+    el.style.borderColor = '#166534';
+    setTimeout(() => el.style.borderColor = '', 1200);
+  }
 }
+
+// close modal on overlay click
+document.getElementById('send-overlay').addEventListener('click', function(e){
+  if (e.target === this) closeSendModal();
+});
 </script>
 """
 
