@@ -3819,6 +3819,11 @@ async def on_ready():
         logging.warning(f"[RuntimeDB] init/migration failed: {e}")
     setattr(bot, "of1_runtime_status_snapshot", _runtime_status_snapshot)
     setattr(bot, "of1_current_or_next_round_meta_coro", current_or_next_round_meta)
+    setattr(bot, "of1_race_live_snapshot", of1_race_live_snapshot)
+    setattr(bot, "of1_apply_race_setting", of1_apply_race_setting)
+    setattr(bot, "of1_dashboard_send_to_thread", of1_dashboard_send_to_thread)
+    setattr(bot, "of1_dashboard_kill_race_live", of1_dashboard_kill_race_live)
+    setattr(bot, "of1_dashboard_start_race_live", of1_dashboard_start_race_live)
 
     ensure_standings_task_running()
     _ensure_background_task("PERIODIC_ROLE_RECOVERY_TASK", periodic_reaction_role_check, "Recovery")
@@ -4943,6 +4948,8 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                     )
 
                     will_post = _race_control_should_post(msg)
+                    feed_handled = False  # ensures exactly one _race_feed_append per message
+
                     if will_post:
                         delay_s = _race_live_delay_seconds()
                         if delay_s > 0:
@@ -4951,8 +4958,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                         await thread.send(f"{emoji} {msg}")
                         RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
                         _race_feed_append(gid, dt, msg, "posted", emoji)
-                    else:
-                        _race_feed_append(gid, dt, msg, "skipped")
+                        feed_handled = True
 
                     if session_kind in {"QUALI", "SPRINT_QUALI"}:
                         seg = _extract_quali_segment(msg)
@@ -4985,18 +4991,20 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                                     _racelog(gid, f"quali summary failed for {closing_seg}: {e}")
                             _seen_session_end_since_last_boundary = False
 
-                        # Post track limit / lap time deletion messages during qualifying
-                        lower_msg = msg.lower()
-                        is_track_deletion = any(p in lower_msg for p in ("track limits", "lap time deleted", "time deleted", "lap deleted"))
-                        if is_track_deletion and not _race_control_should_post(msg):
-                            delay_s = _race_live_delay_seconds()
-                            if delay_s > 0:
-                                await asyncio.sleep(delay_s)
-                            await thread.send(f"🚫 {msg}")
-                            RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
-                            _race_feed_append(gid, dt, msg, "track_deletion", "🚫")
-                        elif not is_track_deletion:
-                            _race_feed_append(gid, dt, msg, "skipped")
+                        # Post track limit / lap time deletion messages during qualifying.
+                        # These are filtered by _race_control_should_post but we still
+                        # want them surfaced in the thread with a dedicated emoji.
+                        if not feed_handled:
+                            lower_msg = msg.lower()
+                            is_track_deletion = any(p in lower_msg for p in ("track limits", "lap time deleted", "time deleted", "lap deleted"))
+                            if is_track_deletion:
+                                delay_s = _race_live_delay_seconds()
+                                if delay_s > 0:
+                                    await asyncio.sleep(delay_s)
+                                await thread.send(f"🚫 {msg}")
+                                RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
+                                _race_feed_append(gid, dt, msg, "track_deletion", "🚫")
+                                feed_handled = True
 
                         if session_end:
                             if current_quali_seg in {"Q3", "SQ3"}:
@@ -5053,6 +5061,10 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                             stop_requested = True
                             _racelog(gid, "session end detected in race/sprint; stopping live loop")
                             break
+
+                    # Catch-all: if no session-kind handler claimed this message, mark skipped
+                    if not feed_handled:
+                        _race_feed_append(gid, dt, msg, "skipped")
 
                 if stop_requested:
                     RACE_LIVE_ENABLED[gid] = False

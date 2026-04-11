@@ -258,7 +258,11 @@ def _csrf_input() -> str:
 def _csrf_protect():
     if request.method != "POST":
         return
-    token = request.form.get("_csrf", "")
+    # Accept token from form body (normal form submits) or X-CSRFToken header (JSON API)
+    token = (
+        request.form.get("_csrf", "")
+        or request.headers.get("X-CSRFToken", "")
+    )
     expected = session.get("_csrf_token", "")
     if not token or not expected or not hmac.compare_digest(token, expected):
         abort(400)
@@ -274,6 +278,7 @@ BASE_TEMPLATE = """
   <title>OF1 Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <style>
     [x-cloak] { display: none; }
     .nav-link.active { background: #1f1f1f; color: #fff; }
@@ -522,6 +527,7 @@ def _render(body: str, flash: str = ""):
         bot_name=bot_name,
         now=now,
         csrf_input=_csrf_input(),
+        csrf_token=_csrf_token(),
     )
 
 def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
@@ -2597,8 +2603,8 @@ async function _post(url, body) {
 }
 
 function getCsrf() {
-  const m = document.cookie.match(/csrf_token=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : '';
+  const m = document.querySelector('meta[name="csrf-token"]');
+  return m ? m.getAttribute('content') : '';
 }
 
 async function killSession(gid) {
