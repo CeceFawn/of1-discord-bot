@@ -1245,26 +1245,6 @@ def status():
             f'</div>'
         )
 
-    def _svc_row(label: str, svc_name: str, action_suffix: str) -> str:
-        """One row in the Services card: service name + start/restart/stop buttons."""
-        btn = lambda act, lbl, cls: (
-            f'<form data-async-refresh="1" action="{url_for("bot_action", action=act + action_suffix)}" method="post" style="margin:0;">'
-            f'<input type="hidden" name="_csrf" value="__CSRF__">'
-            f'<button class="text-xs px-2 py-1 rounded-md border cursor-pointer {cls}">{lbl}</button>'
-            f'</form>'
-        )
-        return (
-            f'<div class="flex items-center gap-2 py-1">'
-            f'<span class="text-gray-500 text-sm w-20 shrink-0">{_escape(label)}</span>'
-            f'<span class="font-mono text-xs text-gray-600 flex-1 truncate">{_escape(svc_name)}</span>'
-            f'<div class="flex gap-1.5 shrink-0">'
-            f'{btn("start", "Start", "bg-[#0f2a0f] text-green-400 border-green-900/50 hover:bg-[#14532d]")}'
-            f'{btn("restart", "Restart", "bg-[#1a1a0f] text-yellow-400 border-yellow-900/50 hover:bg-[#2a2a10]")}'
-            f'{btn("stop", "Stop", "bg-[#2a0f0f] text-red-400 border-red-900/50 hover:bg-[#3a1010]")}'
-            f'</div>'
-            f'</div>'
-        ).replace("__CSRF__", _csrf_token())
-
     current_round_record = data.get("current_round_record") if isinstance(data.get("current_round_record"), dict) else None
     current_round_key = str(data.get("current_round_key") or "")
     current_round_name = str(data.get("current_round_name") or "Next round")
@@ -1426,13 +1406,8 @@ def status():
     </div>
     <div class="bg-[#111] border border-[#222] rounded-xl p-4">
       <div class="text-xs text-gray-500 font-semibold uppercase tracking-widest mb-3">Services</div>
-      <div class="space-y-2">
-        {''.join(_svc_row(label, svc, action_prefix) for label, svc, action_prefix in [
-          ("Bot",       BOT_SYSTEMD_SERVICE,       ""),
-          ("Dashboard", DASHBOARD_SYSTEMD_SERVICE, "_dashboard"),
-          ("Website",   WEBSITE_SYSTEMD_SERVICE,   "_website"),
-        ])}
-      </div>
+      {_kv("Bot", _escape(BOT_SYSTEMD_SERVICE), mono=True)}
+      {_kv("Dashboard", _escape(DASHBOARD_SYSTEMD_SERVICE), mono=True)}
       {_kv("Repo", _escape(BOT_REPO_DIR), mono=True)}
     </div>
   </div>
@@ -1576,32 +1551,14 @@ def status():
 def bot_action(action: str):
     global _DEPLOY_IN_PROGRESS
     action = (action or "").strip().lower()
-    allowed = {
-        "start", "stop", "restart",
-        "start_dashboard", "stop_dashboard", "restart_dashboard",
-        "start_website", "stop_website", "restart_website",
-        "deploy", "deploybot", "deploydashboard", "deploywebsite", "deployboth", "deployall",
-    }
+    allowed = {"start", "stop", "restart", "deploy", "deploybot", "deploydashboard", "deploywebsite", "deployboth", "deployall"}
     if action not in allowed:
         abort(404)
 
-    # Per-service start/stop/restart
-    _svc_map = {
-        "start": (BOT_SYSTEMD_SERVICE, "start"),
-        "stop": (BOT_SYSTEMD_SERVICE, "stop"),
-        "restart": (BOT_SYSTEMD_SERVICE, "restart"),
-        "start_dashboard": (DASHBOARD_SYSTEMD_SERVICE, "start"),
-        "stop_dashboard": (DASHBOARD_SYSTEMD_SERVICE, "stop"),
-        "restart_dashboard": (DASHBOARD_SYSTEMD_SERVICE, "restart"),
-        "start_website": (WEBSITE_SYSTEMD_SERVICE, "start"),
-        "stop_website": (WEBSITE_SYSTEMD_SERVICE, "stop"),
-        "restart_website": (WEBSITE_SYSTEMD_SERVICE, "restart"),
-    }
-    if action in _svc_map:
-        svc, cmd = _svc_map[action]
-        ok, out = _sudo_systemctl(cmd, svc)
-        expected_active = cmd in {"start", "restart"}
-        is_active, state_txt = _service_is_active(svc)
+    if action in {"start", "stop", "restart"}:
+        ok, out = _sudo_systemctl(action)
+        expected_active = action in {"start", "restart"}
+        is_active, state_txt = _service_is_active(BOT_SYSTEMD_SERVICE)
         state_ok = (is_active == expected_active)
         final_ok = bool(ok and state_ok)
         combined = (out or "").strip()
