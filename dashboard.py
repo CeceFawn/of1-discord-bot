@@ -15,7 +15,8 @@ from urllib.parse import urlencode
 import bcrypt
 import psutil
 import requests
-from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify
+import queue
+from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify, Response, stream_with_context
 
 from settings import LOG_PATH, CONFIG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH
 from storage import load_config, save_config, load_state, save_state
@@ -55,6 +56,41 @@ _DEPLOY_IN_PROGRESS = False
 _RUNTIME_STATUS_CACHE = {"ts": 0.0, "data": {}}
 _ROUND_META_CACHE = {"ts": 0.0, "data": {}}
 _RUNTIME_FILE_CACHE = {"ts": 0.0, "data": {}, "source": "none", "error": ""}
+
+# ----------------------------
+# SSE subscriber registry
+# ----------------------------
+_SSE_SUBSCRIBERS: list[queue.Queue] = []
+_SSE_LOCK = threading.Lock()
+
+def _sse_subscribe() -> queue.Queue:
+    q: queue.Queue = queue.Queue(maxsize=50)
+    with _SSE_LOCK:
+        _SSE_SUBSCRIBERS.append(q)
+    return q
+
+def _sse_unsubscribe(q: queue.Queue) -> None:
+    with _SSE_LOCK:
+        try:
+            _SSE_SUBSCRIBERS.remove(q)
+        except ValueError:
+            pass
+
+def _sse_broadcast(event: str, data: dict) -> None:
+    """Push an SSE event to all connected subscribers (non-blocking, drops if full)."""
+    payload = f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+    with _SSE_LOCK:
+        dead = []
+        for q in _SSE_SUBSCRIBERS:
+            try:
+                q.put_nowait(payload)
+            except queue.Full:
+                dead.append(q)
+        for q in dead:
+            try:
+                _SSE_SUBSCRIBERS.remove(q)
+            except ValueError:
+                pass
 
 
 def _write_deploy_status(payload: dict) -> None:
@@ -245,6 +281,7 @@ BASE_TEMPLATE = """
       <a style="color:#9cf;" href="{{ url_for('status') }}">Status</a>
       <a style="color:#9cf;" href="{{ url_for('config') }}">Config</a>
       <a style="color:#9cf;" href="{{ url_for('state') }}">State</a>
+      <a style="color:#fc6;" href="{{ url_for('race_live') }}">Race Live</a>
 
       <!-- Split button: Restart + dropdown -->
       <div style="display:inline-flex;align-items:stretch;gap:0;margin-left:12px;">
@@ -1330,13 +1367,456 @@ def restart():
     _set_last_action("restart", ok, out or ("OK" if ok else "FAILED"))
     return redirect(url_for("logs"))
 
+
+# ─────────────────────────────────────────────────────────────
+# SSE endpoint — real-time push to browser
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/sse")
+@login_required
+def api_sse():
+    """Server-Sent Events stream. Pushes race_state events every 2 s."""
+    def _generate():
+        q = _sse_subscribe()
+        # Send initial snapshot immediately
+        snap = _race_snapshot_safe()
+        yield f"event: race_state\ndata: {json.dumps(snap, default=str)}\n\n"
+        last_push = time.time()
+        try:
+            while True:
+                # Drain any queued pushes first
+                try:
+                    msg = q.get(timeout=2.0)
+                    yield msg
+                    last_push = time.time()
+                except queue.Empty:
+                    pass
+                # Heartbeat / periodic poll regardless
+                if time.time() - last_push >= 2.0:
+                    snap = _race_snapshot_safe()
+                    yield f"event: race_state\ndata: {json.dumps(snap, default=str)}\n\n"
+                    last_push = time.time()
+        except GeneratorExit:
+            pass
+        finally:
+            _sse_unsubscribe(q)
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _race_snapshot_safe() -> dict:
+    """Grab race-live snapshot from the bot reference, safely."""
+    try:
+        if bot_reference and hasattr(bot_reference, "of1_race_live_snapshot"):
+            return bot_reference.of1_race_live_snapshot()
+    except Exception:
+        pass
+    return {}
+
+
+# ─────────────────────────────────────────────────────────────
+# Race Live page
+# ─────────────────────────────────────────────────────────────
+
+_RACE_LIVE_PAGE = """
+<style>
+  .rl-card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px;margin-bottom:16px;}
+  .rl-label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+  .rl-val{font-size:15px;font-weight:600;color:#eee;}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;}
+  .badge-green{background:#1a3a1a;color:#4f4;border:1px solid #2a5a2a;}
+  .badge-red{background:#3a1a1a;color:#f77;border:1px solid #5a2a2a;}
+  .badge-yellow{background:#3a3a1a;color:#ff7;border:1px solid #5a5a2a;}
+  .badge-grey{background:#222;color:#888;border:1px solid #333;}
+  .feed-row{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid #222;font-size:13px;}
+  .feed-ts{color:#666;min-width:60px;font-family:monospace;}
+  .feed-status{min-width:90px;}
+  .feed-msg{color:#ccc;flex:1;}
+  .feed-emoji{min-width:24px;text-align:center;}
+  .status-posted{color:#4f4;}
+  .status-skipped{color:#666;}
+  .status-track_deletion{color:#fa0;}
+  .status-boundary{color:#8cf;}
+  .proc-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1e1e1e;}
+  .proc-name{color:#ccc;min-width:180px;font-family:monospace;font-size:13px;}
+  .proc-kind{color:#888;font-size:12px;min-width:120px;}
+  .proc-ts{color:#666;font-size:12px;font-family:monospace;}
+  .settings-row{display:flex;align-items:center;gap:10px;padding:6px 0;}
+  .settings-key{color:#aaa;font-size:13px;min-width:160px;font-family:monospace;}
+  .settings-val{color:#eee;font-size:13px;font-family:monospace;flex:1;}
+  input.edit-field{background:#111;border:1px solid #333;color:#eee;padding:4px 8px;border-radius:6px;font-size:13px;width:120px;}
+  button.btn{background:#222;color:#eee;border:1px solid #333;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;}
+  button.btn:hover{background:#2a2a2a;}
+  button.btn-red{background:#300;color:#f88;border-color:#822;}
+  button.btn-red:hover{background:#3a0000;}
+  button.btn-green{background:#130;color:#8f8;border-color:#282;}
+  button.btn-green:hover{background:#1a3a00;}
+  #send-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center;}
+  #send-overlay.open{display:flex;}
+  .modal{background:#1a1a1a;border:1px solid #333;border-radius:14px;padding:24px;width:480px;max-width:95vw;}
+  .modal h3{margin:0 0 14px;color:#eee;}
+  .modal textarea{width:100%;box-sizing:border-box;background:#111;border:1px solid #333;color:#eee;padding:8px;border-radius:8px;font-size:14px;resize:vertical;min-height:80px;}
+  .modal .actions{margin-top:14px;display:flex;gap:10px;justify-content:flex-end;}
+</style>
+
+<h2 style="margin:0 0 16px;color:#fc6;">Race Live</h2>
+
+<!-- Process Tags -->
+<div class="rl-card">
+  <div class="rl-label">Background Processes</div>
+  <div id="proc-list" style="margin-top:8px;">Loading…</div>
+</div>
+
+<!-- Active Sessions -->
+<div class="rl-card">
+  <div class="rl-label" style="display:flex;align-items:center;justify-content:space-between;">
+    <span>Active Sessions</span>
+    <span id="session-ts" style="color:#555;font-size:11px;"></span>
+  </div>
+  <div id="session-list" style="margin-top:8px;">Loading…</div>
+</div>
+
+<!-- Message Feed -->
+<div class="rl-card">
+  <div class="rl-label" style="display:flex;align-items:center;justify-content:space-between;">
+    <span>Race Control Feed</span>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <label style="font-size:12px;color:#888;">Guild:
+        <select id="feed-guild" style="background:#111;color:#eee;border:1px solid #333;border-radius:6px;padding:3px 8px;font-size:12px;margin-left:4px;" onchange="renderFeed()">
+          <option value="">All</option>
+        </select>
+      </label>
+      <label style="font-size:12px;color:#888;display:flex;align-items:center;gap:4px;">
+        <input type="checkbox" id="feed-skipped" checked onchange="renderFeed()"> Show skipped
+      </label>
+    </div>
+  </div>
+  <div id="feed-list" style="margin-top:8px;max-height:400px;overflow-y:auto;">Loading…</div>
+</div>
+
+<!-- Settings -->
+<div class="rl-card">
+  <div class="rl-label">Settings</div>
+  <div id="settings-panel" style="margin-top:8px;">Loading…</div>
+</div>
+
+<!-- Send override modal -->
+<div id="send-overlay">
+  <div class="modal">
+    <h3>Send Message to Race Thread</h3>
+    <div style="font-size:12px;color:#888;margin-bottom:10px;">Guild: <span id="send-guild-label" style="color:#ccc;"></span></div>
+    <textarea id="send-text" placeholder="Message text…"></textarea>
+    <div class="actions">
+      <button class="btn" onclick="closeSendModal()">Cancel</button>
+      <button class="btn btn-green" onclick="confirmSend()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _state = {};
+let _sendGuildId = null;
+
+const evtSource = new EventSource('/api/sse');
+evtSource.addEventListener('race_state', e => {
+  _state = JSON.parse(e.data);
+  render();
+});
+
+function render() {
+  renderProcs();
+  renderSessions();
+  renderFeed();
+  renderSettings();
+}
+
+// ── Process tags ──────────────────────────────────────────
+function renderProcs() {
+  const guilds = _state.guilds || {};
+  const rows = [];
+  for (const [gid, g] of Object.entries(guilds)) {
+    const running = g.running;
+    const kind = g.session_kind || '—';
+    const badge = running
+      ? `<span class="badge badge-green">RUNNING</span>`
+      : `<span class="badge badge-grey">STOPPED</span>`;
+    const hold = g.hold ? `<span class="badge badge-yellow" style="margin-left:4px;">HOLD</span>` : '';
+    const killBtn = running
+      ? `<button class="btn btn-red" onclick="killSession('${gid}')" style="padding:3px 10px;font-size:12px;">Kill</button>`
+      : `<button class="btn btn-green" onclick="startSession('${gid}')" style="padding:3px 10px;font-size:12px;">Clear Hold</button>`;
+    const sendBtn = running
+      ? `<button class="btn" onclick="openSendModal('${gid}')" style="padding:3px 10px;font-size:12px;">Send Msg</button>`
+      : '';
+    const thread = g.thread_name ? `<span style="color:#888;font-size:12px;">#${g.thread_name}</span>` : '';
+    const ts = g.last_event_ts ? `<span class="proc-ts">${g.last_event_ts.slice(11,19)} UTC</span>` : '';
+    rows.push(`<div class="proc-row">
+      <span class="proc-name">Guild ${gid}</span>
+      <span class="proc-kind">${kind}</span>
+      ${badge}${hold}
+      ${thread}
+      ${ts}
+      <span style="margin-left:auto;display:flex;gap:6px;">${sendBtn}${killBtn}</span>
+    </div>`);
+  }
+  document.getElementById('proc-list').innerHTML = rows.length ? rows.join('') : '<div style="color:#666;font-size:13px;">No guilds configured.</div>';
+}
+
+// ── Sessions ──────────────────────────────────────────────
+function renderSessions() {
+  const guilds = _state.guilds || {};
+  const rows = [];
+  for (const [gid, g] of Object.entries(guilds)) {
+    if (!g.running && !g.session_key) continue;
+    const kindColor = {RACE:'#f88',SPRINT:'#fa8',QUALI:'#8cf',SPRINT_QUALI:'#acf'}[g.session_kind] || '#aaa';
+    rows.push(`<div style="display:flex;gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid #222;font-size:13px;">
+      <span style="color:#ccc;min-width:140px;">Guild ${gid}</span>
+      <span style="color:${kindColor};font-weight:700;">${g.session_kind || '—'}</span>
+      <span style="color:#888;">key: ${g.session_key || '—'}</span>
+      ${g.thread_name ? `<span style="color:#666;">#${g.thread_name}</span>` : ''}
+    </div>`);
+  }
+  document.getElementById('session-list').innerHTML = rows.length ? rows.join('') : '<div style="color:#666;font-size:13px;">No active sessions.</div>';
+  document.getElementById('session-ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// ── Feed ─────────────────────────────────────────────────
+function renderFeed() {
+  const guilds = _state.guilds || {};
+  // Rebuild guild selector
+  const sel = document.getElementById('feed-guild');
+  const currentGuild = sel.value;
+  const gids = Object.keys(guilds);
+  // Only add options that aren't there yet
+  const existing = Array.from(sel.options).map(o => o.value);
+  for (const gid of gids) {
+    if (!existing.includes(gid)) {
+      const opt = document.createElement('option');
+      opt.value = gid; opt.textContent = `Guild ${gid}`;
+      sel.appendChild(opt);
+    }
+  }
+
+  const showSkipped = document.getElementById('feed-skipped').checked;
+  const filterGuild = sel.value;
+
+  let allRows = [];
+  for (const [gid, g] of Object.entries(guilds)) {
+    if (filterGuild && gid !== filterGuild) continue;
+    for (const item of (g.feed || [])) {
+      allRows.push({gid, ...item});
+    }
+  }
+  // Sort by ts descending (most recent first)
+  allRows.sort((a,b) => b.ts > a.ts ? 1 : -1);
+
+  const rows = [];
+  for (const item of allRows) {
+    if (!showSkipped && item.status === 'skipped') continue;
+    const statusCls = 'status-' + item.status;
+    const statusLabel = item.status === 'track_deletion' ? 'deleted' : item.status;
+    rows.push(`<div class="feed-row">
+      <span class="feed-ts">${item.ts || ''}</span>
+      <span class="feed-emoji">${item.emoji || ''}</span>
+      <span class="feed-status ${statusCls}">${statusLabel}</span>
+      <span class="feed-msg">${escHtml(item.msg || '')}</span>
+      ${item.status === 'skipped' ? `<button class="btn" onclick="sendOverride('${item.gid}',${JSON.stringify(item.msg).replace(/'/g,'\\x27')})" style="padding:2px 8px;font-size:11px;">Override</button>` : ''}
+    </div>`);
+  }
+  document.getElementById('feed-list').innerHTML = rows.length ? rows.join('') : '<div style="color:#666;font-size:13px;">No messages yet.</div>';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Settings ─────────────────────────────────────────────
+function renderSettings() {
+  const delay = _state.delay_seconds ?? '—';
+  const poll  = _state.poll_seconds  ?? '—';
+  const ops   = _state.ops_channel_id ?? '—';
+  document.getElementById('settings-panel').innerHTML = `
+    <div class="settings-row">
+      <span class="settings-key">delay_seconds</span>
+      <input class="edit-field" id="set-delay" type="number" step="0.5" min="0" value="${delay}">
+      <button class="btn" onclick="applySetting('delay_seconds', document.getElementById('set-delay').value)">Apply</button>
+      <span style="color:#666;font-size:12px;">Spoiler delay before posting messages</span>
+    </div>
+    <div class="settings-row">
+      <span class="settings-key">poll_seconds</span>
+      <input class="edit-field" id="set-poll" type="number" step="0.5" min="1" value="${poll}">
+      <button class="btn" onclick="applySetting('poll_seconds', document.getElementById('set-poll').value)">Apply</button>
+      <span style="color:#666;font-size:12px;">OpenF1 poll interval</span>
+    </div>
+    <div class="settings-row">
+      <span class="settings-key">ops_channel_id</span>
+      <input class="edit-field" id="set-ops" type="text" value="${ops}">
+      <button class="btn" onclick="applySetting('ops_channel_id', document.getElementById('set-ops').value)">Apply</button>
+      <span style="color:#666;font-size:12px;">Ops notice channel</span>
+    </div>
+  `;
+}
+
+// ── Actions ───────────────────────────────────────────────
+async function _post(url, body) {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json', 'X-CSRFToken': getCsrf()},
+    body: JSON.stringify(body),
+  });
+  return resp.json();
+}
+
+function getCsrf() {
+  const m = document.cookie.match(/csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+async function killSession(gid) {
+  if (!confirm('Kill race live for guild ' + gid + '?')) return;
+  const r = await _post('/api/race/kill', {guild_id: gid});
+  alert(r.message || (r.ok ? 'Done' : 'Error'));
+}
+
+async function startSession(gid) {
+  const r = await _post('/api/race/start', {guild_id: gid});
+  alert(r.message || (r.ok ? 'Done' : 'Error'));
+}
+
+function openSendModal(gid) {
+  _sendGuildId = gid;
+  document.getElementById('send-guild-label').textContent = 'Guild ' + gid;
+  document.getElementById('send-text').value = '';
+  document.getElementById('send-overlay').classList.add('open');
+}
+
+function sendOverride(gid, msg) {
+  _sendGuildId = gid;
+  document.getElementById('send-guild-label').textContent = 'Guild ' + gid;
+  document.getElementById('send-text').value = msg;
+  document.getElementById('send-overlay').classList.add('open');
+}
+
+function closeSendModal() {
+  document.getElementById('send-overlay').classList.remove('open');
+  _sendGuildId = null;
+}
+
+async function confirmSend() {
+  const msg = document.getElementById('send-text').value.trim();
+  if (!msg || !_sendGuildId) return;
+  closeSendModal();
+  const r = await _post('/api/race/send', {guild_id: _sendGuildId, message: msg});
+  if (!r.ok) alert('Error: ' + (r.message || 'unknown'));
+}
+
+async function applySetting(key, value) {
+  const r = await _post('/api/race/settings', {key, value});
+  if (!r.ok) alert('Error: ' + (r.message || 'unknown'));
+  else alert(r.message || 'Applied');
+}
+</script>
+"""
+
+@app.route("/race")
+@login_required
+def race_live():
+    return _render(_RACE_LIVE_PAGE)
+
+
+# ─────────────────────────────────────────────────────────────
+# Race Live API endpoints
+# ─────────────────────────────────────────────────────────────
+
+@app.route("/api/race/send", methods=["POST"])
+@login_required
+def api_race_send():
+    data = request.get_json(silent=True) or {}
+    gid = data.get("guild_id")
+    msg = str(data.get("message") or "").strip()
+    if not gid or not msg:
+        return jsonify({"ok": False, "message": "guild_id and message required"})
+    try:
+        bot_loop = bot_reference.loop if bot_reference else None
+        if not bot_loop or not bot_loop.is_running():
+            return jsonify({"ok": False, "message": "Bot not running"})
+        coro = bot_reference.of1_dashboard_send_to_thread(int(gid), msg)
+        fut = asyncio.run_coroutine_threadsafe(coro, bot_loop)
+        ok, message = fut.result(timeout=10)
+        return jsonify({"ok": ok, "message": message})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
+@app.route("/api/race/kill", methods=["POST"])
+@login_required
+def api_race_kill():
+    data = request.get_json(silent=True) or {}
+    gid = data.get("guild_id")
+    if not gid:
+        return jsonify({"ok": False, "message": "guild_id required"})
+    try:
+        bot_loop = bot_reference.loop if bot_reference else None
+        if not bot_loop or not bot_loop.is_running():
+            return jsonify({"ok": False, "message": "Bot not running"})
+        coro = bot_reference.of1_dashboard_kill_race_live(int(gid))
+        fut = asyncio.run_coroutine_threadsafe(coro, bot_loop)
+        ok, message = fut.result(timeout=10)
+        return jsonify({"ok": ok, "message": message})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
+@app.route("/api/race/start", methods=["POST"])
+@login_required
+def api_race_start():
+    data = request.get_json(silent=True) or {}
+    gid = data.get("guild_id")
+    if not gid:
+        return jsonify({"ok": False, "message": "guild_id required"})
+    try:
+        bot_loop = bot_reference.loop if bot_reference else None
+        if not bot_loop or not bot_loop.is_running():
+            return jsonify({"ok": False, "message": "Bot not running"})
+        coro = bot_reference.of1_dashboard_start_race_live(int(gid))
+        fut = asyncio.run_coroutine_threadsafe(coro, bot_loop)
+        ok, message = fut.result(timeout=10)
+        return jsonify({"ok": ok, "message": message})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
+@app.route("/api/race/settings", methods=["POST"])
+@login_required
+def api_race_settings():
+    data = request.get_json(silent=True) or {}
+    key   = str(data.get("key")   or "").strip()
+    value = data.get("value")
+    if not key:
+        return jsonify({"ok": False, "message": "key required"})
+    try:
+        if bot_reference and hasattr(bot_reference, "of1_apply_race_setting"):
+            ok, message = bot_reference.of1_apply_race_setting(key, value)
+        else:
+            return jsonify({"ok": False, "message": "Bot not connected"})
+        return jsonify({"ok": ok, "message": message})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
 def run_dashboard():
     try:
         init_runtime_db()
     except Exception:
         pass
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, threaded=True)
 
 def start_dashboard_thread():
     thread = threading.Thread(target=run_dashboard, daemon=True)

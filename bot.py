@@ -3915,6 +3915,20 @@ RACE_LIVE_LAST_EVENT_TS: Dict[int, str] = {}
 RACE_LIVE_DEBUG: Dict[int, deque] = {}
 RACE_LIVE_POSTED_SIGS: Dict[int, set] = {}
 RACE_LIVE_POSTED_SIGS_ORDER: Dict[int, deque] = {}
+# Dashboard-accessible state
+RACE_LIVE_THREADS: Dict[int, Any] = {}          # gid -> discord.Thread
+RACE_LIVE_SESSION_KEYS: Dict[int, int] = {}      # gid -> session_key
+RACE_LIVE_DRIVER_MAPS: Dict[int, Dict[str, str]] = {}  # gid -> driver_map
+RACE_CONTROL_FEED: Dict[int, deque] = {}         # gid -> rolling msg feed (maxlen 300)
+
+def _race_feed_append(gid: int, ts: str, msg: str, status: str, emoji: str = "") -> None:
+    """Append a race control message to the per-guild dashboard feed buffer."""
+    RACE_CONTROL_FEED.setdefault(gid, deque(maxlen=300)).append({
+        "ts": ts[11:19] if len(ts) >= 19 else ts,
+        "msg": msg,
+        "status": status,   # "posted" | "skipped" | "track_deletion" | "boundary"
+        "emoji": emoji,
+    })
 
 def _race_live_delay_seconds() -> float:
     bucket = _state_bucket("race_live")
@@ -4602,6 +4616,8 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
     RACE_LIVE_ENABLED[gid] = True
     RACE_LIVE_POSTED_SIGS.setdefault(gid, set())
     RACE_LIVE_POSTED_SIGS_ORDER.setdefault(gid, deque())
+    RACE_LIVE_THREADS[gid] = thread
+    RACE_LIVE_SESSION_KEYS[gid] = session_key
 
     poll_s = _race_live_poll_seconds()
     session_kind = _normalize_session_kind(session_type)
@@ -4621,6 +4637,7 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
 
     async with aiohttp.ClientSession(headers={"User-Agent": "OF1-Discord-Bot"}) as http:
         driver_map = await _openf1_driver_name_map(http, session_key)
+        RACE_LIVE_DRIVER_MAPS[gid] = driver_map
         posted_segment_summaries: set[str] = set()
         posted_final_summary = False
         current_quali_seg = "SQ1" if session_kind == "SPRINT_QUALI" else "Q1"
@@ -4662,13 +4679,17 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                         or ("SESSION FINISHED" in upper_msg)
                     )
 
-                    if _race_control_should_post(msg):
+                    will_post = _race_control_should_post(msg)
+                    if will_post:
                         delay_s = _race_live_delay_seconds()
                         if delay_s > 0:
                             await asyncio.sleep(delay_s)
                         emoji = _race_control_emoji_for_message(msg)
                         await thread.send(f"{emoji} {msg}")
                         RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
+                        _race_feed_append(gid, dt, msg, "posted", emoji)
+                    else:
+                        _race_feed_append(gid, dt, msg, "skipped")
 
                     if session_kind in {"QUALI", "SPRINT_QUALI"}:
                         seg = _extract_quali_segment(msg)
@@ -4710,6 +4731,9 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
                                 await asyncio.sleep(delay_s)
                             await thread.send(f"🚫 {msg}")
                             RACE_LIVE_LAST_EVENT_TS[gid] = datetime.now(timezone.utc).isoformat()
+                            _race_feed_append(gid, dt, msg, "track_deletion", "🚫")
+                        elif not is_track_deletion:
+                            _race_feed_append(gid, dt, msg, "skipped")
 
                         if session_end:
                             if current_quali_seg in {"Q3", "SQ3"}:
@@ -6180,6 +6204,95 @@ async def racereplay(ctx, year: int, round_num: int, speed: float = 10.0):
 
     RACE_TEST_TASKS[guild.id] = asyncio.create_task(runner())
     await ctx.send(f"\U0001F9EA Queued replay for `{year}` round `{round_num}` at `x{speed}`.")
+
+# ─────────────────────────────────────────────────────────────
+# Dashboard integration helpers
+# These are called from dashboard.py via bot_reference.
+# Sync functions can be called directly; async ones must be
+# dispatched via asyncio.run_coroutine_threadsafe().
+# ─────────────────────────────────────────────────────────────
+
+def of1_race_live_snapshot() -> dict:
+    """Return a JSON-serialisable snapshot of race-live state for the dashboard."""
+    guilds: dict = {}
+    for gid_raw in set(list(RACE_LIVE_ENABLED.keys()) + list(RACE_LIVE_TASKS.keys())):
+        gid_int = int(gid_raw)
+        task   = RACE_LIVE_TASKS.get(gid_int)
+        feed_raw = RACE_CONTROL_FEED.get(gid_int, [])
+        thread = RACE_LIVE_THREADS.get(gid_int)
+        guilds[str(gid_int)] = {
+            "enabled":      bool(RACE_LIVE_ENABLED.get(gid_int, False)),
+            "running":      _task_running(task) if task else False,
+            "session_kind": str(RACE_LIVE_SESSION_KINDS.get(gid_int, "")),
+            "session_key":  RACE_LIVE_SESSION_KEYS.get(gid_int),
+            "last_event_ts": str(RACE_LIVE_LAST_EVENT_TS.get(gid_int) or ""),
+            "hold":         _race_live_is_held(gid_int),
+            "thread_id":    thread.id   if thread else None,
+            "thread_name":  thread.name if thread else None,
+            "feed":         list(feed_raw)[-100:],
+        }
+    return {
+        "delay_seconds":  _race_live_delay_seconds(),
+        "poll_seconds":   _race_live_poll_seconds(),
+        "ops_channel_id": _race_live_ops_channel_id(),
+        "guilds": guilds,
+    }
+
+
+def of1_apply_race_setting(key: str, value) -> tuple:
+    """Apply a race-live setting by key. Returns (ok: bool, message: str)."""
+    try:
+        if key == "delay_seconds":
+            v = _set_race_live_delay_seconds(float(value))
+            return True, f"delay_seconds set to {v:.1f}s"
+        if key == "poll_seconds":
+            v = _set_race_live_poll_seconds(float(value))
+            return True, f"poll_seconds set to {v:.1f}s"
+        if key == "ops_channel_id":
+            v = _set_race_live_ops_channel_id(int(value))
+            return True, f"ops_channel_id set to {v}"
+        return False, f"Unknown setting key: '{key}'"
+    except Exception as e:
+        return False, str(e)
+
+
+async def of1_dashboard_send_to_thread(guild_id: int, message: str) -> tuple:
+    """Send a message to the active race thread for the guild. Returns (ok, msg)."""
+    thread = RACE_LIVE_THREADS.get(int(guild_id))
+    if thread is None:
+        return False, "No active race thread for that guild"
+    try:
+        await thread.send(message)
+        return True, "Sent"
+    except Exception as e:
+        return False, str(e)
+
+
+async def of1_dashboard_kill_race_live(guild_id: int) -> tuple:
+    """Kill race live for a guild (sets hold so supervisor won't restart)."""
+    gid = int(guild_id)
+    RACE_LIVE_ENABLED[gid] = False
+    _set_race_live_hold(gid, True)
+    task = RACE_LIVE_TASKS.get(gid)
+    if task and _task_running(task):
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    RACE_LIVE_TASKS.pop(gid, None)
+    RACE_LIVE_SESSION_KINDS.pop(gid, None)
+    RACE_LIVE_LAST_EVENT_TS.pop(gid, None)
+    RACE_LIVE_THREADS.pop(gid, None)
+    RACE_LIVE_SESSION_KEYS.pop(gid, None)
+    return True, "Race live killed and hold set"
+
+
+async def of1_dashboard_start_race_live(guild_id: int) -> tuple:
+    """Clear the manual hold so the supervisor will restart race live."""
+    _set_race_live_hold(int(guild_id), False)
+    return True, "Hold cleared — supervisor will pick up on next cycle"
+
 
 bot_token = os.getenv("DISCORD_BOT_TOKEN")
 if not bot_token:
