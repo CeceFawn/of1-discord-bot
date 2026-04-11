@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OF1 Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0a; overflow: hidden; font-family: Inter, sans-serif; }
+
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      cursor: grab;
+      user-select: none;
+    }
+    #canvas-container:active { cursor: grabbing; }
+    #canvas-container canvas { display: block; }
+
+    /* ── Title bar ── */
+    #title-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 20px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #title-bar a {
+      pointer-events: all;
+      color: rgba(255,255,255,0.4);
+      font-size: 13px;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    #title-bar a:hover { color: #e8002d; }
+    #title-bar span {
+      color: rgba(255,255,255,0.6);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Hint ── */
+    #ui {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.25);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    /* ── Lightbox ── */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: rgba(0,0,0,0.92);
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    #lightbox.active { display: flex; }
+    #lb-img {
+      max-width: 90vw;
+      max-height: 90vh;
+      object-fit: contain;
+      border-radius: 6px;
+      cursor: zoom-in;
+      transform-origin: center center;
+      transition: transform 0.2s ease;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    #lb-close {
+      position: fixed;
+      top: 20px; right: 24px;
+      width: 44px; height: 44px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.08);
+      border-radius: 50%;
+      color: #fff;
+      font-size: 22px;
+      cursor: pointer;
+      z-index: 1001;
+      transition: background 0.2s;
+    }
+    #lb-close:hover { background: rgba(232,0,45,0.5); }
+
+    /* ── Empty state ── */
+    #empty-state {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.3);
+      text-align: center; gap: 12px;
+    }
+    #empty-state h2 { font-size: 20px; font-weight: 600; color: rgba(255,255,255,0.5); }
+    #empty-state p  { font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<div id="title-bar">
+  <a href="/">← Back to OF1</a>
+  <span>OF1 GALLERY</span>
+  <span style="width:80px"></span>
+</div>
+
+{% if photos %}
+
+<div id="canvas-container"></div>
+<div id="ui">Drag to spin &nbsp;·&nbsp; Click a photo to open</div>
+
+<div id="lightbox">
+  <div id="lb-close" title="Close">✕</div>
+  <img id="lb-img" src="" alt="Gallery photo" />
+</div>
+
+<script src="/static/three.min.js"></script>
+<script>
+(function () {
+  if (typeof THREE === 'undefined') {
+    document.body.innerHTML = '<div style="color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Inter,sans-serif">Failed to load 3D library. Check your connection.</div>';
+    return;
+  }
+
+  const PHOTOS = {{ photos | tojson }};
+  const n = PHOTOS.length;
+
+  const scene    = new THREE.Scene();
+  const camera   = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 5000);
+  camera.position.z = 900;
+
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    logarithmicDepthBuffer: true
+  });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+  const RADIUS    = Math.min(window.innerWidth, window.innerHeight) * 0.28;
+  const sphereGrp = new THREE.Group();
+  scene.add(sphereGrp);
+
+  function fibonacciSphere(n) {
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    return Array.from({ length: n }, (_, i) => {
+      const y   = 1 - (i / Math.max(n - 1, 1)) * 2;
+      const r   = Math.sqrt(1 - y * y);
+      const phi = golden * i;
+      return { x: Math.cos(phi) * r, y, z: Math.sin(phi) * r };
+    });
+  }
+
+  const pts = fibonacciSphere(n);
+
+  // Slightly smaller tiles to reduce overlap
+  const patchAng = Math.sqrt(4 * Math.PI / n) * 0.92;
+
+  const loader = new THREE.TextureLoader();
+  const meshes = [];
+
+  const baseTileSize = RADIUS * patchAng;
+  const SEGMENTS = 16;
+
+  function makeCurvedTile(pt, width, height, depthOffset = 0) {
+    const outward = new THREE.Vector3(pt.x, pt.y, pt.z).normalize();
+    const quat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      outward
+    );
+    const center = outward.clone().multiplyScalar(RADIUS + depthOffset);
+
+    const geo = new THREE.PlaneGeometry(width, height, SEGMENTS, SEGMENTS);
+    const posAttr = geo.attributes.position;
+
+    for (let j = 0; j < posAttr.count; j++) {
+      const v = new THREE.Vector3(
+        posAttr.getX(j),
+        posAttr.getY(j),
+        posAttr.getZ(j)
+      );
+      v.applyQuaternion(quat);
+      v.add(center);
+      v.normalize().multiplyScalar(RADIUS + depthOffset);
+      posAttr.setXYZ(j, v.x, v.y, v.z);
+    }
+
+  posAttr.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
+}
+
+  // Deterministic tiny offsets instead of random offsets
+  // Small enough to preserve the sphere look, enough to separate surfaces
+  function getDepthOffset(i) {
+    const layers = 7;      // number of distinct depth bands
+    const step   = 0.18;   // tiny separation per band
+    return (i % layers) * step;
+  }
+
+  pts.forEach((pt, i) => {
+    const depthOffset = getDepthOffset(i);
+
+    function addMesh(mat, width, height) {
+      const mesh = new THREE.Mesh(makeCurvedTile(pt, width, height, depthOffset), mat);
+      mesh.userData.photo = PHOTOS[i];
+      mesh.renderOrder = i;
+      sphereGrp.add(mesh);
+      meshes.push(mesh);
+    }
+
+    loader.load(PHOTOS[i], (tex) => {
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+      const img = tex.image;
+      const aspect = img && img.width && img.height ? (img.width / img.height) : 1;
+
+      // Keep similar area instead of similar height
+      let width, height;
+      if (aspect >= 1) {
+        width = baseTileSize;
+        height = baseTileSize / aspect;
+      } else {
+        width = baseTileSize * aspect;
+        height = baseTileSize;
+      }
+
+      addMesh(new THREE.MeshBasicMaterial({
+        map: tex,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
+      }), width, height);
+
+    }, undefined, () => {
+      addMesh(new THREE.MeshBasicMaterial({
+        color: 0x330008,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
+      }), baseTileSize, baseTileSize);
+    });
+  });
+
+  const currentQuat   = new THREE.Quaternion();
+  const autoSpinQuat  = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0), 0.003
+  );
+  let autoSpin      = true;
+  let autoSpinTimer = null;
+  let spinning      = false;
+  let spinAxis      = new THREE.Vector3(0, 1, 0);
+  let spinAngle     = 0;
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (!dragging) {
+      if (autoSpin) {
+        currentQuat.premultiply(autoSpinQuat);
+      } else if (spinning) {
+        spinAngle *= 0.95;
+        if (spinAngle < 0.0002) {
+          spinning = false;
+          autoSpin = true;
+        } else {
+          currentQuat.premultiply(
+            new THREE.Quaternion().setFromAxisAngle(spinAxis, spinAngle)
+          );
+        }
+      }
+    }
+    sphereGrp.quaternion.copy(currentQuat);
+    renderer.render(scene, camera);
+  }
+
+  function toVirtualSphere(x, y) {
+    const nx = (x / window.innerWidth)  * 2 - 1;
+    const ny = -((y / window.innerHeight) * 2 - 1);
+    const d  = Math.sqrt(nx * nx + ny * ny);
+    const z  = d < 1 ? Math.sqrt(1 - d * d) : 0;
+    return new THREE.Vector3(nx, ny, z).normalize();
+  }
+
+  function rotationBetween(p1, p2) {
+    const axis = p1.clone().cross(p2);
+    if (axis.length() < 1e-7) return new THREE.Quaternion();
+    axis.normalize();
+    const angle = Math.acos(Math.max(-1, Math.min(1, p1.dot(p2))));
+    return new THREE.Quaternion().setFromAxisAngle(axis, angle);
+  }
+
+  const container = document.getElementById('canvas-container');
+  let dragging = false;
+  let lastSpherePoint = null;
+  let lastDX = 0, lastDY = 0, lastX = 0, lastY = 0;
+  let mouseDownX = 0, mouseDownY = 0;
+  let lastRotQuat = new THREE.Quaternion();
+
+  function startDrag(x, y) {
+    dragging = true; autoSpin = false; spinning = false;
+    clearTimeout(autoSpinTimer);
+    lastSpherePoint = toVirtualSphere(x, y);
+    lastX = x; lastY = y; lastDX = 0; lastDY = 0;
+    mouseDownX = x; mouseDownY = y;
+    lastRotQuat.identity();
+  }
+
+  function moveDrag(x, y) {
+    if (!dragging || !lastSpherePoint) return;
+    lastDX = x - lastX; lastDY = y - lastY;
+    const p2 = toVirtualSphere(x, y);
+    lastRotQuat = rotationBetween(lastSpherePoint, p2);
+    currentQuat.premultiply(lastRotQuat);
+    lastSpherePoint = p2;
+    lastX = x; lastY = y;
+  }
+
+  function endDrag(x, y) {
+    if (!dragging) return;
+    dragging = false;
+    const angle = 2 * Math.acos(Math.max(-1, Math.min(1, lastRotQuat.w)));
+    if (angle > 0.002) {
+      spinning = true;
+      spinAxis = new THREE.Vector3(lastRotQuat.x, lastRotQuat.y, lastRotQuat.z).normalize();
+      spinAngle = angle;
+      autoSpinTimer = setTimeout(() => {
+        if (!dragging) { spinning = false; autoSpin = true; }
+      }, 5000);
+    } else {
+      autoSpinTimer = setTimeout(() => {
+        if (!dragging) autoSpin = true;
+      }, 1500);
+    }
+    const dist = Math.hypot(x - mouseDownX, y - mouseDownY);
+    if (dist < 6) checkClick(x, y);
+  }
+
+  container.addEventListener('mousedown', e => startDrag(e.clientX, e.clientY));
+  window.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+  window.addEventListener('mouseup', e => endDrag(e.clientX, e.clientY));
+
+  container.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    startDrag(t.clientX, t.clientY);
+  }, { passive: true });
+
+  container.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    moveDrag(t.clientX, t.clientY);
+    e.preventDefault();
+  }, { passive: false });
+
+  container.addEventListener('touchend', e => {
+    const t = e.changedTouches[0];
+    endDrag(t.clientX, t.clientY);
+  });
+
+  const raycaster = new THREE.Raycaster();
+
+  function toNDC(x, y) {
+    return new THREE.Vector2(
+      (x / window.innerWidth) * 2 - 1,
+      (y / window.innerHeight) * -2 + 1
+    );
+  }
+
+  function checkClick(x, y) {
+    raycaster.setFromCamera(toNDC(x, y), camera);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length > 0) openLightbox(hits[0].object.userData.photo);
+  }
+
+  window.addEventListener('mousemove', e => {
+    if (dragging) return;
+    raycaster.setFromCamera(toNDC(e.clientX, e.clientY), camera);
+    const hits = raycaster.intersectObjects(meshes);
+    container.style.cursor = hits.length > 0 ? 'pointer' : 'grab';
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  const lightbox = document.getElementById('lightbox');
+  const lbImg    = document.getElementById('lb-img');
+  const lbClose  = document.getElementById('lb-close');
+
+  let lbScale = 1, lbTx = 0, lbTy = 0;
+  let lbDragging = false, lbDidDrag = false, lbDragX = 0, lbDragY = 0;
+  let lbPinching = false, lbPinchDist = 0, lbPinchScale = 1;
+
+  function lbApply() {
+    lbImg.style.transform = `translate(${lbTx}px, ${lbTy}px) scale(${lbScale})`;
+    lbImg.style.cursor = lbScale > 1 ? 'grab' : 'zoom-in';
+  }
+  function lbReset() { lbScale = 1; lbTx = 0; lbTy = 0; lbApply(); }
+
+  function openLightbox(src) {
+    lbImg.src = src;
+    lbReset();
+    lightbox.classList.add('active');
+  }
+
+  function closeLightbox() {
+    lightbox.classList.remove('active');
+    lbImg.src = '';
+  }
+
+  lbClose.addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox(); });
+
+  lbImg.addEventListener('mousedown', e => {
+    lbDidDrag = false;
+    lbDragX = e.clientX - lbTx; lbDragY = e.clientY - lbTy;
+    if (lbScale > 1) { lbDragging = true; lbImg.style.cursor = 'grabbing'; }
+    e.stopPropagation(); e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!lbDragging) return;
+    lbTx = e.clientX - lbDragX; lbTy = e.clientY - lbDragY;
+    lbDidDrag = true; lbApply();
+  });
+
+  window.addEventListener('mouseup', e => {
+    if (lbDragging) {
+      lbDragging = false;
+      lbImg.style.cursor = lbScale > 1 ? 'grab' : 'zoom-in';
+    }
+    if (!lbDidDrag && e.target === lbImg) {
+      lbScale <= 1 ? (lbScale = 2.5, lbApply()) : lbReset();
+    }
+  });
+
+  lbImg.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      lbPinching = true;
+      lbPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      lbPinchScale = lbScale;
+    } else if (lbScale > 1) {
+      lbDragging = true;
+      lbDragX = e.touches[0].clientX - lbTx;
+      lbDragY = e.touches[0].clientY - lbTy;
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  lbImg.addEventListener('touchmove', e => {
+    if (lbPinching && e.touches.length === 2) {
+      const d = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      lbScale = Math.max(1, Math.min(5, lbPinchScale * (d / lbPinchDist)));
+      lbApply();
+    } else if (lbDragging) {
+      lbTx = e.touches[0].clientX - lbDragX;
+      lbTy = e.touches[0].clientY - lbDragY;
+      lbApply();
+    }
+    e.preventDefault();
+  }, { passive: false });
+
+  lbImg.addEventListener('touchend', e => {
+    if (e.touches.length < 2) lbPinching = false;
+    if (e.touches.length === 0) lbDragging = false;
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && lightbox.classList.contains('active')) closeLightbox();
+  });
+
+  animate();
+})();
+</script>
+
+{% else %}
+<div id="empty-state">
+  <h2>No photos yet</h2>
+  <p>Drop images into <code>static/gallery/</code> to populate the sphere.</p>
+</div>
+{% endif %}
+
+</body>
+</html>

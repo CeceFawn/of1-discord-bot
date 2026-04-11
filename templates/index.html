@@ -3,8 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OF1 — Orlando F1</title>
-  <meta name="description" content="Orlando's F1 community. Watch parties, standings, and more." />
+  <title>OF1 | Orlando F1 Watch Parties &amp; Community</title>
+  <meta name="description" content="Orlando's home for Formula 1 fans. Join OF1 for F1 watch parties in Orlando, live race coverage, and the best F1 community in Central Florida." />
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://www.orlandof1.com/" />
+
+  <!-- Open Graph / Social sharing -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:url"         content="https://www.orlandof1.com/" />
+  <meta property="og:title"       content="OF1 | Orlando F1 Watch Parties &amp; Community" />
+  <meta property="og:description" content="Orlando's home for Formula 1 fans. Join OF1 for F1 watch parties in Orlando, live race coverage, and the best F1 community in Central Florida." />
+  <meta property="og:image"       content="https://www.orlandof1.com/static/schedule_halfbarrel.png" />
+  <meta property="og:site_name"   content="OF1 — Orlando F1" />
+
+  <!-- Twitter card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="OF1 | Orlando F1 Watch Parties &amp; Community" />
+  <meta name="twitter:description" content="Orlando's home for Formula 1 fans. Join OF1 for F1 watch parties in Orlando, live race coverage, and the best F1 community in Central Florida." />
+  <meta name="twitter:image"       content="https://www.orlandof1.com/static/schedule_halfbarrel.png" />
+
+  <!-- Sitemap hint -->
+  <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+  <!-- JSON-LD structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "OF1 — Orlando F1",
+    "alternateName": "Orlando F1",
+    "url": "https://www.orlandof1.com/",
+    "logo": "https://www.orlandof1.com/static/schedule_halfbarrel.png",
+    "description": "Orlando's home for Formula 1 fans. F1 watch parties, race coverage, and community in Orlando, Florida.",
+    "sameAs": [
+      "https://discord.gg/WxUBRYVUmF"
+    ],
+    "areaServed": {
+      "@type": "City",
+      "name": "Orlando",
+      "addressRegion": "FL",
+      "addressCountry": "US"
+    }
+  }
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -25,6 +67,110 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
     .red-glow { box-shadow: 0 0 40px rgba(232, 0, 45, 0.15); }
+
+    @keyframes rgb-cycle {
+      0%   { color: #ff0000; text-shadow: 0 0 12px #ff0000, 0 0 24px #ff000088; }
+      16%  { color: #ff8800; text-shadow: 0 0 12px #ff8800, 0 0 24px #ff880088; }
+      33%  { color: #ffff00; text-shadow: 0 0 12px #ffff00, 0 0 24px #ffff0088; }
+      50%  { color: #00ff88; text-shadow: 0 0 12px #00ff88, 0 0 24px #00ff8888; }
+      66%  { color: #00aaff; text-shadow: 0 0 12px #00aaff, 0 0 24px #00aaff88; }
+      83%  { color: #cc00ff; text-shadow: 0 0 12px #cc00ff, 0 0 24px #cc00ff88; }
+      100% { color: #ff0000; text-shadow: 0 0 12px #ff0000, 0 0 24px #ff000088; }
+    }
+    @keyframes rgb-shadow {
+      0%   { box-shadow: 0 8px 40px #ff000066, 0 0 0 1px #ff000033; }
+      16%  { box-shadow: 0 8px 40px #ff880066, 0 0 0 1px #ff880033; }
+      33%  { box-shadow: 0 8px 40px #ffff0066, 0 0 0 1px #ffff0033; }
+      50%  { box-shadow: 0 8px 40px #00ff8866, 0 0 0 1px #00ff8833; }
+      66%  { box-shadow: 0 8px 40px #00aaff66, 0 0 0 1px #00aaff33; }
+      83%  { box-shadow: 0 8px 40px #cc00ff66, 0 0 0 1px #cc00ff33; }
+      100% { box-shadow: 0 8px 40px #ff000066, 0 0 0 1px #ff000033; }
+    }
+    @keyframes rgb-btn {
+      0%   { filter: drop-shadow(0 0 6px #ff0000) drop-shadow(0 0 12px #ff000099); }
+      16%  { filter: drop-shadow(0 0 6px #ff8800) drop-shadow(0 0 12px #ff880099); }
+      33%  { filter: drop-shadow(0 0 6px #ffff00) drop-shadow(0 0 12px #ffff0099); }
+      50%  { filter: drop-shadow(0 0 6px #00ff88) drop-shadow(0 0 12px #00ff8899); }
+      66%  { filter: drop-shadow(0 0 6px #00aaff) drop-shadow(0 0 12px #00aaff99); }
+      83%  { filter: drop-shadow(0 0 6px #cc00ff) drop-shadow(0 0 12px #cc00ff99); }
+      100% { filter: drop-shadow(0 0 6px #ff0000) drop-shadow(0 0 12px #ff000099); }
+    }
+
+    @keyframes rgb-badge {
+      0%   { color: #ff0000; border-color: #ff000066; background-color: #ff000015; text-shadow: 0 0 8px #ff000088; }
+      16%  { color: #ff8800; border-color: #ff880066; background-color: #ff880015; text-shadow: 0 0 8px #ff880088; }
+      33%  { color: #ffff00; border-color: #ffff0066; background-color: #ffff0015; text-shadow: 0 0 8px #ffff0088; }
+      50%  { color: #00ff88; border-color: #00ff8866; background-color: #00ff8815; text-shadow: 0 0 8px #00ff8888; }
+      66%  { color: #00aaff; border-color: #00aaff66; background-color: #00aaff15; text-shadow: 0 0 8px #00aaff88; }
+      83%  { color: #cc00ff; border-color: #cc00ff66; background-color: #cc00ff15; text-shadow: 0 0 8px #cc00ff88; }
+      100% { color: #ff0000; border-color: #ff000066; background-color: #ff000015; text-shadow: 0 0 8px #ff000088; }
+    }
+
+    @keyframes rgb-social {
+      0%   { border-color: #ff000088; color: #ff0000; box-shadow: 0 0 10px #ff000044; }
+      16%  { border-color: #ff880088; color: #ff8800; box-shadow: 0 0 10px #ff880044; }
+      33%  { border-color: #ffff0088; color: #ffff00; box-shadow: 0 0 10px #ffff0044; }
+      50%  { border-color: #00ff8888; color: #00ff88; box-shadow: 0 0 10px #00ff8844; }
+      66%  { border-color: #00aaff88; color: #00aaff; box-shadow: 0 0 10px #00aaff44; }
+      83%  { border-color: #cc00ff88; color: #cc00ff; box-shadow: 0 0 10px #cc00ff44; }
+      100% { border-color: #ff000088; color: #ff0000; box-shadow: 0 0 10px #ff000044; }
+    }
+    @keyframes rgb-heart {
+      0%   { filter: drop-shadow(0 0 4px #ff0000); }
+      16%  { filter: drop-shadow(0 0 4px #ff8800); }
+      33%  { filter: drop-shadow(0 0 4px #ffff00); }
+      50%  { filter: drop-shadow(0 0 4px #00ff88); }
+      66%  { filter: drop-shadow(0 0 4px #00aaff); }
+      83%  { filter: drop-shadow(0 0 4px #cc00ff); }
+      100% { filter: drop-shadow(0 0 4px #ff0000); }
+    }
+
+    .party-logo   { animation: rgb-cycle  3s linear infinite; }
+    .party-badge  { animation: rgb-badge  3s linear infinite; }
+    .party-card   { animation: rgb-shadow 3s linear infinite; }
+    .party-btn    { animation: rgb-btn    3s linear infinite; }
+    .party-social-active { animation: rgb-social 3s linear infinite; }
+    .party-heart  { animation: rgb-heart  3s linear infinite; }
+
+    #party-trigger {
+      opacity: 0;
+      cursor: pointer;
+      font-size: 18px;
+      transition: opacity 0.3s;
+      user-select: none;
+      background: none;
+      border: none;
+      padding: 2px;
+      line-height: 1;
+    }
+    #party-trigger:hover { opacity: 0.4 !important; }
+
+    @keyframes sheen {
+      from { transform: translateX(-100%) skewX(-20deg); }
+      to   { transform: translateX(250%)  skewX(-20deg); }
+    }
+    .sheen-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .sheen-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        105deg,
+        transparent 40%,
+        rgba(255,255,255,0.06) 50%,
+        rgba(255,255,255,0.12) 55%,
+        rgba(255,255,255,0.06) 60%,
+        transparent 70%
+      );
+      transform: translateX(-100%) skewX(-20deg);
+      pointer-events: none;
+    }
+    .sheen-card:hover::before {
+      animation: sheen 3s ease forwards;
+    }
   </style>
 </head>
 
@@ -34,13 +180,16 @@
   <nav class="fixed top-0 left-0 right-0 z-50 bg-f1dark/90 backdrop-blur border-b border-white/10">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
       <a href="/" class="flex items-center gap-2">
-        <span class="text-f1red font-black text-2xl tracking-tight">OF1</span>
+        <span id="of1-logo" class="text-f1red font-black text-2xl tracking-tight">OF1</span>
         <span class="text-white/40 text-sm font-medium hidden sm:block">Orlando F1</span>
       </a>
       {% if next_session %}
-      <div class="flex flex-col items-end">
-        <span class="text-white/40 text-xs uppercase tracking-widest">{{ next_session.session_name }}{% if next_session.meeting_name %} · {{ next_session.meeting_name }}{% endif %}</span>
-        <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}">--:--:--</span>
+      <div class="flex items-center gap-3">
+        <span id="party-trigger" title="">🏎️</span>
+        <div class="flex flex-col items-end">
+          <span class="text-white/40 text-xs uppercase tracking-widest">{{ next_session.session_name }}{% if next_session.meeting_name %} · {{ next_session.meeting_name }}{% endif %}</span>
+          <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}">--:--:--</span>
+        </div>
       </div>
       {% endif %}
     </div>
@@ -48,12 +197,12 @@
 
   <!-- ── HERO ─────────────────────────────────────────────────── -->
   <section class="pt-32 pb-20 px-6 text-center">
-    <div class="max-w-3xl mx-auto">
-      <div class="inline-block bg-f1red/10 border border-f1red/30 text-f1red text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
+    <div class="select-none max-w-3xl mx-auto">
+      <div id="hero-badge" class="inline-block bg-f1red/10 border border-f1red/30 text-f1red text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
         Orlando's F1 Community
       </div>
       <h1 class="text-6xl sm:text-8xl font-black tracking-tighter mb-4">
-        <span class="text-f1red">OF1</span>
+        <span id="hero-logo" class="text-f1red">OF1</span>
       </h1>
       <p class="text-white/50 text-lg sm:text-xl max-w-xl mx-auto">
         Watch parties, race coverage, and the best F1 community in Orlando.
@@ -65,8 +214,8 @@
   {% if watch_party and watch_party.get('active') %}
   <section class="px-6 pb-24">
     <div class="max-w-2xl mx-auto">
-      <a href="{{ discord_invite }}" target="_blank" rel="noopener"
-         class="block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
+      <a id="watch-party-card" href="{{ discord_invite }}" target="_blank" rel="noopener"
+         class="sheen-card block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
         <div class="flex items-center gap-2 text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">
           🏁 Watch Party
         </div>
@@ -89,28 +238,294 @@
           </div>
           {% endif %}
           {% if watch_party.get('location') %}
-          <div class="flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="flex items-start gap-1.5">
+            <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
             </svg>
-            {{ watch_party.location }}
+            <div>
+              {% for line in watch_party.location.split('\n') %}
+                {% if line.strip() %}<div>{{ line.strip() }}</div>{% endif %}
+              {% endfor %}
+            </div>
           </div>
           {% endif %}
+          <div class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+            #race-thread
+          </div>
         </div>
         {% if watch_party.get('details') %}
         <p class="mt-4 text-white/60 text-sm leading-relaxed">{{ watch_party.details }}</p>
         {% endif %}
-        <div class="mt-6 text-f1red text-sm font-semibold">Join in Discord →</div>
+        <div class="mt-6 flex items-center justify-between flex-wrap gap-2">
+          <span class="text-f1red text-sm font-semibold">Join in Discord →</span>
+          {% if member_counts %}
+          <span class="flex items-center gap-2 text-xs text-white/40">
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+              {{ "{:,}".format(member_counts.online) }} online
+            </span>
+            <span class="text-white/20">|</span>
+            <span>{{ "{:,}".format(member_counts.total) }} members</span>
+          </span>
+          {% endif %}
+        </div>
       </a>
     </div>
   </section>
   {% endif %}
 
+  <!-- ── SCHEDULE FLYERS ──────────────────────────────────────── -->
+  <section class="px-6 pb-16">
+    <div class="max-w-2xl mx-auto">
+      <div class="text-white/40 text-xs font-semibold uppercase tracking-widest mb-4">2026 Watch Party Schedule</div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <img src="{{ url_for('static', filename='schedule_halfbarrel.png') }}"
+             alt="Half Barrel Beer Project watch party schedule"
+             class="w-full rounded-2xl border border-white/10 cursor-zoom-in lightbox-img" />
+        <img src="{{ url_for('static', filename='schedule_hourglass.png') }}"
+             alt="Hourglass Brewing Longwood watch party schedule"
+             class="w-full rounded-2xl border border-white/10 cursor-zoom-in lightbox-img" />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SOCIALS ───────────────────────────────────────────────── -->
+  <section class="px-6 pb-24">
+    <div class="max-w-2xl mx-auto">
+      <div class="text-white/40 text-xs font-semibold uppercase tracking-widest mb-4">Find Us</div>
+      <div class="flex flex-wrap gap-3">
+
+        <!-- Instagram -->
+        <a href="https://www.instagram.com/orlandof1fans" target="_blank" rel="noopener"
+           class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+            <circle cx="12" cy="12" r="4"/>
+            <circle cx="17.5" cy="6.5" r="0.5" fill="currentColor" stroke="none"/>
+          </svg>
+          <span class="text-sm font-medium text-white/80">OrlandoF1fans</span>
+        </a>
+
+        <!-- Facebook -->
+        <a href="https://www.facebook.com/orlandoF1fans" target="_blank" rel="noopener"
+           class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>
+          </svg>
+          <span class="text-sm font-medium text-white/80">OrlandoF1fans</span>
+        </a>
+
+        <!-- Linktree -->
+        <a href="https://linktr.ee/orlandof1" target="_blank" rel="noopener"
+           class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
+          <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v13M8 7l4-4 4 4M6 11l6-3 6 3M9 17h6M10 21h4"/>
+          </svg>
+          <span class="text-sm font-medium text-white/80">OrlandoF1</span>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
   <!-- ── FOOTER ────────────────────────────────────────────────── -->
   <footer class="border-t border-white/10 px-6 py-8 text-center text-white/20 text-sm">
-    Orlando F1 · Made with ❤️ for the community
+    Orlando F1 · Made with <span id="footer-heart">❤️</span> for the community
   </footer>
+
+  <!-- ── LIGHTBOX ─────────────────────────────────────────────── -->
+  <div id="lightbox" style="display:none"
+       class="fixed inset-0 z-50 flex items-center justify-center">
+    <!-- backdrop -->
+    <div class="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
+    <!-- image wrapper — stops click propagating to backdrop -->
+    <div class="relative z-10 flex items-center justify-center w-full h-full p-4 sm:p-8"
+         onclick="event.stopPropagation()">
+      <img id="lightbox-img" src="" alt=""
+           class="max-h-full max-w-full rounded-xl shadow-2xl select-none"
+           style="object-fit:contain;transition:transform 0.15s ease;transform-origin:center center;" />
+    </div>
+    <!-- close button -->
+    <button onclick="closeLightbox()"
+            class="absolute top-4 right-4 z-20 text-white/70 hover:text-white bg-black/40 hover:bg-black/70 rounded-full w-10 h-10 flex items-center justify-center text-xl transition-colors">
+      ✕
+    </button>
+  </div>
+
+  <script>
+    (function() {
+      const lb    = document.getElementById('lightbox');
+      const lbImg = document.getElementById('lightbox-img');
+      let scale = 1;
+      let tx = 0, ty = 0;
+
+      function applyTransform() {
+        lbImg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+        lbImg.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+      }
+
+      function resetTransform() {
+        scale = 1; tx = 0; ty = 0;
+        applyTransform();
+      }
+
+      function openLightbox(src, alt) {
+        lbImg.src = src;
+        lbImg.alt = alt;
+        resetTransform();
+        lb.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      }
+
+      window.closeLightbox = function() {
+        lb.style.display = 'none';
+        document.body.style.overflow = '';
+        resetTransform();
+      };
+
+      // --- Desktop: scroll to zoom ---
+      lbImg.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        scale += e.deltaY < 0 ? 0.15 : -0.15;
+        scale = Math.min(Math.max(scale, 0.5), 5);
+        if (scale <= 1) { scale = 1; tx = 0; ty = 0; }
+        applyTransform();
+      }, { passive: false });
+
+      // --- Desktop: click to toggle zoom, drag to pan ---
+      let dragging = false, didDrag = false, dragStartX, dragStartY;
+      lbImg.addEventListener('mousedown', function(e) {
+        didDrag = false;
+        dragStartX = e.clientX - tx;
+        dragStartY = e.clientY - ty;
+        if (scale > 1) {
+          dragging = true;
+          lbImg.style.cursor = 'grabbing';
+        }
+        e.preventDefault();
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (!dragging) return;
+        didDrag = true;
+        tx = e.clientX - dragStartX;
+        ty = e.clientY - dragStartY;
+        lbImg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+      });
+      document.addEventListener('mouseup', function(e) {
+        if (dragging) {
+          dragging = false;
+          lbImg.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+        }
+        if (!didDrag && e.target === lbImg) {
+          if (scale <= 1) { scale = 2; applyTransform(); }
+          else { resetTransform(); }
+        }
+      });
+
+      // --- Mobile: pinch-to-zoom + single-finger pan ---
+      let initDist = null, initScale = 1;
+      let pinchMidX = 0, pinchMidY = 0;
+      let panStartX, panStartY;
+
+      lbImg.addEventListener('touchstart', function(e) {
+        if (e.touches.length === 2) {
+          initDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          initScale = scale;
+          pinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          pinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        } else if (e.touches.length === 1 && scale > 1) {
+          panStartX = e.touches[0].clientX - tx;
+          panStartY = e.touches[0].clientY - ty;
+        }
+      }, { passive: true });
+
+      lbImg.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        if (e.touches.length === 2 && initDist) {
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          scale = Math.min(Math.max(initScale * (dist / initDist), 0.5), 5);
+          tx += midX - pinchMidX;
+          ty += midY - pinchMidY;
+          pinchMidX = midX;
+          pinchMidY = midY;
+          applyTransform();
+        } else if (e.touches.length === 1 && scale > 1) {
+          tx = e.touches[0].clientX - panStartX;
+          ty = e.touches[0].clientY - panStartY;
+          lbImg.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+        }
+      }, { passive: false });
+
+      lbImg.addEventListener('touchend', function(e) {
+        if (e.touches.length < 2) {
+          initDist = null;
+          if (e.touches.length === 1 && scale > 1) {
+            panStartX = e.touches[0].clientX - tx;
+            panStartY = e.touches[0].clientY - ty;
+          }
+        }
+        if (scale <= 1) { scale = 1; tx = 0; ty = 0; applyTransform(); }
+      }, { passive: true });
+
+      // Close on Escape
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeLightbox();
+      });
+
+      // Click backdrop to close
+      lb.addEventListener('click', function(e) {
+        if (e.target === lb) closeLightbox();
+      });
+
+      // Wire up all lightbox images
+      document.querySelectorAll('.lightbox-img').forEach(function(img) {
+        img.addEventListener('click', function() {
+          openLightbox(img.src, img.alt);
+        });
+      });
+    })();
+  </script>
+
+  <!-- ── PARTY MODE ───────────────────────────────────────────── -->
+  <script>
+    (function() {
+      const trigger   = document.getElementById('party-trigger');
+      const navLogo   = document.getElementById('of1-logo');
+      const heroLogo  = document.getElementById('hero-logo');
+      const heroBadge = document.getElementById('hero-badge');
+      const card      = document.getElementById('watch-party-card');
+      const heart     = document.getElementById('footer-heart');
+      const socials   = document.querySelectorAll('.party-social');
+      if (!trigger) return;
+
+      let active = false;
+
+      trigger.addEventListener('click', function() {
+        active = !active;
+        const action = active ? 'add' : 'remove';
+        trigger.style.opacity = active ? '1' : '';
+        trigger.classList[action]('party-btn');
+        if (navLogo)   navLogo.classList[action]('party-logo');
+        if (heroLogo)  heroLogo.classList[action]('party-logo');
+        if (heroBadge) heroBadge.classList[action]('party-badge');
+        if (card)      card.classList[action]('party-card');
+        if (heart)     heart.classList[action]('party-heart');
+        socials.forEach(el => el.classList[action]('party-social-active'));
+      });
+    })();
+  </script>
 
   <!-- ── COUNTDOWN SCRIPTS ─────────────────────────────────────── -->
   <script>

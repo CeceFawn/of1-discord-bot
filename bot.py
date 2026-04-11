@@ -282,6 +282,7 @@ XP_FLUSH_TASK: Optional[asyncio.Task] = None
 PERIODIC_ROLE_RECOVERY_TASK: Optional[asyncio.Task] = None
 RACE_SUPERVISOR_TASK: Optional[asyncio.Task] = None
 RUNTIME_STATUS_TASK: Optional[asyncio.Task] = None
+DRIVER_CACHE_VALIDATION_TASK: Optional[asyncio.Task] = None
 LOOP_HEARTBEATS: Dict[str, str] = {}
 LOOP_ERRORS: Dict[str, int] = {}
 
@@ -428,6 +429,10 @@ _OPENF1_TRACE: Dict[str, Any] = {"window_start": time.time(), "rows": {}}
 _OPENF1_AUTH_RETRY_AFTER_TS: float = 0.0
 _OPENF1_ENDPOINT_COOLDOWN: Dict[str, float] = {}
 _OPENF1_CANDIDATE_SESSIONS_CACHE: Dict[str, Any] = {"ts": 0.0, "keys": []}
+# In-memory copy of driver_cache.json.  Loaded once on first access, then kept
+# in sync with disk via _save_driver_cache().
+_DRIVER_CACHE: Dict[str, Any] = {}
+_DRIVER_CACHE_LOADED: bool = False
 
 
 def _openf1_set_endpoint_cooldown(endpoint: str, seconds: int) -> None:
@@ -1159,16 +1164,6 @@ def _prediction_category_session(category: str) -> str:
         return "race"
     return "race"
 
-def _prediction_category_display(category: str) -> str:
-    return {
-        "pole": "Pole",
-        "sprint_pole": "Sprint Pole",
-        "podium": "Podium",
-        "sprint_podium": "Sprint Podium",
-        "p10": "P10",
-        "sprint_p8": "Sprint P8",
-    }.get(category, category)
-
 def _pred_scored_sessions_for_guild(round_obj: Dict[str, Any], guild_id: int) -> Dict[str, bool]:
     scored = round_obj.setdefault("scored_sessions", {})
     gid = str(guild_id)
@@ -1601,38 +1596,146 @@ async def _openf1_candidate_race_session_keys() -> List[Any]:
         return list(cached_keys)
 
     now = datetime.now(timezone.utc)
-    candidates: List[Any] = []
+    # Include both Race and Sprint sessions — sprints award championship points
+    # so the ↑/↓ delta should compare across whichever points-scoring event
+    # came most recently, even if that was a sprint the day before the GP.
+    POINTS_SESSION_TYPES = ("Race", "Sprint")
+    parsed: List[tuple] = []
     years = [now.year, now.year - 1]
     for year in years:
-        try:
-            sessions = await asyncio.to_thread(_openf1_get_json, "sessions", {"year": year, "session_type": "Race"}, 20, "standings_candidate_sessions")
-        except Exception:
-            continue
-        if not isinstance(sessions, list):
-            continue
-        parsed = []
-        for s in sessions:
-            if not isinstance(s, dict):
+        for session_type in POINTS_SESSION_TYPES:
+            try:
+                sessions = await asyncio.to_thread(
+                    _openf1_get_json,
+                    "sessions",
+                    {"year": year, "session_type": session_type},
+                    20,
+                    "standings_candidate_sessions",
+                )
+            except Exception:
                 continue
-            key = s.get("session_key")
-            dt = _parse_openf1_dt(s.get("date_start"))
-            if key is None or dt is None:
+            if not isinstance(sessions, list):
                 continue
-            # Only include sessions that have already started — future races
-            # won't have championship data and would waste API calls.
-            if dt > now:
-                continue
-            parsed.append((dt, key))
-        parsed.sort(key=lambda x: x[0], reverse=True)
-        for _dt, key in parsed:
-            if key not in candidates:
-                candidates.append(key)
+            for s in sessions:
+                if not isinstance(s, dict):
+                    continue
+                key = s.get("session_key")
+                dt = _parse_openf1_dt(s.get("date_start"))
+                if key is None or dt is None:
+                    continue
+                # Only include sessions that have already started — future races
+                # won't have championship data and would waste API calls.
+                if dt > now:
+                    continue
+                parsed.append((dt, key))
+
+    parsed.sort(key=lambda x: x[0], reverse=True)
+    candidates: List[Any] = []
+    for _dt, key in parsed:
+        if key not in candidates:
+            candidates.append(key)
     # "latest" goes last — it often points to a non-race or in-progress session
     # with incomplete championship data (null team names, missing name fields).
     candidates.append("latest")
     _OPENF1_CANDIDATE_SESSIONS_CACHE["ts"] = now_ts
     _OPENF1_CANDIDATE_SESSIONS_CACHE["keys"] = list(candidates)
     return candidates
+
+def _load_driver_cache() -> Dict[str, Any]:
+    global _DRIVER_CACHE, _DRIVER_CACHE_LOADED
+    if _DRIVER_CACHE_LOADED:
+        return _DRIVER_CACHE
+    from settings import DRIVER_CACHE_PATH
+    try:
+        with open(DRIVER_CACHE_PATH, "r", encoding="utf-8") as f:
+            _DRIVER_CACHE = json.load(f)
+    except Exception:
+        _DRIVER_CACHE = {"drivers": {}, "last_session_key": None}
+    _DRIVER_CACHE_LOADED = True
+    return _DRIVER_CACHE
+
+
+def _save_driver_cache() -> None:
+    from settings import DRIVER_CACHE_PATH
+    try:
+        with open(DRIVER_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(_DRIVER_CACHE, f, indent=2)
+    except Exception as e:
+        logging.error(f"[DriverCache] save failed: {e}")
+
+
+def _update_driver_cache(rows: List[Dict[str, Any]], session_key: Any) -> None:
+    """Merge a fresh batch of API rows into the local driver cache.
+
+    Rules:
+    - Drivers are only ever added, never removed.
+    - When a new session_key is seen, current points are snapshotted as
+      prev_points before the new values are written in.  This gives us the
+      "previous standing" for the ↑/↓ delta arrows without needing a second
+      API call.
+    - name/team/code are updated only when the API returns a non-empty value,
+      so cached names survive API outages or incomplete responses.
+    """
+    cache = _load_driver_cache()
+    drivers = cache.setdefault("drivers", {})
+    last_key = str(cache.get("last_session_key") or "")
+    current_key = str(session_key) if session_key is not None else ""
+    is_new_session = bool(current_key and current_key != last_key)
+
+    for r in rows:
+        num = str(r.get("driver_number") or "")
+        if not num:
+            continue
+        entry = drivers.setdefault(num, {})
+
+        if is_new_session:
+            # Snapshot before overwriting so we can compute position delta.
+            entry["prev_points"] = entry.get("points", 0)
+
+        entry["points"] = int(r.get("points", 0) or 0)
+
+        # Only overwrite identity fields when the API actually has the data.
+        name = str(r.get("name") or "").strip()
+        if name:
+            entry["name"] = name
+        team = str(r.get("team") or "").strip()
+        if team and team != "Unknown":
+            entry["team"] = team
+        code = str(r.get("code") or "").strip()
+        if code:
+            entry["code"] = code
+
+    if is_new_session and current_key:
+        cache["last_session_key"] = current_key
+        cache["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    _save_driver_cache()
+
+
+def _standings_from_cache(use_previous: bool = False) -> List[Dict[str, Any]]:
+    """Build a standings list from the local cache, sorted by points descending.
+    Positions are assigned here so they're always consistent with the actual
+    point totals rather than whatever the API returned.
+    """
+    cache = _load_driver_cache()
+    drivers = cache.get("drivers") or {}
+    rows = []
+    for num_str, d in drivers.items():
+        if not d.get("name"):
+            continue
+        pts = int(d.get("prev_points" if use_previous else "points", 0) or 0)
+        rows.append({
+            "driver_number": int(num_str) if num_str.isdigit() else 0,
+            "name": d.get("name", f"#{num_str}"),
+            "code": d.get("code", ""),
+            "team": d.get("team", "Unknown"),
+            "points": pts,
+        })
+    rows.sort(key=lambda x: x["points"], reverse=True)
+    for i, r in enumerate(rows):
+        r["position"] = i + 1
+    return rows
+
 
 async def _fetch_champ_driver_rows(session_key: Any) -> List[Dict[str, Any]]:
     """Fetch and process championship_drivers for a single session key. Returns [] if unavailable."""
@@ -1701,34 +1804,92 @@ async def _fetch_champ_driver_rows(session_key: Any) -> List[Dict[str, Any]]:
             "name": full_name,
             "team": team,
         })
-    out = [x for x in out if int(x.get("position", 0) or 0) > 0]
+    placed = [x for x in out if int(x.get("position", 0) or 0) > 0]
+    # Drivers with position=0 but real points are still championship entrants —
+    # the API just hasn't assigned them a standing yet (common at season start or
+    # for the most-recent race before data is fully populated).
+    unplaced = [
+        x for x in out
+        if int(x.get("position", 0) or 0) == 0 and int(x.get("points", 0) or 0) > 0
+    ]
+    if unplaced:
+        next_pos = max((int(x.get("position", 0) or 0) for x in placed), default=0) + 1
+        unplaced.sort(key=lambda x: int(x.get("points", 0) or 0), reverse=True)
+        for i, x in enumerate(unplaced):
+            x["position"] = next_pos + i
+        out = placed + unplaced
+    else:
+        out = placed
     out.sort(key=lambda x: int(x.get("position", 999) or 999))
     return out
 
 
-async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
+async def _refresh_driver_cache() -> None:
+    """Try to pull the latest championship data from the API and merge it into
+    the local driver cache.  Picks the candidate session that returns the most
+    drivers (up to 3 attempts) so a partially-populated latest session doesn't
+    overwrite good cached data with an incomplete set.
+    """
     candidates = await _openf1_candidate_race_session_keys()
-    for session_key in candidates:
+    best_rows: List[Dict[str, Any]] = []
+    best_key: Any = None
+    for i, session_key in enumerate(candidates):
         rows = await _fetch_champ_driver_rows(session_key)
-        if rows:
-            return rows if not limit else rows[:int(limit)]
-    return []
+        if len(rows) > len(best_rows):
+            best_rows = rows
+            best_key = session_key
+        if len(best_rows) >= 20:
+            break
+        if i >= 2 and best_rows:
+            break
+    if best_rows:
+        _update_driver_cache(best_rows, best_key)
+
+
+async def _openf1_driver_standings_rows(limit: int = 0) -> List[Dict[str, Any]]:
+    await _refresh_driver_cache()
+    out = _standings_from_cache(use_previous=False)
+    if not out:
+        return []
+    return out if not limit else out[:int(limit)]
 
 
 async def _openf1_driver_standings_pair() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Returns (current_standings, previous_standings). previous is [] if no prior race exists."""
-    candidates = await _openf1_candidate_race_session_keys()
-    current: List[Dict[str, Any]] = []
-    previous: List[Dict[str, Any]] = []
-    for session_key in candidates:
-        rows = await _fetch_champ_driver_rows(session_key)
-        if not rows:
-            continue
-        if not current:
-            current = rows
-        else:
+    """Returns (current_standings, previous_standings).
+
+    Primary path: current = local cache sorted by points; previous = the
+    pre-last-session snapshot stored in the cache (prev_points).  This means
+    the ↑/↓ arrows show how each driver moved in the most recent race/sprint.
+
+    Fallback (cache was just seeded, no real prev_points yet): query the API
+    for the points-scoring session that came *before* the current one — i.e.
+    skip the session we already have as current and use the next distinct one.
+    This avoids comparing identical points (which would give all flat arrows).
+    """
+    await _refresh_driver_cache()
+    current = _standings_from_cache(use_previous=False)
+    previous = _standings_from_cache(use_previous=True)
+
+    # Detect "no real snapshot": every prev_points is still 0 (fresh cache).
+    if not previous or all(r["points"] == 0 for r in previous):
+        cache = _load_driver_cache()
+        current_key = str(cache.get("last_session_key") or "")
+        candidates = await _openf1_candidate_race_session_keys()
+        # Walk the list (most-recent-first) and take the first session that is
+        # different from the one we already used for current standings.
+        for session_key in candidates:
+            if str(session_key) == current_key:
+                continue
+            rows = await _fetch_champ_driver_rows(session_key)
+            if not rows:
+                continue
+            # Derive positions from points for consistency with the cache approach.
+            rows.sort(key=lambda x: int(x.get("points", 0) or 0), reverse=True)
+            for i, r in enumerate(rows):
+                r["position"] = i + 1
             previous = rows
             break
+
     return current, previous
 
 
@@ -1736,7 +1897,10 @@ def _build_constructor_rows(driver_rows: List[Dict[str, Any]]) -> List[Dict[str,
     team_pts: Dict[str, int] = {}
     for r in driver_rows:
         team = str(r.get("team") or "").strip()
-        if not team or team == "Unknown":
+        # Only skip if completely blank — "Unknown" is still a valid aggregation
+        # bucket and prevents real points (e.g. Ferrari with null team_name in the
+        # API) from being silently dropped from the constructor standings.
+        if not team:
             continue
         team_pts[team] = team_pts.get(team, 0) + int(r.get("points", 0) or 0)
     return [
@@ -2370,7 +2534,6 @@ def _command_examples(prefix: str) -> Dict[str, str]:
         "xpset": f"{p}xpset @DriverName 2500",
         "xpreset": f"{p}xpreset @DriverName",
         "xpaudit": f"{p}xpaudit @DriverName",
-        "xpbackfillhistory": f"{p}xpbackfillhistory rebuild CONFIRM",
         "schedule": f"{p}schedule 8",
         "nextsession": f"{p}nextsession",
         "f1reminders": f"{p}f1reminders on #admin-channel",
@@ -2425,7 +2588,6 @@ def _command_descriptions() -> Dict[str, str]:
         "xpset": "Set a user's XP manually (admin).",
         "xpreset": "Reset a user's XP data (admin).",
         "xpaudit": "Audit XP stats and level math for a user.",
-        "xpbackfillhistory": "Rebuild XP from existing message history silently (admin).",
         "schedule": "Show upcoming F1 sessions from the current schedule.",
         "nextsession": "Show the next F1 session and countdown.",
         "f1reminders": "Configure or view automatic F1 session reminders (admin).",
@@ -2732,8 +2894,10 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
     for gid, task in RACE_LIVE_TASKS.items():
         if _task_running(task):
             running_live_guilds.append(int(gid))
+    bot_started_at = getattr(bot, "launch_time", None)
     return {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "bot_started_at": bot_started_at.astimezone(timezone.utc).isoformat() if bot_started_at else None,
         "guild_count": len(bot.guilds),
         "loops": {
             "standings": _task_running(STANDINGS_TASK),
@@ -3671,12 +3835,21 @@ async def on_ready():
     # F1 reminders loop
     _ensure_background_task("F1_REMINDER_TASK", f1_reminder_loop, "F1Reminder")
     _ensure_background_task("RUNTIME_STATUS_TASK", runtime_status_loop, "RuntimeStatus")
+    _ensure_background_task("DRIVER_CACHE_VALIDATION_TASK", driver_cache_validation_loop, "DriverCache")
 
     if not APP_COMMANDS_SYNCED:
         try:
+            _guild_id_str = os.getenv("DISCORD_GUILD_ID", "").strip()
+            if _guild_id_str:
+                _guild_obj = discord.Object(id=int(_guild_id_str))
+                bot.tree.copy_global_to(guild=_guild_obj)
+                await bot.tree.sync(guild=_guild_obj)
+                logging.info(f"[Slash] Command tree synced to guild {_guild_id_str}")
+            # Clear global commands so nothing shows up twice
+            bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
             APP_COMMANDS_SYNCED = True
-            logging.info("[Slash] Command tree synced")
+            logging.info("[Slash] Global commands cleared (guild-only mode)")
         except Exception as e:
             logging.error(f"[Slash] Command tree sync failed: {e}")
 
@@ -4411,10 +4584,15 @@ async def _fetch_saved_race_thread(guild: discord.Guild, round_key: str) -> Opti
         fetched = await guild.fetch_channel(thread_id)
         if isinstance(fetched, discord.Thread):
             return fetched
+    except discord.NotFound:
+        # Thread was genuinely deleted — safe to forget it.
+        _clear_race_thread_record(round_key, guild.id)
     except Exception:
+        # Transient error (rate-limit, network, permissions issue) — keep the
+        # saved record so we can try again on the next supervisor tick rather
+        # than silently nuking it and creating a duplicate thread.
         pass
 
-    _clear_race_thread_record(round_key, guild.id)
     return None
 
 def _normalize_race_name_key(value: str) -> str:
@@ -4478,8 +4656,11 @@ async def _fetch_fallback_race_thread_for_guild(
             fetched = await guild.fetch_channel(thread_id)
             if isinstance(fetched, discord.Thread):
                 return round_key, fetched
-        except Exception:
+        except discord.NotFound:
             _clear_race_thread_record(round_key, guild.id)
+            continue
+        except Exception:
+            # Transient error — don't delete the record, just skip this candidate.
             continue
     return None
 
@@ -4536,10 +4717,20 @@ async def _ensure_live_thread(
     race_name: str,
     title: str,
 ) -> discord.Thread:
+    has_saved_record = bool(_race_thread_record(round_key, guild.id))
     existing = await _fetch_saved_race_thread(guild, round_key)
     if existing is not None:
         _set_race_thread_weekend_state(round_key, guild.id, "active")
         return existing
+
+    # If a record existed for this round_key but we couldn't reach the thread,
+    # it's a transient error (rate-limit, network hiccup).  Raise so the
+    # supervisor retries on the next tick rather than creating a duplicate thread.
+    if has_saved_record:
+        raise RuntimeError(
+            f"Saved thread record exists for {round_key} but thread is temporarily "
+            "unreachable (rate-limit or network). Will retry on the next supervisor tick."
+        )
 
     fallback = await _fetch_fallback_race_thread_for_guild(guild, race_name)
     if fallback is not None:
@@ -4557,6 +4748,18 @@ async def _ensure_live_thread(
             )
         _set_race_thread_weekend_state(round_key, guild.id, "active")
         return fallback_thread
+
+    # Guard: if the round_key looks like a fallback value it means the OpenF1
+    # schedule API was unavailable when the supervisor ran.  Creating a thread
+    # now would produce a garbage title like "2025-round-unknown - Live Weekend"
+    # and prevent the real pre-created thread from ever being found.  Raise so
+    # the supervisor skips this tick and retries once the API recovers.
+    if "unknown" in round_key.lower():
+        raise RuntimeError(
+            f"Refusing to create race thread: round key is '{round_key}' "
+            "(OpenF1 schedule API may be temporarily unavailable). "
+            "Will retry on the next supervisor tick."
+        )
 
     created = await _create_race_thread(
         guild=guild,
@@ -4611,6 +4814,38 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     meta = relevant[0]
     return window_start, window_end, meta, relevant
 
+async def _post_deferred_quali_boundary(
+    gid: int,
+    thread: discord.Thread,
+    http: aiohttp.ClientSession,
+    session_key: int,
+    session_kind: str,
+    current_quali_seg: str,
+    posted_segment_summaries: set,
+    seen_session_end: bool,
+    driver_map: dict,
+) -> None:
+    """Post a qualifying boundary summary that was waiting for SESSION STARTED but never fired."""
+    if not (session_kind in {"QUALI", "SPRINT_QUALI"} and seen_session_end and current_quali_seg not in {"Q3", "SQ3"}):
+        return
+    key = f"{current_quali_seg}:end"
+    if key in posted_segment_summaries:
+        return
+    posted_segment_summaries.add(key)
+    _racelog(gid, f"posting deferred boundary for {current_quali_seg}")
+    try:
+        await _post_quali_boundary_summary(
+            thread=thread,
+            http=http,
+            session_key=session_key,
+            session_kind=session_kind,
+            segment=current_quali_seg,
+            driver_map=driver_map,
+        )
+    except Exception as e:
+        _racelog(gid, f"deferred boundary failed for {current_quali_seg}: {e}")
+
+
 async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_key: int, session_type: str = ""):
     gid = guild.id
     RACE_LIVE_ENABLED[gid] = True
@@ -4648,6 +4883,34 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
         # SESSION FINISHED before CHEQUERED FLAG was ever processed.
         _seen_session_end_since_last_boundary: bool = False
         pred_reminders_posted: set[str] = set()  # tracks which lock reminders we've sent
+
+        # For qualifying sessions, scan historical race_control once at loop start
+        # to initialize segment state.  This handles late-start cases where the loop
+        # begins mid-session and some segment transitions already occurred with
+        # timestamps that would be filtered by loop_start_dt in the main loop.
+        # We don't post anything from this scan — state init only.
+        if session_kind in {"QUALI", "SPRINT_QUALI"}:
+            try:
+                _hist_rc = await _openf1_get(http, "race_control", {"session_key": session_key}, caller="race_live_quali_init")
+                for _hi in _hist_rc:
+                    _hm = str(_hi.get("message") or "").strip()
+                    if not _hm:
+                        continue
+                    _hu = _hm.upper()
+                    _hs = _extract_quali_segment(_hm)
+                    if _hs:
+                        current_quali_seg = _hs
+                    if "SESSION STARTED" in _hu:
+                        _seen_session_end_since_last_boundary = False
+                    if any(_k in _hu for _k in ("CHECKERED", "CHEQUERED", "SESSION END", "SESSION FINISHED")):
+                        if current_quali_seg not in {"Q3", "SQ3"}:
+                            _seen_session_end_since_last_boundary = True
+                        else:
+                            _seen_session_end_since_last_boundary = False
+                _racelog(gid, f"quali init: seg={current_quali_seg}, pending_boundary={_seen_session_end_since_last_boundary}")
+            except Exception as _e:
+                _racelog(gid, f"quali init scan failed (non-fatal): {_e}")
+
         while RACE_LIVE_ENABLED.get(gid, False):
             _loop_tick("race_live")
             try:
@@ -4828,11 +5091,22 @@ async def race_live_loop(guild: discord.Guild, thread: discord.Thread, session_k
 
             except asyncio.CancelledError:
                 _racelog(gid, "race_live_loop cancelled")
+                await _post_deferred_quali_boundary(
+                    gid, thread, http, session_key, session_kind, current_quali_seg,
+                    posted_segment_summaries, _seen_session_end_since_last_boundary, driver_map,
+                )
                 raise
             except Exception as e:
                 _loop_error("race_live")
                 _racelog(gid, f"ERROR {type(e).__name__}: {e}")
                 await asyncio.sleep(5)
+
+        # Natural exit (RACE_LIVE_ENABLED set to False by supervisor).
+        # Post any boundary that was waiting for SESSION STARTED.
+        await _post_deferred_quali_boundary(
+            gid, thread, http, session_key, session_kind, current_quali_seg,
+            posted_segment_summaries, _seen_session_end_since_last_boundary, driver_map,
+        )
 
     _racelog(gid, "race_live_loop exited")
 
@@ -4873,6 +5147,58 @@ async def race_thread_precreate_loop():
             logging.error(f"[RaceLive] Thread pre-creation loop error: {e}")
 
         await asyncio.sleep(6 * 3600)  # check every 6 hours
+
+async def driver_cache_validation_loop():
+    """Runs every 6 hours and sanity-checks the local driver cache.
+
+    Checks:
+    - At least 18 drivers present (full F1 grid).
+    - No driver is missing a name.
+    - No driver has negative points.
+    - At least one driver has points > 0 (catches a fully-zeroed cache).
+
+    If any check fails an ops notice is sent to every guild so you know
+    something has gone wrong without having to spot it yourself.
+    """
+    await bot.wait_until_ready()
+    logging.info("[DriverCache] Validation loop started")
+
+    while not bot.is_closed():
+        await asyncio.sleep(6 * 3600)
+        try:
+            cache = _load_driver_cache()
+            drivers = cache.get("drivers") or {}
+            issues: List[str] = []
+
+            driver_count = len(drivers)
+            if driver_count < 18:
+                issues.append(f"Only {driver_count} drivers in cache (expected ≥ 18).")
+
+            missing_names = [num for num, d in drivers.items() if not d.get("name")]
+            if missing_names:
+                issues.append(f"{len(missing_names)} driver(s) have no name: {', '.join(missing_names)}.")
+
+            negative_pts = [
+                d.get("name", f"#{num}")
+                for num, d in drivers.items()
+                if int(d.get("points", 0) or 0) < 0
+            ]
+            if negative_pts:
+                issues.append(f"Negative points detected for: {', '.join(negative_pts)}.")
+
+            all_zero = all(int(d.get("points", 0) or 0) == 0 for d in drivers.values())
+            if drivers and all_zero:
+                issues.append("All drivers have 0 points — cache may not have been populated yet.")
+
+            if issues:
+                msg = "⚠️ **Driver cache validation failed:**\n" + "\n".join(f"- {i}" for i in issues)
+                logging.warning(f"[DriverCache] Validation issues: {issues}")
+                for guild in bot.guilds:
+                    await _send_race_live_ops_notice(guild, msg)
+            else:
+                logging.info(f"[DriverCache] Validation OK ({driver_count} drivers).")
+        except Exception as e:
+            logging.error(f"[DriverCache] Validation loop error: {e}")
 
 async def race_supervisor_loop():
     await bot.wait_until_ready()
@@ -5112,6 +5438,79 @@ async def raceliveopsclear(ctx):
     """Clear the dedicated race-live ops notice channel."""
     _set_race_live_ops_channel_id(0)
     await ctx.send("✅ Race-live ops channel cleared.")
+
+@bot.tree.command(name="racethreadcheck", description="Check which thread the bot will post live race updates to.")
+@discord.app_commands.checks.has_permissions(administrator=True)
+async def racethreadcheck_slash(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        round_meta = await current_or_next_round_meta()
+        round_key  = str(round_meta.get("key") or "unknown")
+        race_name  = str(round_meta.get("race_name") or "Next Race").strip()
+
+        thread = await _fetch_saved_race_thread(guild, round_key)
+        if thread is not None:
+            await interaction.followup.send(
+                f"For **{race_name}** (`{round_key}`), live updates will post to: {thread.mention}",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                f"No thread saved yet for **{race_name}** (`{round_key}`). "
+                f"One will be created automatically before the race, or use `/racethread` to create it now.",
+                ephemeral=True,
+            )
+    except Exception as e:
+        logging.error(f"[RaceThreadCheck] failed: {e}")
+        await interaction.followup.send(f"Check failed: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="racethreadset", description="Manually set which thread the bot will post live race updates to.")
+@discord.app_commands.checks.has_permissions(administrator=True)
+@discord.app_commands.describe(thread="The thread to redirect live race updates to.")
+async def racethreadset_slash(interaction: discord.Interaction, thread: discord.Thread):
+    guild = interaction.guild
+    member = interaction.user if isinstance(interaction.user, discord.Member) else None
+    if guild is None or member is None:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+
+    perms = member.guild_permissions
+    if not (perms.administrator or perms.manage_threads or perms.manage_channels):
+        await interaction.response.send_message(
+            "You need Manage Threads, Manage Channels, or Administrator permissions to use this command.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        round_meta = await current_or_next_round_meta()
+        round_key  = str(round_meta.get("key") or "unknown")
+        race_name  = str(round_meta.get("race_name") or "Next Race").strip()
+
+        _save_race_thread_record(
+            round_key=round_key,
+            race_name=race_name,
+            guild_id=guild.id,
+            thread=thread,
+            source="manual",
+        )
+        await interaction.followup.send(
+            f"Done. Live updates for **{race_name}** (`{round_key}`) will now post to {thread.mention}.",
+            ephemeral=True,
+        )
+    except Exception as e:
+        logging.error(f"[RaceThreadSet] failed: {e}")
+        await interaction.followup.send(f"Could not update race thread: {e}", ephemeral=True)
+
 
 @bot.tree.command(name="racethread", description="Create the next race thread early with custom watchalong info.")
 @discord.app_commands.describe(
@@ -5423,7 +5822,6 @@ def _load_race_scenarios() -> Dict[str, Dict[str, Any]]:
     logging.info(f"[RaceTest] Loading scenarios from: {path}")
 
     try:
-        import json
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 

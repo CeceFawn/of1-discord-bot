@@ -7,7 +7,7 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, Response
 from dotenv import load_dotenv
 
 EASTERN = ZoneInfo("America/New_York")
@@ -24,7 +24,9 @@ INSTAGRAM_URL   = os.getenv("INSTAGRAM_URL", "")
 TWITTER_URL     = os.getenv("TWITTER_URL", "")
 TIKTOK_URL      = os.getenv("TIKTOK_URL", "")
 
-WATCH_PARTY_PATH = os.path.join(os.path.dirname(__file__), "watch_party.json")
+WATCH_PARTY_PATH  = os.path.join(os.path.dirname(__file__), "watch_party.json")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+DISCORD_GUILD_ID  = os.getenv("DISCORD_GUILD_ID", "").strip()
 
 OPENF1_BASE = "https://api.openf1.org/v1"
 PRE_HOURS  = 24
@@ -212,87 +214,156 @@ def _openf1_get(endpoint: str, params: dict) -> list:
     return []
 
 
+def _parse_meeting_window(sessions: list) -> tuple[datetime, datetime] | None:
+    """Return (window_start, window_end) for a list of sessions, or None."""
+    starts, ends = [], []
+    for s in sessions:
+        ds = s.get("date_start")
+        de = s.get("date_end")
+        if ds:
+            try:
+                starts.append(datetime.fromisoformat(str(ds).replace("Z", "+00:00")).astimezone(timezone.utc))
+            except Exception:
+                pass
+        if de:
+            try:
+                ends.append(datetime.fromisoformat(str(de).replace("Z", "+00:00")).astimezone(timezone.utc))
+            except Exception:
+                pass
+    if not starts or not ends:
+        return None
+    return (min(starts) - timedelta(hours=PRE_HOURS), max(ends) + timedelta(hours=POST_HOURS))
+
+
+def _meeting_info(sessions: list) -> dict:
+    """Extract display info for a meeting from its session list."""
+    lat = sessions[0]
+    meeting_name = (
+        lat.get("meeting_name")
+        or lat.get("country_name")
+        or lat.get("circuit_short_name")
+        or "Race Weekend"
+    )
+
+    race_session = None
+    for s in sessions:
+        st = str(s.get("session_type") or s.get("session_name") or "").upper()
+        if st == "RACE":
+            race_session = s
+            break
+    if race_session is None:
+        dated = [(s, s.get("date_start")) for s in sessions if s.get("date_start")]
+        if dated:
+            dated.sort(key=lambda x: x[1])
+            race_session = dated[-1][0]
+
+    date_display = ""
+    time_display = ""
+    if race_session and race_session.get("date_start"):
+        try:
+            dt_utc = datetime.fromisoformat(
+                str(race_session["date_start"]).replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            dt_est = dt_utc.astimezone(EASTERN)
+            date_display = dt_est.strftime("%A, %B %-d")
+            time_display = dt_est.strftime("%-I:%M %p %Z")
+        except Exception:
+            pass
+
+    return {
+        "race_name": meeting_name,
+        "country": lat.get("country_name") or "",
+        "circuit": lat.get("circuit_short_name") or "",
+        "date_display": date_display,
+        "time_display": time_display,
+    }
+
+
+_member_count_cache: dict = {}  # {total, online, fetched_at}
+_MEMBER_COUNT_TTL = 300  # refresh every 5 minutes
+
+def get_member_counts() -> dict | None:
+    """Fetch approximate member + online counts for the Discord guild via bot token."""
+    if not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
+        return None
+    now_ts = time.time()
+    cached = _member_count_cache
+    if cached.get("fetched_at") and now_ts - cached["fetched_at"] < _MEMBER_COUNT_TTL:
+        return {"total": cached.get("total"), "online": cached.get("online")} if cached.get("total") else None
+    try:
+        resp = requests.get(
+            f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}?with_counts=true",
+            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "User-Agent": "OF1-Website"},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            total  = data.get("approximate_member_count")
+            online = data.get("approximate_presence_count")
+            if total is not None:
+                _member_count_cache.update({"total": int(total), "online": int(online or 0), "fetched_at": now_ts})
+                return {"total": int(total), "online": int(online or 0)}
+    except Exception:
+        pass
+    # return stale cache on failure
+    return {"total": cached["total"], "online": cached.get("online", 0)} if cached.get("total") else None
+
+
 def get_current_race_weekend() -> dict | None:
-    """Return race info if we're currently within a race weekend window, else None.
-    Uses the same logic as the bot: fetch latest session, get all sessions for that
-    meeting, check if now falls within the padded window."""
+    """Return the active or next upcoming race weekend by scanning the full year schedule.
+
+    Instead of relying on session_key=latest (which points at the last *started*
+    session and lags between weekends), we fetch all sessions for the year, group
+    them by meeting, and find:
+      1. A meeting whose padded window (PRE_HOURS before first session →
+         POST_HOURS after last session) contains now  — "active weekend"
+      2. If none, the next meeting whose first session is in the future.
+    """
     try:
         now = datetime.now(timezone.utc)
 
-        latest = _openf1_get("sessions", {"session_key": "latest"})
-        if not latest or not isinstance(latest, list):
-            return None
+        # Collect sessions for this year (and next if needed)
+        all_sessions: list = []
+        for year in [now.year, now.year + 1]:
+            year_sessions = _openf1_get("sessions", {"year": year})
+            if year_sessions:
+                all_sessions.extend(year_sessions)
+            if all_sessions:
+                break  # got data for this year, don't need next year yet
 
-        meeting_key = latest[0].get("meeting_key")
-        lat = latest[0]
-        meeting_name = (
-            lat.get("meeting_name")
-            or lat.get("country_name")
-            or lat.get("circuit_short_name")
-            or "Race Weekend"
-        )
-        if not meeting_key:
-            return None
-
-        all_sessions = _openf1_get("sessions", {"meeting_key": meeting_key})
         if not all_sessions:
             return None
 
-        starts, ends = [], []
+        # Group by meeting_key
+        meetings: dict[int, list] = {}
         for s in all_sessions:
-            ds = s.get("date_start")
-            de = s.get("date_end")
-            if ds:
-                try:
-                    starts.append(datetime.fromisoformat(str(ds).replace("Z", "+00:00")).astimezone(timezone.utc))
-                except Exception:
-                    pass
-            if de:
-                try:
-                    ends.append(datetime.fromisoformat(str(de).replace("Z", "+00:00")).astimezone(timezone.utc))
-                except Exception:
-                    pass
+            mk = s.get("meeting_key")
+            if mk:
+                meetings.setdefault(mk, []).append(s)
 
-        if not starts or not ends:
-            return None
+        active_info: dict | None = None
+        next_info: dict | None = None
+        next_start: datetime | None = None
 
-        window_start = min(starts) - timedelta(hours=PRE_HOURS)
-        window_end   = max(ends)   + timedelta(hours=POST_HOURS)
+        for mk, m_sessions in meetings.items():
+            window = _parse_meeting_window(m_sessions)
+            if not window:
+                continue
+            w_start, w_end = window
 
-        if window_start <= now <= window_end:
-            # Find the race session for date/time display; fall back to last session
-            race_session = None
-            for s in all_sessions:
-                st = str(s.get("session_type") or s.get("session_name") or "").upper()
-                if st == "RACE":
-                    race_session = s
-                    break
-            if race_session is None:
-                dated = [(s, s.get("date_start")) for s in all_sessions if s.get("date_start")]
-                if dated:
-                    dated.sort(key=lambda x: x[1])
-                    race_session = dated[-1][0]
+            if w_start <= now <= w_end:
+                active_info = _meeting_info(m_sessions)
+                break  # active weekend found — stop looking
 
-            date_display = ""
-            time_display = ""
-            if race_session and race_session.get("date_start"):
-                try:
-                    dt_utc = datetime.fromisoformat(
-                        str(race_session["date_start"]).replace("Z", "+00:00")
-                    ).astimezone(timezone.utc)
-                    dt_est = dt_utc.astimezone(EASTERN)
-                    date_display = dt_est.strftime("%A, %B %-d")
-                    time_display = dt_est.strftime("%-I:%M %p %Z")
-                except Exception:
-                    pass
+            # Find the earliest future meeting
+            first_start = w_start + timedelta(hours=PRE_HOURS)  # un-pad to actual start
+            if first_start > now:
+                if next_start is None or first_start < next_start:
+                    next_start = first_start
+                    next_info = _meeting_info(m_sessions)
 
-            return {
-                "race_name": meeting_name,
-                "country": lat.get("country_name") or "",
-                "circuit": lat.get("circuit_short_name") or "",
-                "date_display": date_display,
-                "time_display": time_display,
-            }
+        return active_info or next_info
+
     except Exception:
         pass
     return None
@@ -368,22 +439,33 @@ def get_next_race() -> dict | None:
 # ----------------------------
 @app.route("/")
 def index():
-    current_race = get_current_race_weekend()
     watch_party = load_watch_party()
-    if current_race:
-        watch_party["active"] = True
-        watch_party["title"] = current_race["race_name"]
-        if current_race.get("date_display"):
-            watch_party["date"] = current_race["date_display"]
-        if current_race.get("time_display"):
-            watch_party["time"] = current_race["time_display"]
-        if not watch_party.get("location") and current_race.get("circuit"):
-            watch_party.setdefault("subtitle", current_race["circuit"])
+
+    # Auto-detect the current/upcoming race weekend and fill in any fields that
+    # aren't manually set in watch_party.json.  Setting "override": true skips
+    # auto-detection entirely.  Otherwise, a non-empty value for any individual
+    # field (title, date, time) in the JSON takes priority over the auto value,
+    # so you can override just the fields you need.
+    if not watch_party.get("override"):
+        race = get_current_race_weekend()
+        if race:
+            watch_party["active"] = True
+            if not watch_party.get("title"):
+                watch_party["title"] = f"{race['race_name']} Watch Party"
+            if not watch_party.get("date") and race.get("date_display"):
+                watch_party["date"] = race["date_display"]
+            if not watch_party.get("time"):
+                if race.get("time_display"):
+                    watch_party["time"] = race["time_display"]
+                else:
+                    watch_party.pop("time", None)
+
     return render_template(
         "index.html",
         watch_party=watch_party,
         next_race=get_next_race(),
         next_session=get_next_session(),
+        member_counts=get_member_counts(),
         discord_invite=DISCORD_INVITE,
         instagram_url=INSTAGRAM_URL,
         twitter_url=TWITTER_URL,
@@ -392,32 +474,51 @@ def index():
     )
 
 
+@app.route("/gallery")
+def gallery():
+    gallery_dir = os.path.join(os.path.dirname(__file__), "static", "gallery")
+    photos = []
+    if os.path.isdir(gallery_dir):
+        exts = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        for fname in sorted(os.listdir(gallery_dir)):
+            if os.path.splitext(fname)[1].lower() in exts:
+                photos.append(f"/static/gallery/{fname}")
+    return render_template("gallery.html", photos=photos)
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.orlandof1.com/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://www.orlandof1.com/gallery</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+</urlset>"""
+    return Response(xml, mimetype="application/xml")
+
+
+@app.route("/robots.txt")
+def robots():
+    txt = """User-agent: *
+Allow: /
+
+Sitemap: https://www.orlandof1.com/sitemap.xml
+"""
+    return Response(txt, mimetype="text/plain")
+
+
 @app.route("/api/next-race")
 def api_next_race():
     return jsonify(get_next_race() or {})
 
 
-@app.route("/api/debug")
-def api_debug():
-    static_token = os.getenv("OPENF1_BEARER_TOKEN", "")
-    bearer = _get_bearer_token()
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    raw = requests.get(f"{OPENF1_BASE}/sessions", params={"session_key": "latest"},
-                       headers=_openf1_headers(), timeout=10).json()
-    return jsonify({
-        "static_token_set": bool(static_token),
-        "oauth_auth_url_set": bool(os.getenv("OPENF1_AUTH_URL")),
-        "oauth_credentials_set": bool(os.getenv("OPENF1_AUTH_USERNAME") and os.getenv("OPENF1_AUTH_PASSWORD")),
-        "bearer_token_active": bool(bearer),
-        "bearer_prefix": bearer[:8] + "..." if bearer else None,
-        "env_path": env_path,
-        "env_file_exists": os.path.exists(env_path),
-        "raw_latest_response": raw,
-        "next_session": get_next_session(),
-        "next_race": get_next_race(),
-        "current_race_weekend": get_current_race_weekend(),
-        "cache_keys": list(_cache.keys()),
-    })
 
 
 if __name__ == "__main__":
