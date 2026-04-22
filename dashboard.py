@@ -3171,13 +3171,44 @@ def _load_xp_state_direct() -> dict:
 
 
 def _get_name_map(guild_id: str) -> dict:
-    """Return {uid_str: display_name} for the guild, from bot cache."""
+    """Return {uid_str: display_name} for the guild, preferring bot cache then REST API."""
     if bot_reference and hasattr(bot_reference, "of1_member_name_map"):
         try:
-            return bot_reference.of1_member_name_map(int(guild_id))
+            result = bot_reference.of1_member_name_map(int(guild_id))
+            if result:
+                return result
         except Exception:
             pass
-    return {}
+    # Fallback: Discord REST API (handles empty member cache)
+    token = _DISCORD_BOT_TOKEN_LOCAL or _DISCORD_BOT_TOKEN
+    if not token or not guild_id:
+        return {}
+    try:
+        name_map: dict = {}
+        after = "0"
+        while True:
+            r = requests.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}/members",
+                params={"limit": 1000, "after": after},
+                headers={"Authorization": f"Bot {token}", "User-Agent": "OF1-Dashboard"},
+                timeout=10,
+            )
+            if r.status_code != 200:
+                break
+            batch = r.json() or []
+            if not batch:
+                break
+            for m in batch:
+                uid = str((m.get("user") or {}).get("id") or "")
+                nick = m.get("nick") or (m.get("user") or {}).get("global_name") or (m.get("user") or {}).get("username") or uid
+                if uid:
+                    name_map[uid] = nick
+            if len(batch) < 1000:
+                break
+            after = str((batch[-1].get("user") or {}).get("id") or "0")
+        return name_map
+    except Exception:
+        return {}
 
 
 def _user_cell(uid: str, name_map: dict) -> str:
