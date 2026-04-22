@@ -3378,7 +3378,12 @@ async def h2h(ctx, *, query: str):
                 for s in raw:
                     if not isinstance(s, dict):
                         continue
-                    if not _openf1_is_f1_session(s):
+                    # Exclude known non-F1 series; don't require explicit "Formula 1"
+                    # label because some sessions omit it from meeting_name.
+                    hay = " ".join(str(s.get(k) or "") for k in (
+                        "meeting_name", "meeting_official_name", "session_name",
+                    )).lower()
+                    if re.search(r"\b(formula\s*[23e]|f[23]|gp[23]|f1\s*academy|porsche)\b", hay):
                         continue
                     sk = s.get("session_key")
                     if not sk:
