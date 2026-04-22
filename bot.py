@@ -276,6 +276,12 @@ reload_config_state()
 # ----------------------------
 XP_STATE: Dict[str, Any] = load_xp_state()
 XP_DIRTY: bool = False
+
+# ----------------------------
+# Command Log (in-memory ring buffer)
+# ----------------------------
+import collections as _collections
+_CMD_LOG: _collections.deque = _collections.deque(maxlen=300)
 XP_SAVE_LOCK = asyncio.Lock()
 XP_FLUSH_TASK: Optional[asyncio.Task] = None
 
@@ -3287,6 +3293,80 @@ async def teamstats(ctx, *, query: str):
         f"- Points: **{match.get('points', '0')}**\n"
         f"- Wins: **{match.get('wins', 'N/A')}**"
     )
+@bot.command(name="h2h", aliases=["headtohead", "versus"])
+async def h2h(ctx, *, query: str):
+    """Compare two F1 drivers head-to-head. E.g. !h2h verstappen norris"""
+    import re as _re
+    parts = _re.split(r'\s+vs\.?\s+|\s+versus\s+', query, flags=_re.IGNORECASE)
+    if len(parts) == 2:
+        q1, q2 = parts[0].strip(), parts[1].strip()
+    else:
+        words = query.split()
+        if len(words) < 2:
+            return await ctx.send("Usage: `!h2h <driver1> <driver2>` — e.g. `!h2h verstappen norris`")
+        mid = max(1, len(words) // 2)
+        q1, q2 = " ".join(words[:mid]), " ".join(words[mid:])
+
+    try:
+        rows = await _openf1_driver_standings_rows(limit=0)
+    except Exception as e:
+        logging.error(f"[F1] h2h failed: {e}")
+        return await ctx.send("Could not fetch standings. Try again shortly.")
+
+    if not rows:
+        return await ctx.send("No driver standings available yet.")
+
+    def _find(q: str):
+        qk = _clean_text_key(q)
+        for r in rows:
+            hay = " ".join(str(x) for x in [r.get("name"), r.get("code"), r.get("driver_number"), r.get("team")] if x)
+            if qk in _clean_text_key(hay):
+                return r
+        return None
+
+    d1, d2 = _find(q1), _find(q2)
+    if not d1 and not d2:
+        return await ctx.send(f"Neither `{q1}` nor `{q2}` found in current standings.")
+    if not d1:
+        return await ctx.send(f"Driver `{q1}` not found in current standings.")
+    if not d2:
+        return await ctx.send(f"Driver `{q2}` not found in current standings.")
+
+    name1, name2 = d1["name"], d2["name"]
+    pos1  = int(d1.get("position", 99) or 99)
+    pos2  = int(d2.get("position", 99) or 99)
+    pts1  = int(d1.get("points",  0)  or 0)
+    pts2  = int(d2.get("points",  0)  or 0)
+    team1 = str(d1.get("team", "?") or "?")
+    team2 = str(d2.get("team", "?") or "?")
+    code1 = str(d1.get("code") or d1.get("driver_number", ""))
+    code2 = str(d2.get("code") or d2.get("driver_number", ""))
+
+    pts_diff = pts1 - pts2
+    if pts_diff > 0:
+        pts_line = f"{name1} leads by **{pts_diff}** pts"
+    elif pts_diff < 0:
+        pts_line = f"{name2} leads by **{abs(pts_diff)}** pts"
+    else:
+        pts_line = "Both drivers level on points"
+
+    champ_ahead = name1 if pos1 < pos2 else (name2 if pos2 < pos1 else None)
+    champ_line = (f"{champ_ahead} is ahead in the championship" if champ_ahead
+                  else "Equal championship position")
+
+    msg = (
+        f"**{name1}** ({code1}) vs **{name2}** ({code2})\n"
+        f"─────────────────────────────\n"
+        f"🏆 **Championship**\n"
+        f"  {name1}: **P{pos1}** — {pts1} pts — {team1}\n"
+        f"  {name2}: **P{pos2}** — {pts2} pts — {team2}\n"
+        f"\n"
+        f"📊 {pts_line}\n"
+        f"🔺 {champ_line}"
+    )
+    await ctx.send(msg)
+
+
 async def _prediction_round_context() -> Dict[str, Any]:
     try:
         meta = await current_or_next_round_meta()
@@ -6702,6 +6782,73 @@ async def of1_dashboard_start_race_live(guild_id: int) -> tuple:
     """Clear the manual hold so the supervisor will restart race live."""
     _set_race_live_hold(int(guild_id), False)
     return True, "Hold cleared — supervisor will pick up on next cycle"
+
+
+@bot.listen("on_command")
+async def _cmd_log_listener(ctx):
+    try:
+        _CMD_LOG.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "user": str(ctx.author),
+            "user_id": str(ctx.author.id),
+            "guild": str(ctx.guild) if ctx.guild else "DM",
+            "guild_id": str(ctx.guild.id) if ctx.guild else None,
+            "command": ctx.command.name if ctx.command else "?",
+            "full": (ctx.message.content or "")[:300],
+        })
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────
+# Dashboard bridge helpers (additions)
+# ─────────────────────────────────────────────────────────────
+
+def of1_cmd_log_snapshot() -> list:
+    return list(_CMD_LOG)
+
+
+def of1_openf1_health_snapshot() -> dict:
+    with _OPENF1_TRACE_LOCK:
+        import copy
+        return copy.deepcopy(_OPENF1_TRACE)
+
+
+def of1_xp_snapshot() -> dict:
+    import copy
+    return copy.deepcopy(XP_STATE)
+
+
+def of1_xp_adjust(guild_id: int, user_id: int, delta: int) -> tuple:
+    try:
+        from xp_storage import get_user_record
+        u = get_user_record(XP_STATE, int(guild_id), int(user_id))
+        old_xp = int(u.get("xp", 0) or 0)
+        new_xp = max(0, old_xp + int(delta))
+        u["xp"] = new_xp
+        _xp_mark_dirty()
+        return True, f"XP adjusted: {old_xp} → {new_xp} (Δ{delta:+d})"
+    except Exception as e:
+        return False, str(e)
+
+
+def of1_quiz_snapshot() -> list:
+    import copy
+    return copy.deepcopy(F1_QUIZ_QUESTIONS)
+
+
+def of1_quiz_save(questions: list) -> tuple:
+    global F1_QUIZ_QUESTIONS
+    try:
+        clean = [q for q in questions if isinstance(q, dict) and q.get("q")]
+        tmp = F1_QUIZ_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(clean, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, F1_QUIZ_FILE)
+        F1_QUIZ_QUESTIONS = clean
+        return True, f"Saved {len(clean)} questions"
+    except Exception as e:
+        return False, str(e)
 
 
 bot_token = os.getenv("DISCORD_BOT_TOKEN")

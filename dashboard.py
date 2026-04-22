@@ -24,6 +24,14 @@ from flask import Flask, request, redirect, url_for, render_template_string, ses
 load_dotenv()
 
 from settings import LOG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH, DEPLOY_STATUS_PATH, WATCH_PARTY_PATH
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+GALLERY_DIR = os.path.join(BASE_DIR, "static", "gallery")
+F1_QUIZ_PATH = os.path.join(BASE_DIR, "f1_quiz.json")
+XP_STATE_PATH = os.path.join(BASE_DIR, "xp_state.json")
+SCHEDULED_MSGS_PATH = os.path.join(BASE_DIR, "scheduled_messages.json")
+_DISCORD_BOT_TOKEN_LOCAL = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
+_SCHEDULED_MSGS_LOCK = threading.Lock()
 from storage import load_config, load_state
 from runtime_store import get_runtime_status, list_alerts, init_runtime_db
 
@@ -320,6 +328,7 @@ BASE_TEMPLATE = """
 
     <!-- Nav links -->
     <nav class="flex-1 overflow-y-auto p-2 space-y-0.5">
+      <p class="px-3 pt-2 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">System</p>
       <a href="{{ url_for('logs') }}"
          class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -334,6 +343,22 @@ BASE_TEMPLATE = """
         </svg>
         Status
       </a>
+      <a href="{{ url_for('cmd_log') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        Cmd Log
+      </a>
+      <a href="{{ url_for('openf1_health') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
+        </svg>
+        OpenF1 Health
+      </a>
+
+      <p class="px-3 pt-3 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Community</p>
       <a href="{{ url_for('watch_party_editor') }}"
          class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -348,6 +373,52 @@ BASE_TEMPLATE = """
         </svg>
         Discord Events
       </a>
+      <a href="{{ url_for('gallery_mgr') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        Gallery
+      </a>
+      <a href="{{ url_for('member_stats') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        Member Stats
+      </a>
+
+      <p class="px-3 pt-3 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Bot Tools</p>
+      <a href="{{ url_for('quiz_mgr') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Quiz
+      </a>
+      <a href="{{ url_for('xp_mgr') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
+        </svg>
+        XP Manager
+      </a>
+      <a href="{{ url_for('announce') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
+        </svg>
+        Announce
+      </a>
+      <a href="{{ url_for('schedule_msgs') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Schedule
+      </a>
+
+      <p class="px-3 pt-3 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Race</p>
       <a href="{{ url_for('race_live') }}"
          class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-yellow-500 hover:bg-[#1a1a1a] hover:text-yellow-300 text-sm transition-colors">
         <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -2781,8 +2852,854 @@ def run_dashboard():
         init_runtime_db()
     except Exception:
         pass
+    _sched_thread = threading.Thread(target=_scheduled_msgs_worker, daemon=True, name="scheduled-msgs")
+    _sched_thread.start()
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
     app.run(host="0.0.0.0", port=port, threaded=True)
+
+# ─────────────────────────────────────────────────────────────
+# Gallery Manager
+# ─────────────────────────────────────────────────────────────
+_GALLERY_ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+
+@app.route("/gallery_mgr")
+@login_required
+def gallery_mgr():
+    os.makedirs(GALLERY_DIR, exist_ok=True)
+    files = []
+    for fname in sorted(os.listdir(GALLERY_DIR)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in _GALLERY_ALLOWED_EXT:
+            size = os.path.getsize(os.path.join(GALLERY_DIR, fname))
+            files.append({"name": fname, "size": size, "url": f"/static/gallery/{fname}"})
+
+    def _gallery_row(photo):
+        ename = _escape(photo["name"])
+        eurl  = _escape(photo["url"])
+        kb    = photo["size"] // 1024
+        csrf  = _csrf_input()
+        return (
+            f'<div class="flex items-center gap-3 p-3 bg-[#111] border border-[#222] rounded-xl">'
+            f'<img src="{eurl}" class="w-16 h-16 object-cover rounded-lg shrink-0" loading="lazy" />'
+            f'<div class="flex-1 min-w-0">'
+            f'<div class="text-sm text-gray-200 truncate">{ename}</div>'
+            f'<div class="text-xs text-gray-500">{kb} KB</div>'
+            f'</div>'
+            f'<form method="post" action="/gallery_mgr/delete" onsubmit="return confirm(\'Delete this photo?\')">'
+            f'{csrf}'
+            f'<input type="hidden" name="filename" value="{ename}" />'
+            f'<button class="text-xs text-red-400 hover:text-red-300 border border-red-900 px-3 py-1.5 rounded-lg transition-colors">Delete</button>'
+            f'</form>'
+            f'</div>'
+        )
+
+    rows = "".join(_gallery_row(f) for f in files) or '<p class="text-gray-500 text-sm">No photos in gallery yet.</p>'
+
+    body = f"""
+    <div class="space-y-4 max-w-3xl">
+      <div class="flex items-center justify-between">
+        <h1 class="text-xl font-bold text-white">Gallery Manager</h1>
+        <span class="text-xs text-gray-500">{len(files)} photo(s)</span>
+      </div>
+      <form method="post" action="/gallery_mgr/upload" enctype="multipart/form-data"
+            class="bg-[#111] border border-[#222] rounded-xl p-4 space-y-3">
+        {_csrf_input()}
+        <div class="text-xs text-gray-500 uppercase tracking-widest">Upload Photos</div>
+        <input type="file" name="photos" multiple accept=".jpg,.jpeg,.png,.gif,.webp"
+               class="block w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:bg-[#222] file:text-gray-300 file:cursor-pointer" />
+        <button class="bg-[#1f6f3f] hover:bg-[#2a8f52] text-white text-sm px-4 py-2 rounded-lg transition-colors">Upload</button>
+      </form>
+      <div class="space-y-2">{rows}</div>
+    </div>
+    """
+    return _render(body)
+
+
+@app.route("/gallery_mgr/upload", methods=["POST"])
+@login_required
+def gallery_mgr_upload():
+    os.makedirs(GALLERY_DIR, exist_ok=True)
+    files = request.files.getlist("photos")
+    saved = 0
+    for f in files:
+        if not f or not f.filename:
+            continue
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in _GALLERY_ALLOWED_EXT:
+            continue
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in f.filename)
+        dest = os.path.join(GALLERY_DIR, safe)
+        f.save(dest)
+        saved += 1
+    return redirect(url_for("gallery_mgr"))
+
+
+@app.route("/gallery_mgr/delete", methods=["POST"])
+@login_required
+def gallery_mgr_delete():
+    fname = (request.form.get("filename") or "").strip()
+    if fname and "/" not in fname and "\\" not in fname:
+        target = os.path.join(GALLERY_DIR, fname)
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in _GALLERY_ALLOWED_EXT and os.path.isfile(target):
+            os.remove(target)
+    return redirect(url_for("gallery_mgr"))
+
+
+# ─────────────────────────────────────────────────────────────
+# Quiz Manager
+# ─────────────────────────────────────────────────────────────
+def _load_quiz() -> list:
+    try:
+        with open(F1_QUIZ_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [q for q in data if isinstance(q, dict) and q.get("q")]
+        if isinstance(data, dict) and isinstance(data.get("questions"), list):
+            return [q for q in data["questions"] if isinstance(q, dict) and q.get("q")]
+    except Exception:
+        pass
+    return []
+
+
+def _save_quiz(questions: list) -> None:
+    tmp = F1_QUIZ_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(questions, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, F1_QUIZ_PATH)
+    if bot_reference and hasattr(bot_reference, "of1_quiz_save"):
+        bot_reference.of1_quiz_save(questions)
+
+
+@app.route("/quiz_mgr")
+@login_required
+def quiz_mgr():
+    questions = _load_quiz()
+    q_filter = (request.args.get("q") or "").lower().strip()
+    cat_filter = (request.args.get("cat") or "").lower().strip()
+    diff_filter = (request.args.get("diff") or "").lower().strip()
+
+    cats = sorted({str(q.get("category") or "").strip() for q in questions if q.get("category")})
+    diffs = sorted({str(q.get("difficulty") or "").strip() for q in questions if q.get("difficulty")})
+
+    shown = questions
+    if q_filter:
+        shown = [q for q in shown if q_filter in q.get("q", "").lower()]
+    if cat_filter:
+        shown = [q for q in shown if (q.get("category") or "").lower() == cat_filter]
+    if diff_filter:
+        shown = [q for q in shown if (q.get("difficulty") or "").lower() == diff_filter]
+
+    cat_opts = "".join(f'<option value="{_escape(c)}" {"selected" if cat_filter == c else ""}>{_escape(c)}</option>' for c in cats)
+    diff_opts = "".join(f'<option value="{_escape(d)}" {"selected" if diff_filter == d else ""}>{_escape(d)}</option>' for d in diffs)
+
+    rows = ""
+    for i, q in enumerate(questions):
+        if q not in shown:
+            continue
+        idx = questions.index(q)
+        ans = ", ".join(str(a) for a in (q.get("answers") or []))
+        rows += (
+            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+            f'<td class="px-3 py-2 text-sm text-gray-200 max-w-xs">{_escape(q.get("q",""))}</td>'
+            f'<td class="px-3 py-2 text-xs text-gray-400">{_escape(ans[:80])}</td>'
+            f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("category",""))}</td>'
+            f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("difficulty",""))}</td>'
+            f'<td class="px-3 py-2">'
+            f'<form method="post" action="/quiz_mgr/delete" onsubmit="return confirm(\'Delete this question?\')" class="inline">'
+            f'{_csrf_input()}<input type="hidden" name="idx" value="{idx}" />'
+            f'<button class="text-xs text-red-400 hover:text-red-300">Delete</button>'
+            f'</form>'
+            f'</td>'
+            f'</tr>'
+        )
+
+    body = f"""
+    <div class="space-y-4 max-w-5xl">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <h1 class="text-xl font-bold text-white">Quiz Manager</h1>
+        <span class="text-xs text-gray-500">{len(questions)} questions · {len(shown)} shown</span>
+      </div>
+
+      <!-- Filters -->
+      <form method="get" class="flex gap-2 flex-wrap items-end">
+        <input name="q" value="{_escape(q_filter)}" placeholder="Search question…"
+               class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 w-56 focus:outline-none focus:border-gray-500" />
+        <select name="cat" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500">
+          <option value="">All categories</option>{cat_opts}
+        </select>
+        <select name="diff" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500">
+          <option value="">All difficulties</option>{diff_opts}
+        </select>
+        <button class="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 text-sm rounded-lg px-4 py-1.5 hover:bg-[#222]">Filter</button>
+      </form>
+
+      <!-- Add question -->
+      <details class="bg-[#111] border border-[#222] rounded-xl">
+        <summary class="px-4 py-3 text-sm text-gray-300 cursor-pointer select-none font-medium">+ Add Question</summary>
+        <form method="post" action="/quiz_mgr/add" class="p-4 space-y-3 border-t border-[#222]">
+          {_csrf_input()}
+          <div class="grid grid-cols-1 gap-3">
+            <textarea name="question" placeholder="Question text" rows="2" required
+                      class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 resize-none w-full"></textarea>
+            <input name="answers" placeholder="Answers (comma-separated)" required
+                   class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 w-full" />
+            <div class="flex gap-2">
+              <input name="category" placeholder="Category (e.g. circuits)"
+                     class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 flex-1" />
+              <select name="difficulty" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+          </div>
+          <button class="bg-[#1f6f3f] hover:bg-[#2a8f52] text-white text-sm px-4 py-2 rounded-lg transition-colors">Add Question</button>
+        </form>
+      </details>
+
+      <!-- Table -->
+      <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
+        <table class="w-full text-left">
+          <thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">
+            <th class="px-3 py-2">Question</th>
+            <th class="px-3 py-2">Answers</th>
+            <th class="px-3 py-2">Category</th>
+            <th class="px-3 py-2">Difficulty</th>
+            <th class="px-3 py-2"></th>
+          </tr></thead>
+          <tbody>{rows or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No questions match.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+    """
+    return _render(body)
+
+
+@app.route("/quiz_mgr/add", methods=["POST"])
+@login_required
+def quiz_mgr_add():
+    question = (request.form.get("question") or "").strip()
+    raw_answers = (request.form.get("answers") or "").strip()
+    category = (request.form.get("category") or "").strip()
+    difficulty = (request.form.get("difficulty") or "easy").strip()
+    if question and raw_answers:
+        answers = [a.strip() for a in raw_answers.split(",") if a.strip()]
+        qs = _load_quiz()
+        qs.append({"q": question, "answers": answers, "category": category, "difficulty": difficulty})
+        _save_quiz(qs)
+    return redirect(url_for("quiz_mgr"))
+
+
+@app.route("/quiz_mgr/delete", methods=["POST"])
+@login_required
+def quiz_mgr_delete():
+    try:
+        idx = int(request.form.get("idx", -1))
+        qs = _load_quiz()
+        if 0 <= idx < len(qs):
+            qs.pop(idx)
+            _save_quiz(qs)
+    except Exception:
+        pass
+    return redirect(url_for("quiz_mgr"))
+
+
+# ─────────────────────────────────────────────────────────────
+# XP Manager
+# ─────────────────────────────────────────────────────────────
+_XP_AUDIT_LOG: list = []  # in-memory audit log for this session
+
+
+def _load_xp_state_direct() -> dict:
+    try:
+        with open(XP_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"guilds": {}}
+
+
+@app.route("/xp_mgr")
+@login_required
+def xp_mgr():
+    if bot_reference and hasattr(bot_reference, "of1_xp_snapshot"):
+        xp_state = bot_reference.of1_xp_snapshot()
+    else:
+        xp_state = _load_xp_state_direct()
+
+    guilds = xp_state.get("guilds") or {}
+    guild_tabs = ""
+    tables = ""
+    guild_ids = sorted(guilds.keys())
+
+    for gid in guild_ids:
+        g = guilds[gid]
+        users = g.get("users") or {}
+        sorted_users = sorted(users.items(), key=lambda kv: int((kv[1] or {}).get("xp", 0) or 0), reverse=True)
+        guild_tabs += f'<button onclick="showGuild(\'{gid}\')" id="tab_{gid}" class="px-3 py-1.5 text-sm rounded-lg border border-[#2a2a2a] text-gray-400 hover:text-white hover:bg-[#1a1a1a]">{gid}</button>'
+
+        user_rows = "".join(
+            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+            f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-200">{int((rec or {}).get("xp", 0) or 0)}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-400">{int((rec or {}).get("level", 0) or 0)}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-500">{int((rec or {}).get("messages", 0) or 0)}</td>'
+            f'<td class="px-3 py-2">'
+            f'<div class="flex gap-1">'
+            f'<input id="xp_amt_{gid}_{uid}" type="number" placeholder="±XP" class="w-20 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-xs rounded px-2 py-1 focus:outline-none" />'
+            f'<button onclick="adjustXp(\'{gid}\',\'{uid}\')" class="text-xs bg-[#1f6f3f] hover:bg-[#2a8f52] text-white px-2 py-1 rounded transition-colors">Apply</button>'
+            f'</div>'
+            f'</td>'
+            f'</tr>'
+            for uid, rec in sorted_users[:50]
+        ) or '<tr><td colspan="5" class="px-3 py-3 text-gray-500 text-sm">No users.</td></tr>'
+
+        tables += (
+            f'<div id="guild_{gid}" class="guild-panel hidden">'
+            f'<div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">'
+            f'<table class="w-full text-left">'
+            f'<thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">'
+            f'<th class="px-3 py-2">User ID</th><th class="px-3 py-2">XP</th>'
+            f'<th class="px-3 py-2">Level</th><th class="px-3 py-2">Messages</th><th class="px-3 py-2">Adjust</th>'
+            f'</tr></thead>'
+            f'<tbody>{user_rows}</tbody></table></div>'
+            f'<p class="text-xs text-gray-600 mt-2">Showing top 50 by XP. Adjustments take effect immediately.</p>'
+            f'</div>'
+        )
+
+    audit_rows = "".join(
+        f'<div class="flex gap-3 text-xs py-1 border-b border-[#1a1a1a]">'
+        f'<span class="text-gray-600 shrink-0">{_escape(e.get("ts",""))}</span>'
+        f'<span class="text-gray-400">{_escape(e.get("user_id",""))} in {_escape(e.get("guild_id",""))}</span>'
+        f'<span class="text-green-400">{_escape(e.get("result",""))}</span>'
+        f'</div>'
+        for e in reversed(_XP_AUDIT_LOG[-50:])
+    ) or '<p class="text-gray-600 text-xs">No adjustments this session.</p>'
+
+    body = f"""
+    <div class="space-y-4 max-w-4xl">
+      <h1 class="text-xl font-bold text-white">XP Manager</h1>
+      <div class="flex gap-2 flex-wrap" id="guildTabs">{guild_tabs or '<span class="text-gray-500 text-sm">No guild data found.</span>'}</div>
+      <div id="guildPanels">{tables}</div>
+      <details class="bg-[#111] border border-[#222] rounded-xl">
+        <summary class="px-4 py-3 text-sm text-gray-400 cursor-pointer">Audit Log (this session)</summary>
+        <div class="p-4 border-t border-[#222] space-y-0.5">{audit_rows}</div>
+      </details>
+    </div>
+    <script>
+    function showGuild(gid) {{
+      document.querySelectorAll('.guild-panel').forEach(el => el.classList.add('hidden'));
+      document.getElementById('guild_' + gid)?.classList.remove('hidden');
+    }}
+    const firstGuild = document.querySelector('.guild-panel');
+    if (firstGuild) firstGuild.classList.remove('hidden');
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    async function adjustXp(gid, uid) {{
+      const amt = parseInt(document.getElementById('xp_amt_' + gid + '_' + uid)?.value || '0');
+      if (!amt || isNaN(amt)) return alert('Enter a non-zero XP amount.');
+      const r = await fetch('/xp_mgr/adjust', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}},
+        body: JSON.stringify({{guild_id: gid, user_id: uid, delta: amt}})
+      }});
+      const d = await r.json();
+      alert(d.message || (d.ok ? 'Done' : 'Error'));
+      if (d.ok) location.reload();
+    }}
+    </script>
+    """
+    return _render(body)
+
+
+@app.route("/xp_mgr/adjust", methods=["POST"])
+@login_required
+def xp_mgr_adjust():
+    data = request.get_json(silent=True) or {}
+    gid = str(data.get("guild_id") or "").strip()
+    uid = str(data.get("user_id") or "").strip()
+    try:
+        delta = int(data.get("delta") or 0)
+    except Exception:
+        return jsonify({"ok": False, "message": "Invalid delta"})
+
+    if not gid or not uid or delta == 0:
+        return jsonify({"ok": False, "message": "guild_id, user_id, and non-zero delta required"})
+
+    if bot_reference and hasattr(bot_reference, "of1_xp_adjust"):
+        ok, msg = bot_reference.of1_xp_adjust(int(gid), int(uid), delta)
+    else:
+        return jsonify({"ok": False, "message": "Bot not connected"})
+
+    _XP_AUDIT_LOG.append({
+        "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        "guild_id": gid,
+        "user_id": uid,
+        "delta": delta,
+        "result": msg,
+    })
+    return jsonify({"ok": ok, "message": msg})
+
+
+# ─────────────────────────────────────────────────────────────
+# Announcement Broadcaster
+# ─────────────────────────────────────────────────────────────
+def _discord_list_channels(guild_id: str) -> list:
+    token = _DISCORD_BOT_TOKEN_LOCAL or _DISCORD_BOT_TOKEN
+    if not token or not guild_id:
+        return []
+    try:
+        r = requests.get(
+            f"https://discord.com/api/v10/guilds/{guild_id}/channels",
+            headers={"Authorization": f"Bot {token}", "User-Agent": "OF1-Dashboard"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            chans = r.json() or []
+            return sorted(
+                [c for c in chans if isinstance(c, dict) and c.get("type") in (0, 5)],
+                key=lambda c: str(c.get("name") or ""),
+            )
+    except Exception:
+        pass
+    return []
+
+
+def _discord_send_message(channel_id: str, content: str) -> tuple:
+    token = _DISCORD_BOT_TOKEN_LOCAL or _DISCORD_BOT_TOKEN
+    if not token:
+        return False, "No bot token configured"
+    try:
+        r = requests.post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            json={"content": content},
+            headers={"Authorization": f"Bot {token}", "User-Agent": "OF1-Dashboard"},
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            return True, "Message sent"
+        return False, f"Discord returned {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+@app.route("/announce", methods=["GET", "POST"])
+@login_required
+def announce():
+    guild_id = _DISCORD_GUILD_ID or (os.getenv("DISCORD_GUILD_ID") or "").strip()
+    channels = _discord_list_channels(guild_id)
+    flash_msg = ""
+
+    if request.method == "POST":
+        channel_id = (request.form.get("channel_id") or "").strip()
+        content = (request.form.get("content") or "").strip()
+        if channel_id and content:
+            ok, msg = _discord_send_message(channel_id, content)
+            flash_msg = f'{"✅" if ok else "❌"} {_escape(msg)}'
+        else:
+            flash_msg = "❌ Channel and message are required."
+
+    chan_opts = "".join(
+        f'<option value="{_escape(str(c.get("id","")))}">#{_escape(str(c.get("name","")))} ({c.get("id","")})</option>'
+        for c in channels
+    ) or '<option value="">No channels found — check bot token/guild ID</option>'
+
+    body = f"""
+    <div class="space-y-4 max-w-2xl">
+      <h1 class="text-xl font-bold text-white">Announcement Broadcaster</h1>
+      {f'<div class="bg-[#111] border border-[#222] rounded-xl px-4 py-3 text-sm">{flash_msg}</div>' if flash_msg else ''}
+      <form method="post" class="bg-[#111] border border-[#222] rounded-xl p-4 space-y-3">
+        {_csrf_input()}
+        <div>
+          <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Channel</label>
+          <select name="channel_id" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">
+            {chan_opts}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Message</label>
+          <textarea name="content" rows="5" placeholder="Message content (Markdown supported)…" required
+                    class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 resize-y font-mono"></textarea>
+        </div>
+        <button class="bg-[#1f6f3f] hover:bg-[#2a8f52] text-white text-sm px-5 py-2 rounded-lg transition-colors font-medium">Send to Discord</button>
+      </form>
+      <p class="text-xs text-gray-600">Message is sent immediately as the bot to the selected channel. Supports Discord markdown.</p>
+    </div>
+    """
+    return _render(body)
+
+
+# ─────────────────────────────────────────────────────────────
+# Scheduled Messages Queue
+# ─────────────────────────────────────────────────────────────
+def _load_scheduled_msgs() -> list:
+    with _SCHEDULED_MSGS_LOCK:
+        try:
+            if os.path.exists(SCHEDULED_MSGS_PATH):
+                with open(SCHEDULED_MSGS_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+        return []
+
+
+def _save_scheduled_msgs(msgs: list) -> None:
+    with _SCHEDULED_MSGS_LOCK:
+        tmp = SCHEDULED_MSGS_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(msgs, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, SCHEDULED_MSGS_PATH)
+
+
+def _scheduled_msgs_worker() -> None:
+    while True:
+        try:
+            time.sleep(30)
+            now_ts = time.time()
+            msgs = _load_scheduled_msgs()
+            changed = False
+            for m in msgs:
+                if m.get("sent") or not m.get("channel_id") or not m.get("content"):
+                    continue
+                send_at = float(m.get("send_at_ts") or 0)
+                if now_ts >= send_at:
+                    ok, _ = _discord_send_message(str(m["channel_id"]), str(m["content"]))
+                    m["sent"] = True
+                    m["sent_ok"] = ok
+                    m["sent_at"] = datetime.now(timezone.utc).isoformat()
+                    changed = True
+            if changed:
+                _save_scheduled_msgs(msgs)
+        except Exception:
+            pass
+
+
+@app.route("/schedule_msgs")
+@login_required
+def schedule_msgs():
+    guild_id = _DISCORD_GUILD_ID or (os.getenv("DISCORD_GUILD_ID") or "").strip()
+    channels = _discord_list_channels(guild_id)
+    msgs = _load_scheduled_msgs()
+
+    chan_opts = "".join(
+        f'<option value="{_escape(str(c.get("id","")))}">#{_escape(str(c.get("name","")))} ({c.get("id","")})</option>'
+        for c in channels
+    ) or '<option value="">No channels found</option>'
+
+    msg_rows = ""
+    for m in reversed(msgs[-100:]):
+        sent = m.get("sent", False)
+        ok_badge = '<span class="text-green-400 text-xs">Sent</span>' if (sent and m.get("sent_ok")) else \
+                   ('<span class="text-red-400 text-xs">Failed</span>' if (sent and not m.get("sent_ok")) else \
+                    '<span class="text-yellow-400 text-xs">Pending</span>')
+        send_dt = datetime.fromtimestamp(float(m.get("send_at_ts") or 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        msg_rows += (
+            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+            f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(send_dt)}</td>'
+            f'<td class="px-3 py-2 text-xs text-gray-400">{_escape(str(m.get("channel_id",""))[:20])}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-300 max-w-xs truncate">{_escape((m.get("content") or "")[:80])}</td>'
+            f'<td class="px-3 py-2">{ok_badge}</td>'
+            f'<td class="px-3 py-2">'
+            + ('' if sent else
+               f'<form method="post" action="/schedule_msgs/cancel" class="inline">'
+               f'{_csrf_input()}<input type="hidden" name="msg_id" value="{_escape(str(m.get("id","")))}"/>'
+               f'<button class="text-xs text-red-400 hover:text-red-300">Cancel</button></form>')
+            + '</td></tr>'
+        )
+
+    body = f"""
+    <div class="space-y-4 max-w-4xl">
+      <h1 class="text-xl font-bold text-white">Scheduled Messages</h1>
+      <form method="post" action="/schedule_msgs/add" class="bg-[#111] border border-[#222] rounded-xl p-4 space-y-3">
+        {_csrf_input()}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Channel</label>
+            <select name="channel_id" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">{chan_opts}</select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Send At (UTC)</label>
+            <input name="send_at" type="datetime-local" required
+                   class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500" />
+          </div>
+        </div>
+        <textarea name="content" rows="3" placeholder="Message content…" required
+                  class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 resize-y font-mono"></textarea>
+        <button class="bg-[#1f6f3f] hover:bg-[#2a8f52] text-white text-sm px-5 py-2 rounded-lg transition-colors">Schedule</button>
+      </form>
+      <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
+        <table class="w-full text-left">
+          <thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">
+            <th class="px-3 py-2">Scheduled For</th><th class="px-3 py-2">Channel</th>
+            <th class="px-3 py-2">Message</th><th class="px-3 py-2">Status</th><th class="px-3 py-2"></th>
+          </tr></thead>
+          <tbody>{msg_rows or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No scheduled messages.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-600">Worker checks every 30 seconds and sends any due messages.</p>
+    </div>
+    """
+    return _render(body)
+
+
+@app.route("/schedule_msgs/add", methods=["POST"])
+@login_required
+def schedule_msgs_add():
+    channel_id = (request.form.get("channel_id") or "").strip()
+    content = (request.form.get("content") or "").strip()
+    send_at_raw = (request.form.get("send_at") or "").strip()
+    if channel_id and content and send_at_raw:
+        try:
+            dt = datetime.fromisoformat(send_at_raw).replace(tzinfo=timezone.utc)
+            msgs = _load_scheduled_msgs()
+            import uuid
+            msgs.append({
+                "id": str(uuid.uuid4())[:8],
+                "channel_id": channel_id,
+                "content": content,
+                "send_at_ts": dt.timestamp(),
+                "send_at_iso": dt.isoformat(),
+                "sent": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            _save_scheduled_msgs(msgs)
+        except Exception:
+            pass
+    return redirect(url_for("schedule_msgs"))
+
+
+@app.route("/schedule_msgs/cancel", methods=["POST"])
+@login_required
+def schedule_msgs_cancel():
+    msg_id = (request.form.get("msg_id") or "").strip()
+    if msg_id:
+        msgs = _load_scheduled_msgs()
+        msgs = [m for m in msgs if str(m.get("id") or "") != msg_id]
+        _save_scheduled_msgs(msgs)
+    return redirect(url_for("schedule_msgs"))
+
+
+# ─────────────────────────────────────────────────────────────
+# Member Stats Panel
+# ─────────────────────────────────────────────────────────────
+@app.route("/stats")
+@login_required
+def member_stats():
+    if bot_reference and hasattr(bot_reference, "of1_xp_snapshot"):
+        xp_state = bot_reference.of1_xp_snapshot()
+    else:
+        xp_state = _load_xp_state_direct()
+
+    state = load_state() or {}
+    quiz_root = state.get("quiz_scores") or {}
+    pred_root = (state.get("predictions") or {}).get("totals") or {}
+
+    guilds = xp_state.get("guilds") or {}
+    guild_id = list(guilds.keys())[0] if guilds else None
+
+    # XP leaderboard
+    xp_rows = ""
+    if guild_id:
+        users = (guilds.get(guild_id) or {}).get("users") or {}
+        top_xp = sorted(users.items(), key=lambda kv: int((kv[1] or {}).get("xp", 0) or 0), reverse=True)[:15]
+        for rank, (uid, rec) in enumerate(top_xp, 1):
+            xp = int((rec or {}).get("xp", 0) or 0)
+            lvl = int((rec or {}).get("level", 0) or 0)
+            msgs = int((rec or {}).get("messages", 0) or 0)
+            xp_rows += (
+                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+                f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
+                f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+                f'<td class="px-3 py-2 text-sm text-yellow-400 font-semibold">{xp:,}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-400">Lv {lvl}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-500">{msgs:,} msgs</td>'
+                f'</tr>'
+            )
+
+    # Quiz leaderboard — pick first guild key in quiz data
+    quiz_gid = list(quiz_root.keys())[0] if quiz_root else None
+    quiz_rows = ""
+    if quiz_gid:
+        quiz_scores = quiz_root.get(quiz_gid) or {}
+        top_quiz = sorted(quiz_scores.items(), key=lambda kv: int(kv[1] or 0), reverse=True)[:10]
+        for rank, (uid, pts) in enumerate(top_quiz, 1):
+            quiz_rows += (
+                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+                f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
+                f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+                f'<td class="px-3 py-2 text-sm text-blue-400 font-semibold">{int(pts or 0):,} pts</td>'
+                f'</tr>'
+            )
+
+    # Prediction leaderboard
+    pred_gid = list(pred_root.keys())[0] if pred_root else None
+    pred_rows = ""
+    if pred_gid:
+        pred_scores = pred_root.get(pred_gid) or {}
+        top_pred = sorted(pred_scores.items(), key=lambda kv: int(kv[1] or 0), reverse=True)[:10]
+        for rank, (uid, pts) in enumerate(top_pred, 1):
+            pred_rows += (
+                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+                f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
+                f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+                f'<td class="px-3 py-2 text-sm text-green-400 font-semibold">{int(pts or 0):,} pts</td>'
+                f'</tr>'
+            )
+
+    def _table(title: str, headers: list, rows: str, empty: str = "No data") -> str:
+        ths = "".join(f'<th class="px-3 py-2">{h}</th>' for h in headers)
+        ncols = len(headers)
+        empty_row = f'<tr><td colspan="{ncols}" class="px-3 py-4 text-gray-500 text-sm">{empty}</td></tr>'
+        return (
+            f'<div class="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">'
+            f'<div class="px-4 py-3 border-b border-[#222] text-sm font-semibold text-gray-300">{title}</div>'
+            f'<table class="w-full text-left"><thead>'
+            f'<tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">{ths}</tr>'
+            f'</thead><tbody>'
+            f'{rows or empty_row}'
+            f'</tbody></table></div>'
+        )
+
+    body = f"""
+    <div class="space-y-4 max-w-5xl">
+      <h1 class="text-xl font-bold text-white">Member Stats</h1>
+      <p class="text-xs text-gray-500">Guild: {_escape(guild_id or "none")} — user IDs shown (names need Discord API lookup)</p>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {_table("XP Leaderboard", ["#", "User ID", "XP", "Level", "Messages"], xp_rows)}
+        {_table("Quiz Leaderboard", ["#", "User ID", "Score"], quiz_rows)}
+        {_table("Predictions Leaderboard", ["#", "User ID", "Points"], pred_rows)}
+      </div>
+    </div>
+    """
+    return _render(body)
+
+
+# ─────────────────────────────────────────────────────────────
+# Bot Command Log
+# ─────────────────────────────────────────────────────────────
+@app.route("/cmd_log")
+@login_required
+def cmd_log():
+    if bot_reference and hasattr(bot_reference, "of1_cmd_log_snapshot"):
+        entries = bot_reference.of1_cmd_log_snapshot()
+    else:
+        entries = []
+
+    rows = "".join(
+        f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+        f'<td class="px-3 py-1.5 text-xs text-gray-600 whitespace-nowrap">{_escape(str(e.get("ts",""))[:19].replace("T"," "))}</td>'
+        f'<td class="px-3 py-1.5 text-xs text-yellow-400 font-mono">{_escape(str(e.get("command","?")))}</td>'
+        f'<td class="px-3 py-1.5 text-xs text-gray-300">{_escape(str(e.get("user","")))}</td>'
+        f'<td class="px-3 py-1.5 text-xs text-gray-500">{_escape(str(e.get("guild","")))}</td>'
+        f'<td class="px-3 py-1.5 text-xs text-gray-600 font-mono max-w-xs truncate">{_escape(str(e.get("full",""))[:100])}</td>'
+        f'</tr>'
+        for e in reversed(entries[-200:])
+    ) or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No commands logged yet. Commands are logged while the bot is running.</td></tr>'
+
+    body = f"""
+    <div class="space-y-4 max-w-5xl">
+      <div class="flex items-center justify-between">
+        <h1 class="text-xl font-bold text-white">Command Log</h1>
+        <div class="flex gap-2">
+          <span class="text-xs text-gray-500">{len(entries)} entries</span>
+          <button onclick="location.reload()" class="text-xs bg-[#1a1a1a] border border-[#222] text-gray-300 px-3 py-1 rounded-lg hover:bg-[#222]">Refresh</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
+        <table class="w-full text-left">
+          <thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">
+            <th class="px-3 py-2">Time (UTC)</th>
+            <th class="px-3 py-2">Command</th>
+            <th class="px-3 py-2">User</th>
+            <th class="px-3 py-2">Server</th>
+            <th class="px-3 py-2">Full Input</th>
+          </tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-600">In-memory only — cleared on bot restart. Shows last 200 commands.</p>
+    </div>
+    <script>setTimeout(() => location.reload(), 15000);</script>
+    """
+    return _render(body)
+
+
+# ─────────────────────────────────────────────────────────────
+# OpenF1 API Health
+# ─────────────────────────────────────────────────────────────
+@app.route("/openf1_health")
+@login_required
+def openf1_health():
+    if bot_reference and hasattr(bot_reference, "of1_openf1_health_snapshot"):
+        trace = bot_reference.of1_openf1_health_snapshot()
+    else:
+        trace = {}
+
+    window_start = float(trace.get("window_start") or 0)
+    window_age_s = int(time.time() - window_start) if window_start else 0
+    rows_data = trace.get("rows") or {}
+
+    endpoint_rows = ""
+    for ep, stats in sorted(rows_data.items()):
+        if not isinstance(stats, dict):
+            continue
+        calls = int(stats.get("calls", 0) or 0)
+        errors = int(stats.get("errors", 0) or 0)
+        avg_ms = int(stats.get("avg_ms", 0) or 0)
+        last_status = int(stats.get("last_status", 0) or 0)
+        status_cls = "text-green-400" if 200 <= last_status < 300 else ("text-yellow-400" if last_status == 0 else "text-red-400")
+        err_cls = "text-red-400" if errors else "text-gray-500"
+        endpoint_rows += (
+            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+            f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(ep)}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-200">{calls}</td>'
+            f'<td class="px-3 py-2 text-sm {err_cls}">{errors}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-400">{avg_ms} ms</td>'
+            f'<td class="px-3 py-2 text-sm {status_cls}">{last_status or "—"}</td>'
+            f'</tr>'
+        )
+
+    body = f"""
+    <div class="space-y-4 max-w-3xl">
+      <div class="flex items-center justify-between">
+        <h1 class="text-xl font-bold text-white">OpenF1 API Health</h1>
+        <button onclick="location.reload()" class="text-xs bg-[#1a1a1a] border border-[#222] text-gray-300 px-3 py-1 rounded-lg hover:bg-[#222]">Refresh</button>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+          <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Window Age</div>
+          <div class="text-2xl font-bold text-white">{window_age_s}s</div>
+        </div>
+        <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+          <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Endpoints Tracked</div>
+          <div class="text-2xl font-bold text-white">{len(rows_data)}</div>
+        </div>
+        <div class="bg-[#111] border border-[#222] rounded-xl p-4">
+          <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Total Calls</div>
+          <div class="text-2xl font-bold text-white">{sum(int((v or {{}}).get("calls", 0)) for v in rows_data.values() if isinstance(v, dict))}</div>
+        </div>
+      </div>
+      <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
+        <table class="w-full text-left">
+          <thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">
+            <th class="px-3 py-2">Endpoint</th>
+            <th class="px-3 py-2">Calls</th>
+            <th class="px-3 py-2">Errors</th>
+            <th class="px-3 py-2">Avg Latency</th>
+            <th class="px-3 py-2">Last Status</th>
+          </tr></thead>
+          <tbody>{endpoint_rows or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No API calls recorded yet — data resets on bot restart.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-600">Trace window resets periodically. Refresh for latest data.</p>
+    </div>
+    <script>setTimeout(() => location.reload(), 30000);</script>
+    """
+    return _render(body)
+
 
 def start_dashboard_thread():
     thread = threading.Thread(target=run_dashboard, daemon=True)
