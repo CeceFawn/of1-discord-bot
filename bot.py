@@ -3310,7 +3310,7 @@ async def h2h(ctx, *, query: str):
     try:
         rows = await _openf1_driver_standings_rows(limit=0)
     except Exception as e:
-        logging.error(f"[F1] h2h failed: {e}")
+        logging.error(f"[F1] h2h standings failed: {e}")
         return await ctx.send("Could not fetch standings. Try again shortly.")
 
     if not rows:
@@ -3332,7 +3332,8 @@ async def h2h(ctx, *, query: str):
     if not d2:
         return await ctx.send(f"Driver `{q2}` not found in current standings.")
 
-    name1, name2 = d1["name"], d2["name"]
+    name1 = d1["name"].split()[-1] if d1.get("name") else d1["name"]
+    name2 = d2["name"].split()[-1] if d2.get("name") else d2["name"]
     pos1  = int(d1.get("position", 99) or 99)
     pos2  = int(d2.get("position", 99) or 99)
     pts1  = int(d1.get("points",  0)  or 0)
@@ -3341,7 +3342,95 @@ async def h2h(ctx, *, query: str):
     team2 = str(d2.get("team", "?") or "?")
     code1 = str(d1.get("code") or d1.get("driver_number", ""))
     code2 = str(d2.get("code") or d2.get("driver_number", ""))
+    num1  = str(d1.get("driver_number") or "")
+    num2  = str(d2.get("driver_number") or "")
 
+    # ── Season head-to-head via position endpoint ──────────────
+    race_d1 = race_d2 = race_total = 0
+    quali_d1 = quali_d2 = quali_total = 0
+
+    if num1 and num2:
+        async with ctx.typing():
+            now = datetime.now(timezone.utc)
+            try:
+                all_sessions = await asyncio.to_thread(
+                    _openf1_get_json, "sessions", {"year": now.year}, 30, "h2h_sessions"
+                )
+            except Exception:
+                all_sessions = []
+
+            race_keys: List[int] = []
+            quali_keys: List[int] = []
+            if isinstance(all_sessions, list):
+                for s in all_sessions:
+                    if not isinstance(s, dict):
+                        continue
+                    date_end = _parse_openf1_dt(s.get("date_end"))
+                    if not date_end or date_end >= now:
+                        continue
+                    sk = s.get("session_key")
+                    if not sk:
+                        continue
+                    st = _openf1_session_type(s).upper().strip()
+                    if st == "RACE":
+                        race_keys.append(int(sk))
+                    elif st == "QUALIFYING":
+                        quali_keys.append(int(sk))
+
+            # Fetch the latest position entry for one driver in one session.
+            sem = asyncio.Semaphore(6)
+
+            async def _final_pos(session_key: int, driver_num: str) -> Optional[int]:
+                async with sem:
+                    try:
+                        data = await asyncio.to_thread(
+                            _openf1_get_json, "position",
+                            {"session_key": session_key, "driver_number": driver_num},
+                            20, "h2h_pos",
+                        )
+                        if not isinstance(data, list) or not data:
+                            return None
+                        best_dt, best_pos = "", None
+                        for r in data:
+                            if not isinstance(r, dict):
+                                continue
+                            dt = str(r.get("date") or "")
+                            try:
+                                p = int(r["position"])
+                            except Exception:
+                                continue
+                            if dt >= best_dt:
+                                best_dt, best_pos = dt, p
+                        return best_pos
+                    except Exception:
+                        return None
+
+            # Run all fetches concurrently
+            all_keys = race_keys + quali_keys
+            tasks1 = [asyncio.create_task(_final_pos(sk, num1)) for sk in all_keys]
+            tasks2 = [asyncio.create_task(_final_pos(sk, num2)) for sk in all_keys]
+            await asyncio.gather(*tasks1, *tasks2)
+
+            n_race = len(race_keys)
+            for i, sk in enumerate(all_keys):
+                p1 = tasks1[i].result()
+                p2 = tasks2[i].result()
+                if p1 is None or p2 is None:
+                    continue
+                if i < n_race:
+                    race_total += 1
+                    if p1 < p2:
+                        race_d1 += 1
+                    elif p2 < p1:
+                        race_d2 += 1
+                else:
+                    quali_total += 1
+                    if p1 < p2:
+                        quali_d1 += 1
+                    elif p2 < p1:
+                        quali_d2 += 1
+
+    # ── Build message ──────────────────────────────────────────
     pts_diff = pts1 - pts2
     if pts_diff > 0:
         pts_line = f"{name1} leads by **{pts_diff}** pts"
@@ -3354,15 +3443,33 @@ async def h2h(ctx, *, query: str):
     champ_line = (f"{champ_ahead} is ahead in the championship" if champ_ahead
                   else "Equal championship position")
 
+    def _bar(a: int, b: int, name_a: str, name_b: str) -> str:
+        if a == 0 and b == 0:
+            return "  No data yet"
+        total = a + b
+        winner = name_a if a > b else (name_b if b > a else None)
+        w_str = f" — **{winner}** leads" if winner else " — level"
+        return f"  {name_a} **{a}** — **{b}** {name_b}{w_str}"
+
+    race_section = (
+        f"🏁 **Race finishes** ({race_total} races)\n"
+        + _bar(race_d1, race_d2, name1, name2)
+    ) if num1 and num2 else ""
+
+    quali_section = (
+        f"\n🅿 **Qualifying** ({quali_total} sessions)\n"
+        + _bar(quali_d1, quali_d2, name1, name2)
+    ) if num1 and num2 else ""
+
     msg = (
         f"**{name1}** ({code1}) vs **{name2}** ({code2})\n"
-        f"─────────────────────────────\n"
+        f"──────────────────────────────────\n"
         f"🏆 **Championship**\n"
         f"  {name1}: **P{pos1}** — {pts1} pts — {team1}\n"
         f"  {name2}: **P{pos2}** — {pts2} pts — {team2}\n"
-        f"\n"
-        f"📊 {pts_line}\n"
-        f"🔺 {champ_line}"
+        f"  {pts_line}\n"
+        f"  {champ_line}\n"
+        + (f"\n{race_section}\n{quali_section}" if race_section else "")
     )
     await ctx.send(msg)
 
@@ -6811,7 +6918,50 @@ def of1_cmd_log_snapshot() -> list:
 def of1_openf1_health_snapshot() -> dict:
     with _OPENF1_TRACE_LOCK:
         import copy
-        return copy.deepcopy(_OPENF1_TRACE)
+        raw = copy.deepcopy(_OPENF1_TRACE)
+
+    window_start = float(raw.get("window_start") or 0)
+    by_endpoint: Dict[str, Any] = {}
+    for raw_key, stats in (raw.get("rows") or {}).items():
+        try:
+            _caller, endpoint, status_str = str(raw_key).split("|", 2)
+            status = int(status_str)
+        except Exception:
+            continue
+        if not isinstance(stats, dict):
+            continue
+        cnt = int(stats.get("count", 0) or 0)
+        lat_sum = int(stats.get("lat_ms_sum", 0) or 0)
+        ep = by_endpoint.setdefault(endpoint, {"calls": 0, "errors": 0, "lat_sum": 0, "last_status": 0})
+        ep["calls"] += cnt
+        ep["lat_sum"] += lat_sum
+        ep["last_status"] = status
+        if status >= 400:
+            ep["errors"] += cnt
+
+    endpoints = {
+        ep: {
+            "calls": d["calls"],
+            "errors": d["errors"],
+            "avg_ms": int(d["lat_sum"] / d["calls"]) if d["calls"] > 0 else 0,
+            "last_status": d["last_status"],
+        }
+        for ep, d in by_endpoint.items()
+    }
+    return {"window_start": window_start, "endpoints": endpoints}
+
+
+def of1_member_name_map(guild_id: int) -> dict:
+    """Return {str(user_id): display_name} for all in-cache members of a guild."""
+    result: Dict[str, str] = {}
+    try:
+        guild = bot.get_guild(int(guild_id))
+        if guild:
+            for member in guild.members:
+                result[str(member.id)] = member.display_name
+    except Exception:
+        pass
+    return result
 
 
 def of1_xp_snapshot() -> dict:

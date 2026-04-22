@@ -3000,16 +3000,40 @@ def quiz_mgr():
             continue
         idx = questions.index(q)
         ans = ", ".join(str(a) for a in (q.get("answers") or []))
+        diff_val = _escape(q.get("difficulty") or "easy")
+        diff_opts_edit = "".join(
+            f'<option value="{d}" {"selected" if diff_val == d else ""}>{d.capitalize()}</option>'
+            for d in ("easy", "medium", "hard")
+        )
+        csrf = _csrf_input()
         rows += (
-            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
-            f'<td class="px-3 py-2 text-sm text-gray-200 max-w-xs">{_escape(q.get("q",""))}</td>'
+            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#0d0d0d]" id="qrow_{idx}">'
+            f'<td class="px-3 py-2 text-sm text-gray-200">{_escape(q.get("q",""))}</td>'
             f'<td class="px-3 py-2 text-xs text-gray-400">{_escape(ans[:80])}</td>'
             f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("category",""))}</td>'
             f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("difficulty",""))}</td>'
-            f'<td class="px-3 py-2">'
+            f'<td class="px-3 py-2 whitespace-nowrap">'
+            f'<button type="button" onclick="toggleEdit({idx})" class="text-xs text-blue-400 hover:text-blue-300 mr-2">Edit</button>'
             f'<form method="post" action="/quiz_mgr/delete" onsubmit="return confirm(\'Delete this question?\')" class="inline">'
-            f'{_csrf_input()}<input type="hidden" name="idx" value="{idx}" />'
+            f'{csrf}<input type="hidden" name="idx" value="{idx}" />'
             f'<button class="text-xs text-red-400 hover:text-red-300">Delete</button>'
+            f'</form>'
+            f'</td>'
+            f'</tr>'
+            f'<tr id="qedit_{idx}" class="hidden bg-[#0a0a12] border-b border-[#1a1a2a]">'
+            f'<td colspan="5" class="px-4 py-3">'
+            f'<form method="post" action="/quiz_mgr/edit" class="grid grid-cols-1 gap-2">'
+            f'{csrf}<input type="hidden" name="idx" value="{idx}" />'
+            f'<textarea name="question" rows="2" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 resize-none w-full">{_escape(q.get("q",""))}</textarea>'
+            f'<input name="answers" value="{_escape(ans)}" placeholder="Answers (comma-separated)"'
+            f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 w-full" />'
+            f'<div class="flex gap-2">'
+            f'<input name="category" value="{_escape(q.get("category",""))}" placeholder="Category"'
+            f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 flex-1" />'
+            f'<select name="difficulty" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600">{diff_opts_edit}</select>'
+            f'<button class="bg-blue-700 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors">Save</button>'
+            f'<button type="button" onclick="toggleEdit({idx})" class="text-sm text-gray-500 hover:text-gray-300 px-3 py-2">Cancel</button>'
+            f'</div>'
             f'</form>'
             f'</td>'
             f'</tr>'
@@ -3073,6 +3097,12 @@ def quiz_mgr():
         </table>
       </div>
     </div>
+    <script>
+    function toggleEdit(idx) {{
+      const editRow = document.getElementById('qedit_' + idx);
+      if (editRow) editRow.classList.toggle('hidden');
+    }}
+    </script>
     """
     return _render(body)
 
@@ -3089,6 +3119,26 @@ def quiz_mgr_add():
         qs = _load_quiz()
         qs.append({"q": question, "answers": answers, "category": category, "difficulty": difficulty})
         _save_quiz(qs)
+    return redirect(url_for("quiz_mgr"))
+
+
+@app.route("/quiz_mgr/edit", methods=["POST"])
+@login_required
+def quiz_mgr_edit():
+    try:
+        idx = int(request.form.get("idx", -1))
+        question = (request.form.get("question") or "").strip()
+        raw_answers = (request.form.get("answers") or "").strip()
+        category = (request.form.get("category") or "").strip()
+        difficulty = (request.form.get("difficulty") or "easy").strip()
+        if question and raw_answers:
+            answers = [a.strip() for a in raw_answers.split(",") if a.strip()]
+            qs = _load_quiz()
+            if 0 <= idx < len(qs):
+                qs[idx] = {"q": question, "answers": answers, "category": category, "difficulty": difficulty}
+                _save_quiz(qs)
+    except Exception:
+        pass
     return redirect(url_for("quiz_mgr"))
 
 
@@ -3109,7 +3159,7 @@ def quiz_mgr_delete():
 # ─────────────────────────────────────────────────────────────
 # XP Manager
 # ─────────────────────────────────────────────────────────────
-_XP_AUDIT_LOG: list = []  # in-memory audit log for this session
+_XP_AUDIT_LOG: list = []
 
 
 def _load_xp_state_direct() -> dict:
@@ -3118,6 +3168,24 @@ def _load_xp_state_direct() -> dict:
             return json.load(f)
     except Exception:
         return {"guilds": {}}
+
+
+def _get_name_map(guild_id: str) -> dict:
+    """Return {uid_str: display_name} for the guild, from bot cache."""
+    if bot_reference and hasattr(bot_reference, "of1_member_name_map"):
+        try:
+            return bot_reference.of1_member_name_map(int(guild_id))
+        except Exception:
+            pass
+    return {}
+
+
+def _user_cell(uid: str, name_map: dict) -> str:
+    """Render a user cell: display name with user ID shown on hover."""
+    name = _escape(name_map.get(uid) or uid)
+    title = f"User ID: {_escape(uid)}"
+    cls = "cursor-help border-b border-dotted border-gray-600" if name != _escape(uid) else "font-mono"
+    return f'<span class="{cls}" title="{title}">{name}</span>'
 
 
 @app.route("/xp_mgr")
@@ -3134,44 +3202,54 @@ def xp_mgr():
     guild_ids = sorted(guilds.keys())
 
     for gid in guild_ids:
+        name_map = _get_name_map(gid)
         g = guilds[gid]
         users = g.get("users") or {}
         sorted_users = sorted(users.items(), key=lambda kv: int((kv[1] or {}).get("xp", 0) or 0), reverse=True)
         guild_tabs += f'<button onclick="showGuild(\'{gid}\')" id="tab_{gid}" class="px-3 py-1.5 text-sm rounded-lg border border-[#2a2a2a] text-gray-400 hover:text-white hover:bg-[#1a1a1a]">{gid}</button>'
 
-        user_rows = "".join(
-            f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
-            f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
-            f'<td class="px-3 py-2 text-sm text-gray-200">{int((rec or {}).get("xp", 0) or 0)}</td>'
-            f'<td class="px-3 py-2 text-sm text-gray-400">{int((rec or {}).get("level", 0) or 0)}</td>'
-            f'<td class="px-3 py-2 text-sm text-gray-500">{int((rec or {}).get("messages", 0) or 0)}</td>'
-            f'<td class="px-3 py-2">'
-            f'<div class="flex gap-1">'
-            f'<input id="xp_amt_{gid}_{uid}" type="number" placeholder="±XP" class="w-20 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-xs rounded px-2 py-1 focus:outline-none" />'
-            f'<button onclick="adjustXp(\'{gid}\',\'{uid}\')" class="text-xs bg-[#1f6f3f] hover:bg-[#2a8f52] text-white px-2 py-1 rounded transition-colors">Apply</button>'
-            f'</div>'
-            f'</td>'
-            f'</tr>'
-            for uid, rec in sorted_users[:50]
-        ) or '<tr><td colspan="5" class="px-3 py-3 text-gray-500 text-sm">No users.</td></tr>'
+        def _row(uid, rec, gid=gid, name_map=name_map):
+            cell = _user_cell(uid, name_map)
+            safe_gid = _escape(gid)
+            safe_uid = _escape(uid)
+            xp  = int((rec or {}).get("xp", 0) or 0)
+            lvl = int((rec or {}).get("level", 0) or 0)
+            msgs = int((rec or {}).get("messages", 0) or 0)
+            return (
+                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+                f'<td class="px-3 py-2 text-sm text-gray-300">{cell}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-200">{xp:,}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-400">{lvl}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-500">{msgs:,}</td>'
+                f'<td class="px-3 py-2"><div class="flex gap-1">'
+                f'<input id="xp_amt_{safe_gid}_{safe_uid}" type="number" placeholder="±XP"'
+                f' class="w-20 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-xs rounded px-2 py-1 focus:outline-none" />'
+                f'<button onclick="adjustXp(\'{safe_gid}\',\'{safe_uid}\')"'
+                f' class="text-xs bg-[#1f6f3f] hover:bg-[#2a8f52] text-white px-2 py-1 rounded transition-colors">Apply</button>'
+                f'</div></td>'
+                f'</tr>'
+            )
+
+        user_rows = "".join(_row(uid, rec) for uid, rec in sorted_users[:50]) \
+            or '<tr><td colspan="5" class="px-3 py-3 text-gray-500 text-sm">No users.</td></tr>'
 
         tables += (
             f'<div id="guild_{gid}" class="guild-panel hidden">'
             f'<div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">'
             f'<table class="w-full text-left">'
             f'<thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">'
-            f'<th class="px-3 py-2">User ID</th><th class="px-3 py-2">XP</th>'
+            f'<th class="px-3 py-2">Member</th><th class="px-3 py-2">XP</th>'
             f'<th class="px-3 py-2">Level</th><th class="px-3 py-2">Messages</th><th class="px-3 py-2">Adjust</th>'
             f'</tr></thead>'
             f'<tbody>{user_rows}</tbody></table></div>'
-            f'<p class="text-xs text-gray-600 mt-2">Showing top 50 by XP. Adjustments take effect immediately.</p>'
+            f'<p class="text-xs text-gray-600 mt-2">Top 50 by XP. Hover a name to see user ID.</p>'
             f'</div>'
         )
 
     audit_rows = "".join(
         f'<div class="flex gap-3 text-xs py-1 border-b border-[#1a1a1a]">'
         f'<span class="text-gray-600 shrink-0">{_escape(e.get("ts",""))}</span>'
-        f'<span class="text-gray-400">{_escape(e.get("user_id",""))} in {_escape(e.get("guild_id",""))}</span>'
+        f'<span class="text-gray-400">{_escape(e.get("user_id",""))}</span>'
         f'<span class="text-green-400">{_escape(e.get("result",""))}</span>'
         f'</div>'
         for e in reversed(_XP_AUDIT_LOG[-50:])
@@ -3301,7 +3379,7 @@ def announce():
             flash_msg = "❌ Channel and message are required."
 
     chan_opts = "".join(
-        f'<option value="{_escape(str(c.get("id","")))}">#{_escape(str(c.get("name","")))} ({c.get("id","")})</option>'
+        f'<option value="{_escape(str(c.get("id","")))}">#{_escape(str(c.get("name","")))}</option>'
         for c in channels
     ) or '<option value="">No channels found — check bot token/guild ID</option>'
 
@@ -3385,7 +3463,7 @@ def schedule_msgs():
     msgs = _load_scheduled_msgs()
 
     chan_opts = "".join(
-        f'<option value="{_escape(str(c.get("id","")))}">#{_escape(str(c.get("name","")))} ({c.get("id","")})</option>'
+        f'<option value="{_escape(str(c.get("id","")))}">#{_escape(str(c.get("name","")))}</option>'
         for c in channels
     ) or '<option value="">No channels found</option>'
 
@@ -3499,6 +3577,7 @@ def member_stats():
 
     guilds = xp_state.get("guilds") or {}
     guild_id = list(guilds.keys())[0] if guilds else None
+    name_map = _get_name_map(guild_id) if guild_id else {}
 
     # XP leaderboard
     xp_rows = ""
@@ -3512,15 +3591,16 @@ def member_stats():
             xp_rows += (
                 f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
                 f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
-                f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-300">{_user_cell(uid, name_map)}</td>'
                 f'<td class="px-3 py-2 text-sm text-yellow-400 font-semibold">{xp:,}</td>'
                 f'<td class="px-3 py-2 text-sm text-gray-400">Lv {lvl}</td>'
                 f'<td class="px-3 py-2 text-sm text-gray-500">{msgs:,} msgs</td>'
                 f'</tr>'
             )
 
-    # Quiz leaderboard — pick first guild key in quiz data
+    # Quiz leaderboard
     quiz_gid = list(quiz_root.keys())[0] if quiz_root else None
+    quiz_name_map = _get_name_map(quiz_gid) if quiz_gid else name_map
     quiz_rows = ""
     if quiz_gid:
         quiz_scores = quiz_root.get(quiz_gid) or {}
@@ -3529,13 +3609,14 @@ def member_stats():
             quiz_rows += (
                 f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
                 f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
-                f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-300">{_user_cell(uid, quiz_name_map)}</td>'
                 f'<td class="px-3 py-2 text-sm text-blue-400 font-semibold">{int(pts or 0):,} pts</td>'
                 f'</tr>'
             )
 
     # Prediction leaderboard
     pred_gid = list(pred_root.keys())[0] if pred_root else None
+    pred_name_map = _get_name_map(pred_gid) if pred_gid else name_map
     pred_rows = ""
     if pred_gid:
         pred_scores = pred_root.get(pred_gid) or {}
@@ -3544,7 +3625,7 @@ def member_stats():
             pred_rows += (
                 f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
                 f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
-                f'<td class="px-3 py-2 text-sm font-mono text-gray-300">{_escape(uid)}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-300">{_user_cell(uid, pred_name_map)}</td>'
                 f'<td class="px-3 py-2 text-sm text-green-400 font-semibold">{int(pts or 0):,} pts</td>'
                 f'</tr>'
             )
@@ -3566,7 +3647,7 @@ def member_stats():
     body = f"""
     <div class="space-y-4 max-w-5xl">
       <h1 class="text-xl font-bold text-white">Member Stats</h1>
-      <p class="text-xs text-gray-500">Guild: {_escape(guild_id or "none")} — user IDs shown (names need Discord API lookup)</p>
+      <p class="text-xs text-gray-500">Guild: {_escape(guild_id or "none")} — hover a name to see their user ID</p>
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {_table("XP Leaderboard", ["#", "User ID", "XP", "Level", "Messages"], xp_rows)}
         {_table("Quiz Leaderboard", ["#", "User ID", "Score"], quiz_rows)}
@@ -3640,10 +3721,11 @@ def openf1_health():
 
     window_start = float(trace.get("window_start") or 0)
     window_age_s = int(time.time() - window_start) if window_start else 0
-    rows_data = trace.get("rows") or {}
+    endpoints = trace.get("endpoints") or {}
+    total_calls = sum(int((v or {}).get("calls", 0)) for v in endpoints.values() if isinstance(v, dict))
 
     endpoint_rows = ""
-    for ep, stats in sorted(rows_data.items()):
+    for ep, stats in sorted(endpoints.items()):
         if not isinstance(stats, dict):
             continue
         calls = int(stats.get("calls", 0) or 0)
@@ -3662,6 +3744,11 @@ def openf1_health():
             f'</tr>'
         )
 
+    no_data_note = (
+        'No API calls recorded in this 60-second window yet — '
+        'trigger any bot F1 command, then refresh.'
+    ) if window_start else 'Bot not connected or no data yet.'
+
     body = f"""
     <div class="space-y-4 max-w-3xl">
       <div class="flex items-center justify-between">
@@ -3671,15 +3758,15 @@ def openf1_health():
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div class="bg-[#111] border border-[#222] rounded-xl p-4">
           <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Window Age</div>
-          <div class="text-2xl font-bold text-white">{window_age_s}s</div>
+          <div class="text-2xl font-bold text-white">{window_age_s}s <span class="text-sm text-gray-500">/ 60s</span></div>
         </div>
         <div class="bg-[#111] border border-[#222] rounded-xl p-4">
-          <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Endpoints Tracked</div>
-          <div class="text-2xl font-bold text-white">{len(rows_data)}</div>
+          <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Endpoints Hit</div>
+          <div class="text-2xl font-bold text-white">{len(endpoints)}</div>
         </div>
         <div class="bg-[#111] border border-[#222] rounded-xl p-4">
           <div class="text-xs text-gray-500 uppercase tracking-widest mb-1">Total Calls</div>
-          <div class="text-2xl font-bold text-white">{sum(int((v or {{}}).get("calls", 0)) for v in rows_data.values() if isinstance(v, dict))}</div>
+          <div class="text-2xl font-bold text-white">{total_calls}</div>
         </div>
       </div>
       <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
@@ -3691,12 +3778,12 @@ def openf1_health():
             <th class="px-3 py-2">Avg Latency</th>
             <th class="px-3 py-2">Last Status</th>
           </tr></thead>
-          <tbody>{endpoint_rows or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No API calls recorded yet — data resets on bot restart.</td></tr>'}</tbody>
+          <tbody>{endpoint_rows or f'<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">{_escape(no_data_note)}</td></tr>'}</tbody>
         </table>
       </div>
-      <p class="text-xs text-gray-600">Trace window resets periodically. Refresh for latest data.</p>
+      <p class="text-xs text-gray-600">Trace window resets every 60 seconds — counters reflect the current window only.</p>
     </div>
-    <script>setTimeout(() => location.reload(), 30000);</script>
+    <script>setTimeout(() => location.reload(), 20000);</script>
     """
     return _render(body)
 
