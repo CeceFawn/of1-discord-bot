@@ -3352,30 +3352,50 @@ async def h2h(ctx, *, query: str):
     if num1 and num2:
         async with ctx.typing():
             now = datetime.now(timezone.utc)
+
+            # Fetch Race and Qualifying sessions separately so we get API-level
+            # filtering instead of relying on client-side type detection.
+            race_sessions_raw, quali_sessions_raw = [], []
             try:
-                all_sessions = await asyncio.to_thread(
-                    _openf1_get_json, "sessions", {"year": now.year}, 30, "h2h_sessions"
+                race_sessions_raw = await asyncio.to_thread(
+                    _openf1_get_json, "sessions",
+                    {"year": now.year, "session_type": "Race"}, 30, "h2h_sess_race"
                 )
             except Exception:
-                all_sessions = []
+                pass
+            try:
+                quali_sessions_raw = await asyncio.to_thread(
+                    _openf1_get_json, "sessions",
+                    {"year": now.year, "session_type": "Qualifying"}, 30, "h2h_sess_quali"
+                )
+            except Exception:
+                pass
 
-            race_keys: List[int] = []
-            quali_keys: List[int] = []
-            if isinstance(all_sessions, list):
-                for s in all_sessions:
+            def _completed_keys(raw) -> List[int]:
+                keys: List[int] = []
+                if not isinstance(raw, list):
+                    return keys
+                for s in raw:
                     if not isinstance(s, dict):
                         continue
-                    date_end = _parse_openf1_dt(s.get("date_end"))
-                    if not date_end or date_end >= now:
+                    if not _openf1_is_f1_session(s):
                         continue
                     sk = s.get("session_key")
                     if not sk:
                         continue
-                    st = _openf1_session_type(s).upper().strip()
-                    if st == "RACE":
-                        race_keys.append(int(sk))
-                    elif st == "QUALIFYING":
-                        quali_keys.append(int(sk))
+                    # Prefer date_end; fall back to date_start + 3h buffer
+                    cutoff = _parse_openf1_dt(s.get("date_end"))
+                    if not cutoff:
+                        ds = _parse_openf1_dt(s.get("date_start"))
+                        if ds:
+                            cutoff = ds + timedelta(hours=3)
+                    if not cutoff or cutoff >= now:
+                        continue
+                    keys.append(int(sk))
+                return keys
+
+            race_keys: List[int] = _completed_keys(race_sessions_raw)
+            quali_keys: List[int] = _completed_keys(quali_sessions_raw)
 
             # Fetch the latest position entry for one driver in one session.
             sem = asyncio.Semaphore(6)
