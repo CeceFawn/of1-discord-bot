@@ -3353,9 +3353,14 @@ async def h2h(ctx, *, query: str):
         async with ctx.typing():
             now = datetime.now(timezone.utc)
 
+            _NON_F1 = re.compile(
+                r"\b(formula\s*[23e]|f[23]|gp[23]|f1\s*academy|porsche)\b", re.I
+            )
+
             async def _completed_session_keys(session_type: str, buffer_h: int) -> List[int]:
-                """Fetch session keys for completed sessions of a given type this year.
-                Uses date_start + buffer to determine completion — date_end is unreliable."""
+                """Fetch session keys for completed F1 sessions of a given type this year.
+                Uses date_start + buffer to determine completion — date_end is unreliable.
+                Deny-lists known non-F1 series without requiring an explicit F1 label."""
                 try:
                     raw = await asyncio.to_thread(
                         _openf1_get_json, "sessions",
@@ -3369,6 +3374,11 @@ async def h2h(ctx, *, query: str):
                     return keys
                 for s in raw:
                     if not isinstance(s, dict):
+                        continue
+                    hay = " ".join(str(s.get(k) or "") for k in (
+                        "meeting_name", "meeting_official_name",
+                    ))
+                    if _NON_F1.search(hay):
                         continue
                     sk = s.get("session_key")
                     if not sk:
