@@ -3353,93 +3353,75 @@ async def h2h(ctx, *, query: str):
         async with ctx.typing():
             now = datetime.now(timezone.utc)
 
-            # Fetch Race and Qualifying sessions separately so we get API-level
-            # filtering instead of relying on client-side type detection.
-            race_sessions_raw, quali_sessions_raw = [], []
-            try:
-                race_sessions_raw = await asyncio.to_thread(
-                    _openf1_get_json, "sessions",
-                    {"year": now.year, "session_type": "Race"}, 30, "h2h_sess_race"
-                )
-            except Exception:
-                pass
-            try:
-                quali_sessions_raw = await asyncio.to_thread(
-                    _openf1_get_json, "sessions",
-                    {"year": now.year, "session_type": "Qualifying"}, 30, "h2h_sess_quali"
-                )
-            except Exception:
-                pass
-
-            def _completed_keys(raw) -> List[int]:
+            async def _completed_session_keys(session_type: str, buffer_h: int) -> List[int]:
+                """Fetch session keys for completed sessions of a given type this year.
+                Uses date_start + buffer to determine completion — date_end is unreliable."""
+                try:
+                    raw = await asyncio.to_thread(
+                        _openf1_get_json, "sessions",
+                        {"year": now.year, "session_type": session_type},
+                        30, f"h2h_sess_{session_type.lower()}",
+                    )
+                except Exception:
+                    return []
                 keys: List[int] = []
                 if not isinstance(raw, list):
                     return keys
                 for s in raw:
                     if not isinstance(s, dict):
                         continue
-                    # Exclude known non-F1 series; don't require explicit "Formula 1"
-                    # label because some sessions omit it from meeting_name.
-                    hay = " ".join(str(s.get(k) or "") for k in (
-                        "meeting_name", "meeting_official_name", "session_name",
-                    )).lower()
-                    if re.search(r"\b(formula\s*[23e]|f[23]|gp[23]|f1\s*academy|porsche)\b", hay):
-                        continue
                     sk = s.get("session_key")
                     if not sk:
                         continue
-                    # Prefer date_end; fall back to date_start + 3h buffer
-                    cutoff = _parse_openf1_dt(s.get("date_end"))
-                    if not cutoff:
-                        ds = _parse_openf1_dt(s.get("date_start"))
-                        if ds:
-                            cutoff = ds + timedelta(hours=3)
-                    if not cutoff or cutoff >= now:
+                    dt = _parse_openf1_dt(s.get("date_start"))
+                    if dt is None or dt + timedelta(hours=buffer_h) > now:
                         continue
                     keys.append(int(sk))
                 return keys
 
-            race_keys: List[int] = _completed_keys(race_sessions_raw)
-            quali_keys: List[int] = _completed_keys(quali_sessions_raw)
+            race_keys, quali_keys = await asyncio.gather(
+                _completed_session_keys("Race", 3),
+                _completed_session_keys("Qualifying", 2),
+            )
 
-            # Fetch the latest position entry for one driver in one session.
             sem = asyncio.Semaphore(6)
 
-            async def _final_pos(session_key: int, driver_num: str) -> Optional[int]:
+            async def _session_final_positions(session_key: int) -> dict:
+                """Fetch all drivers' final positions for a session in one API call."""
                 async with sem:
                     try:
                         data = await asyncio.to_thread(
                             _openf1_get_json, "position",
-                            {"session_key": session_key, "driver_number": driver_num},
+                            {"session_key": session_key},
                             20, "h2h_pos",
                         )
-                        if not isinstance(data, list) or not data:
-                            return None
-                        best_dt, best_pos = "", None
+                        if not isinstance(data, list):
+                            return {}
+                        latest: dict = {}
                         for r in data:
                             if not isinstance(r, dict):
                                 continue
+                            drv = str(r.get("driver_number") or "")
                             dt = str(r.get("date") or "")
                             try:
-                                p = int(r["position"])
+                                pos = int(r["position"])
                             except Exception:
                                 continue
-                            if dt >= best_dt:
-                                best_dt, best_pos = dt, p
-                        return best_pos
+                            if drv not in latest or dt >= latest[drv][0]:
+                                latest[drv] = (dt, pos)
+                        return {drv: p for drv, (_, p) in latest.items()}
                     except Exception:
-                        return None
+                        return {}
 
-            # Run all fetches concurrently
             all_keys = race_keys + quali_keys
-            tasks1 = [asyncio.create_task(_final_pos(sk, num1)) for sk in all_keys]
-            tasks2 = [asyncio.create_task(_final_pos(sk, num2)) for sk in all_keys]
-            await asyncio.gather(*tasks1, *tasks2)
+            all_results = await asyncio.gather(
+                *[asyncio.create_task(_session_final_positions(sk)) for sk in all_keys]
+            )
 
             n_race = len(race_keys)
-            for i, sk in enumerate(all_keys):
-                p1 = tasks1[i].result()
-                p2 = tasks2[i].result()
+            for i, positions in enumerate(all_results):
+                p1 = positions.get(num1)
+                p2 = positions.get(num2)
                 if p1 is None or p2 is None:
                     continue
                 if i < n_race:
