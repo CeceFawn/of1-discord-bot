@@ -306,7 +306,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Albert Park Grand Prix Circuit have in this quiz dataset?",
+    "q": "How many corners does Albert Park Grand Prix Circuit have?",
     "answers": [
       "14"
     ],
@@ -314,7 +314,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Autodromo Enzo E Dino Ferrari have in this quiz dataset?",
+    "q": "How many corners does Autodromo Enzo E Dino Ferrari have?",
     "answers": [
       "19"
     ],
@@ -322,7 +322,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Autodromo Hermanos Rodriguez have in this quiz dataset?",
+    "q": "How many corners does Autodromo Hermanos Rodriguez have?",
     "answers": [
       "17"
     ],
@@ -330,7 +330,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Autodromo Jose Carlos Pace have in this quiz dataset?",
+    "q": "How many corners does Autodromo Jose Carlos Pace have?",
     "answers": [
       "15"
     ],
@@ -338,7 +338,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Bahrain International Circuit have in this quiz dataset?",
+    "q": "How many corners does Bahrain International Circuit have?",
     "answers": [
       "15"
     ],
@@ -346,7 +346,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Baku City Circuit have in this quiz dataset?",
+    "q": "How many corners does Baku City Circuit have?",
     "answers": [
       "20"
     ],
@@ -354,7 +354,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Circuit De Barcelona-Catalunya have in this quiz dataset?",
+    "q": "How many corners does Circuit De Barcelona-Catalunya have?",
     "answers": [
       "14"
     ],
@@ -362,7 +362,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Circuit De Monaco have in this quiz dataset?",
+    "q": "How many corners does Circuit De Monaco have?",
     "answers": [
       "19"
     ],
@@ -370,7 +370,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Circuit De Spa-Francorchamps have in this quiz dataset?",
+    "q": "How many corners does Circuit De Spa-Francorchamps have?",
     "answers": [
       "19"
     ],
@@ -378,7 +378,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Circuit Gilles Villeneuve have in this quiz dataset?",
+    "q": "How many corners does Circuit Gilles Villeneuve have?",
     "answers": [
       "14"
     ],
@@ -386,7 +386,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Circuit Of The Americas have in this quiz dataset?",
+    "q": "How many corners does Circuit Of The Americas have?",
     "answers": [
       "20"
     ],
@@ -394,7 +394,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Hungaroring have in this quiz dataset?",
+    "q": "How many corners does Hungaroring have?",
     "answers": [
       "14"
     ],
@@ -402,7 +402,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Jeddah Corniche Circuit have in this quiz dataset?",
+    "q": "How many corners does Jeddah Corniche Circuit have?",
     "answers": [
       "27"
     ],
@@ -410,7 +410,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Las Vegas Strip Street Circuit have in this quiz dataset?",
+    "q": "How many corners does Las Vegas Strip Street Circuit have?",
     "answers": [
       "17"
     ],
@@ -418,7 +418,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Losail International Circuit have in this quiz dataset?",
+    "q": "How many corners does Losail International Circuit have?",
     "answers": [
       "16"
     ],
@@ -426,7 +426,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Miami International Autodrome have in this quiz dataset?",
+    "q": "How many corners does Miami International Autodrome have?",
     "answers": [
       "19"
     ],
@@ -434,7 +434,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Shanghai International Circuit have in this quiz dataset?",
+    "q": "How many corners does Shanghai International Circuit have?",
     "answers": [
       "16"
     ],
@@ -442,7 +442,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Silverstone Circuit have in this quiz dataset?",
+    "q": "How many corners does Silverstone Circuit have?",
     "answers": [
       "18"
     ],
@@ -450,7 +450,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Suzuka Circuit have in this quiz dataset?",
+    "q": "How many corners does Suzuka Circuit have?",
     "answers": [
       "18"
     ],
@@ -458,7 +458,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners does Yas Marina Circuit have in this quiz dataset?",
+    "q": "How many corners does Yas Marina Circuit have?",
     "answers": [
       "16"
     ],
@@ -466,7 +466,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Albert Park Grand Prix Circuit in this quiz dataset?",
+    "q": "How many laps does Albert Park Grand Prix Circuit have?",
     "answers": [
       "58"
     ],
@@ -474,7 +474,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Autodromo Enzo E Dino Ferrari in this quiz dataset?",
+    "q": "How many laps does Autodromo Enzo E Dino Ferrari have?",
     "answers": [
       "63"
     ],
@@ -482,7 +482,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Autodromo Hermanos Rodriguez in this quiz dataset?",
+    "q": "How many laps does Autodromo Hermanos Rodriguez have?",
     "answers": [
       "71"
     ],
@@ -490,7 +490,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Autodromo Jose Carlos Pace in this quiz dataset?",
+    "q": "How many laps does Autodromo Jose Carlos Pace have?",
     "answers": [
       "71"
     ],
@@ -498,7 +498,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Autodromo Nazionale Monza in this quiz dataset?",
+    "q": "How many laps does Autodromo Nazionale Monza have?",
     "answers": [
       "53"
     ],
@@ -506,7 +506,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Bahrain International Circuit in this quiz dataset?",
+    "q": "How many laps does Bahrain International Circuit have?",
     "answers": [
       "57"
     ],
@@ -514,7 +514,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Baku City Circuit in this quiz dataset?",
+    "q": "How many laps does Baku City Circuit have?",
     "answers": [
       "51"
     ],
@@ -522,7 +522,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Circuit De Barcelona-Catalunya in this quiz dataset?",
+    "q": "How many laps does Circuit De Barcelona-Catalunya have?",
     "answers": [
       "66"
     ],
@@ -530,7 +530,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Circuit De Spa-Francorchamps in this quiz dataset?",
+    "q": "How many laps does Circuit De Spa-Francorchamps have?",
     "answers": [
       "44"
     ],
@@ -538,7 +538,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Circuit Gilles Villeneuve in this quiz dataset?",
+    "q": "How many laps does Circuit Gilles Villeneuve have?",
     "answers": [
       "70"
     ],
@@ -546,7 +546,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Circuit Of The Americas in this quiz dataset?",
+    "q": "How many laps does Circuit Of The Americas have?",
     "answers": [
       "56"
     ],
@@ -554,7 +554,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Circuit Zandvoort in this quiz dataset?",
+    "q": "How many laps does Circuit Zandvoort have?",
     "answers": [
       "72"
     ],
@@ -562,7 +562,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Hungaroring in this quiz dataset?",
+    "q": "How many laps does Hungaroring have?",
     "answers": [
       "70"
     ],
@@ -570,7 +570,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Jeddah Corniche Circuit in this quiz dataset?",
+    "q": "How many laps does Jeddah Corniche Circuit have?",
     "answers": [
       "50"
     ],
@@ -578,7 +578,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Las Vegas Strip Street Circuit in this quiz dataset?",
+    "q": "How many laps does Las Vegas Strip Street Circuit have?",
     "answers": [
       "50"
     ],
@@ -586,7 +586,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Losail International Circuit in this quiz dataset?",
+    "q": "How many laps does Losail International Circuit have?",
     "answers": [
       "57"
     ],
@@ -594,7 +594,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Marina Bay Street Circuit in this quiz dataset?",
+    "q": "How many laps does Marina Bay Street Circuit have?",
     "answers": [
       "62"
     ],
@@ -602,7 +602,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Miami International Autodrome in this quiz dataset?",
+    "q": "How many laps does Miami International Autodrome have?",
     "answers": [
       "57"
     ],
@@ -610,7 +610,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Red Bull Ring in this quiz dataset?",
+    "q": "How many laps does Red Bull Ring have?",
     "answers": [
       "71"
     ],
@@ -618,7 +618,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Shanghai International Circuit in this quiz dataset?",
+    "q": "How many laps does Shanghai International Circuit have?",
     "answers": [
       "56"
     ],
@@ -626,7 +626,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many race laps are listed for Suzuka Circuit in this quiz dataset?",
+    "q": "How many laps does Suzuka Circuit have?",
     "answers": [
       "53"
     ],
@@ -1039,130 +1039,7 @@
     "category": "circuits"
   },
   {
-    "q": "Approximately what race distance (km) is listed for Bahrain International Circuit?",
-    "answers": [
-      "308.484"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Baku City Circuit?",
-    "answers": [
-      "306.153"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Circuit De Barcelona-Catalunya?",
-    "answers": [
-      "307.362"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Circuit De Monaco?",
-    "answers": [
-      "260.286"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Circuit De Spa-Francorchamps?",
-    "answers": [
-      "308.176"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Circuit Of The Americas?",
-    "answers": [
-      "308.728"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Circuit Zandvoort?",
-    "answers": [
-      "306.648"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Jeddah Corniche Circuit?",
-    "answers": [
-      "308.7",
-      "308.700"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Las Vegas Strip Street Circuit?",
-    "answers": [
-      "310.05",
-      "310.050"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Losail International Circuit?",
-    "answers": [
-      "308.883"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Marina Bay Street Circuit?",
-    "answers": [
-      "306.28",
-      "306.280"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Shanghai International Circuit?",
-    "answers": [
-      "305.256"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Silverstone Circuit?",
-    "answers": [
-      "306.332"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Suzuka Circuit?",
-    "answers": [
-      "307.771"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Yas Marina Circuit?",
-    "answers": [
-      "306.298"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "At Abu Dhabi, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Abu Dhabi Grand Prix have?",
     "answers": [
       "58"
     ],
@@ -1170,7 +1047,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Austin, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Austin Grand Prix have?",
     "answers": [
       "56"
     ],
@@ -1178,7 +1055,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Baku, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Baku Grand Prix have?",
     "answers": [
       "51"
     ],
@@ -1186,7 +1063,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Barcelona, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Barcelona Grand Prix have?",
     "answers": [
       "66"
     ],
@@ -1194,7 +1071,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Budapest, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Budapest Grand Prix have?",
     "answers": [
       "70"
     ],
@@ -1202,7 +1079,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Jeddah, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Jeddah Grand Prix have?",
     "answers": [
       "50"
     ],
@@ -1210,7 +1087,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Las Vegas, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Las Vegas Grand Prix have?",
     "answers": [
       "50"
     ],
@@ -1218,7 +1095,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Lusail, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Lusail Grand Prix have?",
     "answers": [
       "57"
     ],
@@ -1226,7 +1103,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Melbourne, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Melbourne Grand Prix have?",
     "answers": [
       "58"
     ],
@@ -1234,7 +1111,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Mexico City, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Mexico City Grand Prix have?",
     "answers": [
       "71"
     ],
@@ -1242,7 +1119,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Montreal, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Montreal Grand Prix have?",
     "answers": [
       "70"
     ],
@@ -1250,7 +1127,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Monza, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Monza Grand Prix have?",
     "answers": [
       "53"
     ],
@@ -1258,7 +1135,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Sakhir, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Sakhir Grand Prix have?",
     "answers": [
       "57"
     ],
@@ -1266,7 +1143,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Sao Paulo, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Sao Paulo Grand Prix have?",
     "answers": [
       "71"
     ],
@@ -1274,7 +1151,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Shanghai, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Shanghai Grand Prix have?",
     "answers": [
       "56"
     ],
@@ -1282,7 +1159,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Silverstone, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Silverstone Grand Prix have?",
     "answers": [
       "52"
     ],
@@ -1290,7 +1167,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Singapore, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Singapore Grand Prix have?",
     "answers": [
       "62"
     ],
@@ -1298,7 +1175,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Spa, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Spa Grand Prix have?",
     "answers": [
       "44"
     ],
@@ -1306,7 +1183,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Spielberg, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Spielberg Grand Prix have?",
     "answers": [
       "71"
     ],
@@ -1314,7 +1191,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Suzuka, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Suzuka Grand Prix have?",
     "answers": [
       "53"
     ],
@@ -1322,7 +1199,7 @@
     "category": "circuits"
   },
   {
-    "q": "At Zandvoort, how many race laps are listed for the F1 circuit in this quiz dataset?",
+    "q": "How many laps does the Zandvoort Grand Prix have?",
     "answers": [
       "72"
     ],
@@ -1330,7 +1207,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Australia GP circuit in this quiz dataset (Albert Park Grand Prix Circuit)?",
+    "q": "How many corners does the current Australia GP circuit have (Albert Park Grand Prix Circuit)?",
     "answers": [
       "14"
     ],
@@ -1338,7 +1215,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Austria GP circuit in this quiz dataset (Red Bull Ring)?",
+    "q": "How many corners does the current Austria GP circuit have (Red Bull Ring)?",
     "answers": [
       "10"
     ],
@@ -1346,7 +1223,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Azerbaijan GP circuit in this quiz dataset (Baku City Circuit)?",
+    "q": "How many corners does the current Azerbaijan GP circuit have (Baku City Circuit)?",
     "answers": [
       "20"
     ],
@@ -1354,7 +1231,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Bahrain GP circuit in this quiz dataset (Bahrain International Circuit)?",
+    "q": "How many corners does the current Bahrain GP circuit have (Bahrain International Circuit)?",
     "answers": [
       "15"
     ],
@@ -1362,7 +1239,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Brazil GP circuit in this quiz dataset (Autodromo Jose Carlos Pace)?",
+    "q": "How many corners does the current Brazil GP circuit have (Autodromo Jose Carlos Pace)?",
     "answers": [
       "15"
     ],
@@ -1370,7 +1247,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Canada GP circuit in this quiz dataset (Circuit Gilles Villeneuve)?",
+    "q": "How many corners does the current Canada GP circuit have (Circuit Gilles Villeneuve)?",
     "answers": [
       "14"
     ],
@@ -1378,7 +1255,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current China GP circuit in this quiz dataset (Shanghai International Circuit)?",
+    "q": "How many corners does the current China GP circuit have (Shanghai International Circuit)?",
     "answers": [
       "16"
     ],
@@ -1386,7 +1263,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Hungary GP circuit in this quiz dataset (Hungaroring)?",
+    "q": "How many corners does the current Hungary GP circuit have (Hungaroring)?",
     "answers": [
       "14"
     ],
@@ -1394,7 +1271,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Italy GP circuit in this quiz dataset (Autodromo Enzo E Dino Ferrari)?",
+    "q": "How many corners does the current Italy GP circuit have (Autodromo Enzo E Dino Ferrari)?",
     "answers": [
       "19"
     ],
@@ -1402,7 +1279,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Italy GP circuit in this quiz dataset (Autodromo Nazionale Monza)?",
+    "q": "How many corners does the current Italy GP circuit have (Autodromo Nazionale Monza)?",
     "answers": [
       "11"
     ],
@@ -1410,7 +1287,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Japan GP circuit in this quiz dataset (Suzuka Circuit)?",
+    "q": "How many corners does the current Japan GP circuit have (Suzuka Circuit)?",
     "answers": [
       "18"
     ],
@@ -1418,7 +1295,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Monaco GP circuit in this quiz dataset (Circuit De Monaco)?",
+    "q": "How many corners does the current Monaco GP circuit have (Circuit De Monaco)?",
     "answers": [
       "19"
     ],
@@ -1426,7 +1303,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Netherlands GP circuit in this quiz dataset (Circuit Zandvoort)?",
+    "q": "How many corners does the current Netherlands GP circuit have (Circuit Zandvoort)?",
     "answers": [
       "14"
     ],
@@ -1434,7 +1311,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Qatar GP circuit in this quiz dataset (Losail International Circuit)?",
+    "q": "How many corners does the current Qatar GP circuit have (Losail International Circuit)?",
     "answers": [
       "16"
     ],
@@ -1442,7 +1319,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Saudi Arabia GP circuit in this quiz dataset (Jeddah Corniche Circuit)?",
+    "q": "How many corners does the current Saudi Arabia GP circuit have (Jeddah Corniche Circuit)?",
     "answers": [
       "27"
     ],
@@ -1450,7 +1327,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Singapore GP circuit in this quiz dataset (Marina Bay Street Circuit)?",
+    "q": "How many corners does the current Singapore GP circuit have (Marina Bay Street Circuit)?",
     "answers": [
       "19"
     ],
@@ -1458,7 +1335,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current Spain GP circuit in this quiz dataset (Circuit De Barcelona-Catalunya)?",
+    "q": "How many corners does the current Spain GP circuit have (Circuit De Barcelona-Catalunya)?",
     "answers": [
       "14"
     ],
@@ -1466,7 +1343,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current UAE GP circuit in this quiz dataset (Yas Marina Circuit)?",
+    "q": "How many corners does the current UAE GP circuit have (Yas Marina Circuit)?",
     "answers": [
       "16"
     ],
@@ -1474,7 +1351,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current United Kingdom GP circuit in this quiz dataset (Silverstone Circuit)?",
+    "q": "How many corners does the current United Kingdom GP circuit have (Silverstone Circuit)?",
     "answers": [
       "18"
     ],
@@ -1482,7 +1359,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current USA GP circuit in this quiz dataset (Circuit Of The Americas)?",
+    "q": "How many corners does the current USA GP circuit have (Circuit Of The Americas)?",
     "answers": [
       "20"
     ],
@@ -1490,7 +1367,7 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current USA GP circuit in this quiz dataset (Las Vegas Strip Street Circuit)?",
+    "q": "How many corners does the current USA GP circuit have (Las Vegas Strip Street Circuit)?",
     "answers": [
       "17"
     ],
@@ -1498,170 +1375,9 @@
     "category": "circuits"
   },
   {
-    "q": "How many corners are listed for the current USA GP circuit in this quiz dataset (Miami International Autodrome)?",
+    "q": "How many corners does the current USA GP circuit have (Miami International Autodrome)?",
     "answers": [
       "19"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Albert Park Grand Prix Circuit?",
-    "answers": [
-      "5.278"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Autodromo Enzo E Dino Ferrari?",
-    "answers": [
-      "4.909"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Autodromo Hermanos Rodriguez?",
-    "answers": [
-      "4.304"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Autodromo Jose Carlos Pace?",
-    "answers": [
-      "4.309"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Autodromo Nazionale Monza?",
-    "answers": [
-      "5.793"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Circuit De Barcelona-Catalunya?",
-    "answers": [
-      "4.657"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Circuit De Monaco?",
-    "answers": [
-      "3.337"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Circuit De Spa-Francorchamps?",
-    "answers": [
-      "7.004"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Circuit Gilles Villeneuve?",
-    "answers": [
-      "4.361"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Circuit Of The Americas?",
-    "answers": [
-      "5.513"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Circuit Zandvoort?",
-    "answers": [
-      "4.259"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Hungaroring?",
-    "answers": [
-      "4.381"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Jeddah Corniche Circuit?",
-    "answers": [
-      "6.174"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Las Vegas Strip Street Circuit?",
-    "answers": [
-      "6.201"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Marina Bay Street Circuit?",
-    "answers": [
-      "4.94",
-      "4.940"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Miami International Autodrome?",
-    "answers": [
-      "5.412"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Shanghai International Circuit?",
-    "answers": [
-      "5.451"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Silverstone Circuit?",
-    "answers": [
-      "5.891"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Suzuka Circuit?",
-    "answers": [
-      "5.807"
-    ],
-    "difficulty": "hard",
-    "category": "circuits"
-  },
-  {
-    "q": "What is the listed lap length (km) for Yas Marina Circuit?",
-    "answers": [
-      "5.281"
     ],
     "difficulty": "hard",
     "category": "circuits"
@@ -1958,63 +1674,6 @@
       "ground effect downforce"
     ],
     "difficulty": "medium",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Autodromo Enzo E Dino Ferrari?",
-    "answers": [
-      "309.267"
-    ],
-    "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Autodromo Hermanos Rodriguez?",
-    "answers": [
-      "305.584"
-    ],
-    "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Autodromo Jose Carlos Pace?",
-    "answers": [
-      "305.939"
-    ],
-    "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Autodromo Nazionale Monza?",
-    "answers": [
-      "307.029"
-    ],
-    "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Hungaroring?",
-    "answers": [
-      "306.67",
-      "306.670"
-    ],
-    "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Miami International Autodrome?",
-    "answers": [
-      "308.484"
-    ],
-    "difficulty": "hard",
-    "category": "general"
-  },
-  {
-    "q": "Approximately what race distance (km) is listed for Red Bull Ring?",
-    "answers": [
-      "306.578"
-    ],
-    "difficulty": "hard",
     "category": "general"
   },
   {
