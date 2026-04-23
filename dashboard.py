@@ -3695,10 +3695,8 @@ def member_stats():
 @app.route("/cmd_log")
 @login_required
 def cmd_log():
-    if bot_reference and hasattr(bot_reference, "of1_cmd_log_snapshot"):
-        entries = bot_reference.of1_cmd_log_snapshot()
-    else:
-        entries = []
+    from runtime_store import list_cmd_log
+    entries = list_cmd_log(200)
 
     rows = "".join(
         f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
@@ -3708,7 +3706,7 @@ def cmd_log():
         f'<td class="px-3 py-1.5 text-xs text-gray-500">{_escape(str(e.get("guild","")))}</td>'
         f'<td class="px-3 py-1.5 text-xs text-gray-600 font-mono max-w-xs truncate">{_escape(str(e.get("full",""))[:100])}</td>'
         f'</tr>'
-        for e in reversed(entries[-200:])
+        for e in entries
     ) or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No commands logged yet. Commands are logged while the bot is running.</td></tr>'
 
     body = f"""

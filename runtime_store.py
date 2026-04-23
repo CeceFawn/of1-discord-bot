@@ -46,6 +46,20 @@ def init_runtime_db() -> None:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS cmd_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    user TEXT NOT NULL DEFAULT '',
+                    user_id TEXT NOT NULL DEFAULT '',
+                    guild TEXT NOT NULL DEFAULT '',
+                    guild_id TEXT NOT NULL DEFAULT '',
+                    command TEXT NOT NULL DEFAULT '',
+                    full TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS migrations (
                     key TEXT PRIMARY KEY,
                     applied_at TEXT NOT NULL
@@ -148,6 +162,52 @@ def list_alerts(limit: int = 20) -> List[Dict[str, Any]]:
                     }
                 )
             return out
+        finally:
+            conn.close()
+
+
+def insert_cmd_log(ts: str, user: str, user_id: str, guild: str, guild_id: str, command: str, full: str) -> None:
+    init_runtime_db()
+    with _DB_LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO cmd_log (ts, user, user_id, guild, guild_id, command, full)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (str(ts or ""), str(user or ""), str(user_id or ""),
+                 str(guild or ""), str(guild_id or ""), str(command or ""), str(full or "")[:300]),
+            )
+            conn.execute(
+                """
+                DELETE FROM cmd_log
+                WHERE id NOT IN (SELECT id FROM cmd_log ORDER BY id DESC LIMIT 300)
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def list_cmd_log(limit: int = 200) -> List[Dict[str, Any]]:
+    init_runtime_db()
+    lim = max(1, min(300, int(limit)))
+    with _DB_LOCK:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT ts, user, user_id, guild, guild_id, command, full
+                FROM cmd_log ORDER BY id DESC LIMIT ?
+                """,
+                (lim,),
+            ).fetchall()
+            return [
+                {"ts": ts, "user": user, "user_id": uid, "guild": guild,
+                 "guild_id": gid, "command": cmd, "full": full}
+                for ts, user, uid, guild, gid, cmd, full in rows
+            ]
         finally:
             conn.close()
 

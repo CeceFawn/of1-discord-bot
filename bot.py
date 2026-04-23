@@ -6919,15 +6919,16 @@ async def of1_dashboard_start_race_live(guild_id: int) -> tuple:
 @bot.listen("on_command")
 async def _cmd_log_listener(ctx):
     try:
-        _CMD_LOG.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "user": str(ctx.author),
-            "user_id": str(ctx.author.id),
-            "guild": str(ctx.guild) if ctx.guild else "DM",
-            "guild_id": str(ctx.guild.id) if ctx.guild else None,
-            "command": ctx.command.name if ctx.command else "?",
-            "full": (ctx.message.content or "")[:300],
-        })
+        from runtime_store import insert_cmd_log
+        insert_cmd_log(
+            ts=datetime.now(timezone.utc).isoformat(),
+            user=str(ctx.author),
+            user_id=str(ctx.author.id),
+            guild=str(ctx.guild) if ctx.guild else "DM",
+            guild_id=str(ctx.guild.id) if ctx.guild else "",
+            command=ctx.command.name if ctx.command else "?",
+            full=(ctx.message.content or "")[:300],
+        )
     except Exception:
         pass
 
