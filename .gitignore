@@ -25,5 +25,6 @@ bot.log.*
 watch_party.json
 replay_output.txt
 static/schedule_*.png
-static/schedule_*.jpgstatic/gallery/
+static/schedule_*.jpg
+static/gallery/
 f1_quiz.json
