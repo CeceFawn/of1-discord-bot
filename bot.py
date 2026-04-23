@@ -5440,16 +5440,10 @@ async def race_supervisor_loop():
                     await asyncio.sleep(idle_s)
                     continue
 
-                window_start, window_end, meta, relevant = info
+                window_start, window_end, meta, relevant, latest_live = info
                 now = datetime.now(timezone.utc)
                 in_window = window_start <= now <= window_end
 
-                latest_now = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="race_supervisor_latest_current")
-                if not latest_now:
-                    await asyncio.sleep(idle_s)
-                    continue
-
-                latest_live = latest_now[0]
                 latest_type = _session_type_upper(latest_live)
                 # Prefer session_name — it's more specific (e.g. "Sprint Qualifying" vs generic "Qualifying")
                 session_type = str(latest_live.get("session_name") or latest_live.get("session_type") or "")

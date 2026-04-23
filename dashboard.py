@@ -1179,6 +1179,9 @@ def logout():
     session.pop("dash_auth_method", None)
     session.pop("discord_user_id", None)
     session.pop("_discord_oauth_state", None)
+    session.pop("quiz_filter_q", None)
+    session.pop("quiz_filter_cat", None)
+    session.pop("quiz_filter_diff", None)
     return redirect(url_for("login"))
 
 # ----------------------------
@@ -2976,9 +2979,21 @@ def _save_quiz(questions: list) -> None:
 @login_required
 def quiz_mgr():
     questions = _load_quiz()
-    q_filter = (request.args.get("q") or "").lower().strip()
-    cat_filter = (request.args.get("cat") or "").lower().strip()
-    diff_filter = (request.args.get("diff") or "").lower().strip()
+
+    # Persist filters in session: use URL args when the filter form is submitted,
+    # fall back to session values on redirects (after add/edit/delete).
+    has_args = any(k in request.args for k in ("q", "cat", "diff"))
+    if has_args:
+        q_filter = (request.args.get("q") or "").lower().strip()
+        cat_filter = (request.args.get("cat") or "").lower().strip()
+        diff_filter = (request.args.get("diff") or "").lower().strip()
+        session["quiz_filter_q"] = q_filter
+        session["quiz_filter_cat"] = cat_filter
+        session["quiz_filter_diff"] = diff_filter
+    else:
+        q_filter = session.get("quiz_filter_q", "")
+        cat_filter = session.get("quiz_filter_cat", "")
+        diff_filter = session.get("quiz_filter_diff", "")
 
     cats = sorted({str(q.get("category") or "").strip() for q in questions if q.get("category")})
     diffs = sorted({str(q.get("difficulty") or "").strip() for q in questions if q.get("difficulty")})
@@ -2994,7 +3009,14 @@ def quiz_mgr():
     cat_opts = "".join(f'<option value="{_escape(c)}" {"selected" if cat_filter == c else ""}>{_escape(c)}</option>' for c in cats)
     diff_opts = "".join(f'<option value="{_escape(d)}" {"selected" if diff_filter == d else ""}>{_escape(d)}</option>' for d in diffs)
 
+    any_filter = bool(q_filter or cat_filter or diff_filter)
+    clear_btn = (
+        '<a href="/quiz_mgr/clear_filter" class="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-400 text-sm '
+        'rounded-lg px-3 py-1.5 hover:bg-[#222] hover:text-gray-200">&#x2715; Clear Filter</a>'
+    ) if any_filter else ""
+
     rows = ""
+    csrf = _csrf_input()
     for i, q in enumerate(questions):
         if q not in shown:
             continue
@@ -3005,9 +3027,9 @@ def quiz_mgr():
             f'<option value="{d}" {"selected" if diff_val == d else ""}>{d.capitalize()}</option>'
             for d in ("easy", "medium", "hard")
         )
-        csrf = _csrf_input()
         rows += (
             f'<tr class="border-b border-[#1a1a1a] hover:bg-[#0d0d0d]" id="qrow_{idx}">'
+            f'<td class="px-3 py-2"><input type="checkbox" class="q-select accent-blue-500 w-4 h-4 cursor-pointer" value="{idx}" /></td>'
             f'<td class="px-3 py-2 text-sm text-gray-200">{_escape(q.get("q",""))}</td>'
             f'<td class="px-3 py-2 text-xs text-gray-400">{_escape(ans[:80])}</td>'
             f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("category",""))}</td>'
@@ -3021,7 +3043,7 @@ def quiz_mgr():
             f'</td>'
             f'</tr>'
             f'<tr id="qedit_{idx}" class="hidden bg-[#0a0a12] border-b border-[#1a1a2a]">'
-            f'<td colspan="5" class="px-4 py-3">'
+            f'<td colspan="6" class="px-4 py-3">'
             f'<form method="post" action="/quiz_mgr/edit" class="grid grid-cols-1 gap-2">'
             f'{csrf}<input type="hidden" name="idx" value="{idx}" />'
             f'<textarea name="question" rows="2" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 resize-none w-full">{_escape(q.get("q",""))}</textarea>'
@@ -3057,7 +3079,19 @@ def quiz_mgr():
           <option value="">All difficulties</option>{diff_opts}
         </select>
         <button class="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 text-sm rounded-lg px-4 py-1.5 hover:bg-[#222]">Filter</button>
+        {clear_btn}
       </form>
+
+      <!-- Bulk action bar (shown when checkboxes are selected) -->
+      <div id="bulk-bar" class="hidden items-center gap-3 bg-[#111] border border-[#333] rounded-xl px-4 py-2.5">
+        <span id="bulk-count" class="text-sm text-gray-300 font-medium">0 selected</span>
+        <form id="bulk-delete-form" method="post" action="/quiz_mgr/delete_bulk" onsubmit="return confirmBulkDelete()">
+          {_csrf_input()}
+          <div id="bulk-indices"></div>
+          <button class="bg-red-800 hover:bg-red-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors">Delete Selected</button>
+        </form>
+        <button type="button" onclick="clearSelection()" class="text-sm text-gray-500 hover:text-gray-300">Deselect All</button>
+      </div>
 
       <!-- Add question -->
       <details class="bg-[#111] border border-[#222] rounded-xl">
@@ -3087,13 +3121,14 @@ def quiz_mgr():
       <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
         <table class="w-full text-left">
           <thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">
+            <th class="px-3 py-2"><input type="checkbox" id="select-all" class="accent-blue-500 w-4 h-4 cursor-pointer" title="Select all visible" /></th>
             <th class="px-3 py-2">Question</th>
             <th class="px-3 py-2">Answers</th>
             <th class="px-3 py-2">Category</th>
             <th class="px-3 py-2">Difficulty</th>
             <th class="px-3 py-2"></th>
           </tr></thead>
-          <tbody>{rows or '<tr><td colspan="5" class="px-3 py-4 text-gray-500 text-sm">No questions match.</td></tr>'}</tbody>
+          <tbody>{rows or '<tr><td colspan="6" class="px-3 py-4 text-gray-500 text-sm">No questions match.</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -3102,6 +3137,61 @@ def quiz_mgr():
       const editRow = document.getElementById('qedit_' + idx);
       if (editRow) editRow.classList.toggle('hidden');
     }}
+
+    function updateBulkBar() {{
+      const checked = document.querySelectorAll('.q-select:checked');
+      const bar = document.getElementById('bulk-bar');
+      const count = document.getElementById('bulk-count');
+      const indicesDiv = document.getElementById('bulk-indices');
+      count.textContent = checked.length + ' selected';
+      if (checked.length > 0) {{
+        bar.classList.remove('hidden');
+        bar.classList.add('flex');
+        indicesDiv.innerHTML = '';
+        checked.forEach(cb => {{
+          const inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = 'idx';
+          inp.value = cb.value;
+          indicesDiv.appendChild(inp);
+        }});
+      }} else {{
+        bar.classList.add('hidden');
+        bar.classList.remove('flex');
+      }}
+    }}
+
+    function clearSelection() {{
+      document.querySelectorAll('.q-select').forEach(cb => cb.checked = false);
+      const all = document.getElementById('select-all');
+      if (all) {{ all.checked = false; all.indeterminate = false; }}
+      updateBulkBar();
+    }}
+
+    function confirmBulkDelete() {{
+      const n = document.querySelectorAll('.q-select:checked').length;
+      return confirm('Delete ' + n + ' question' + (n !== 1 ? 's' : '') + '? This cannot be undone.');
+    }}
+
+    const selectAll = document.getElementById('select-all');
+    if (selectAll) {{
+      selectAll.addEventListener('change', function() {{
+        document.querySelectorAll('.q-select').forEach(cb => cb.checked = this.checked);
+        updateBulkBar();
+      }});
+    }}
+
+    document.querySelectorAll('.q-select').forEach(cb => {{
+      cb.addEventListener('change', function() {{
+        const total = document.querySelectorAll('.q-select').length;
+        const totalChecked = document.querySelectorAll('.q-select:checked').length;
+        if (selectAll) {{
+          selectAll.checked = total === totalChecked;
+          selectAll.indeterminate = totalChecked > 0 && totalChecked < total;
+        }}
+        updateBulkBar();
+      }});
+    }});
     </script>
     """
     return _render(body)
@@ -3145,11 +3235,40 @@ def quiz_mgr_edit():
 @app.route("/quiz_mgr/delete", methods=["POST"])
 @login_required
 def quiz_mgr_delete():
+    _csrf_protect()
     try:
         idx = int(request.form.get("idx", -1))
         qs = _load_quiz()
         if 0 <= idx < len(qs):
             qs.pop(idx)
+            _save_quiz(qs)
+    except Exception:
+        pass
+    return redirect(url_for("quiz_mgr"))
+
+
+@app.route("/quiz_mgr/clear_filter")
+@login_required
+def quiz_mgr_clear_filter():
+    session.pop("quiz_filter_q", None)
+    session.pop("quiz_filter_cat", None)
+    session.pop("quiz_filter_diff", None)
+    return redirect(url_for("quiz_mgr"))
+
+
+@app.route("/quiz_mgr/delete_bulk", methods=["POST"])
+@login_required
+def quiz_mgr_delete_bulk():
+    _csrf_protect()
+    try:
+        raw = request.form.getlist("idx")
+        # Sort descending so popping by index doesn't shift remaining indices
+        indices = sorted({int(x) for x in raw if x.isdigit()}, reverse=True)
+        if indices:
+            qs = _load_quiz()
+            for idx in indices:
+                if 0 <= idx < len(qs):
+                    qs.pop(idx)
             _save_quiz(qs)
     except Exception:
         pass
