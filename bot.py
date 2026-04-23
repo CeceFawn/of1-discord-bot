@@ -1932,8 +1932,8 @@ def _delta_str(current_pos: int, prev_pos: Optional[int]) -> str:
     return "-"
 
 
-async def fetch_driver_standings_text(limit: int = 0) -> str:
-    current, previous = await _openf1_driver_standings_pair()
+async def fetch_driver_standings_text(limit: int = 0, _pair=None) -> str:
+    current, previous = _pair if _pair is not None else await _openf1_driver_standings_pair()
     if not current:
         return "No standings available from OpenF1."
     prev_pos: Dict[int, int] = {r["driver_number"]: r["position"] for r in previous}
@@ -1946,8 +1946,8 @@ async def fetch_driver_standings_text(limit: int = 0) -> str:
     return "__**F1 Driver Standings**__\n```\n" + "\n".join(lines) + "\n```"
 
 
-async def fetch_constructor_standings_text(limit: int = 0) -> str:
-    current_drivers, prev_drivers = await _openf1_driver_standings_pair()
+async def fetch_constructor_standings_text(limit: int = 0, _pair=None) -> str:
+    current_drivers, prev_drivers = _pair if _pair is not None else await _openf1_driver_standings_pair()
     if not current_drivers:
         return "No standings available from OpenF1."
     current_rows = _build_constructor_rows(current_drivers)
@@ -2839,17 +2839,24 @@ async def update_standings_once():
 
     driver_msg_id = os.getenv("DRIVER_STANDINGS_MESSAGE_ID")
     constructor_msg_id = os.getenv("CONSTRUCTOR_STANDINGS_MESSAGE_ID")
-    driver_text_task = fetch_driver_standings_text() if driver_msg_id else None
-    constructor_text_task = fetch_constructor_standings_text() if constructor_msg_id else None
 
     driver_text = constructor_text = None
-    if driver_text_task or constructor_text_task:
-        results = await asyncio.gather(
-            driver_text_task if driver_text_task else asyncio.sleep(0, result=None),
-            constructor_text_task if constructor_text_task else asyncio.sleep(0, result=None),
-            return_exceptions=True,
-        )
-        driver_text, constructor_text = results
+    if driver_msg_id or constructor_msg_id:
+        try:
+            pair = await _openf1_driver_standings_pair()
+        except Exception as e:
+            logging.error(f"[Standings] Failed to fetch standings pair: {e}")
+            pair = ([], [])
+        if driver_msg_id:
+            try:
+                driver_text = await fetch_driver_standings_text(_pair=pair)
+            except Exception as e:
+                driver_text = e
+        if constructor_msg_id:
+            try:
+                constructor_text = await fetch_constructor_standings_text(_pair=pair)
+            except Exception as e:
+                constructor_text = e
 
     if driver_msg_id:
         try:
@@ -3394,39 +3401,39 @@ async def h2h(ctx, *, query: str):
                 _completed_session_keys("Qualifying", 2),
             )
 
-            sem = asyncio.Semaphore(6)
-
             async def _session_final_positions(session_key: int) -> dict:
-                """Fetch all drivers' final positions for a session in one API call."""
-                async with sem:
-                    try:
-                        data = await asyncio.to_thread(
-                            _openf1_get_json, "position",
-                            {"session_key": session_key},
-                            20, "h2h_pos",
-                        )
-                        if not isinstance(data, list):
-                            return {}
-                        latest: dict = {}
-                        for r in data:
-                            if not isinstance(r, dict):
-                                continue
-                            drv = str(r.get("driver_number") or "")
-                            dt = str(r.get("date") or "")
-                            try:
-                                pos = int(r["position"])
-                            except Exception:
-                                continue
-                            if drv not in latest or dt >= latest[drv][0]:
-                                latest[drv] = (dt, pos)
-                        return {drv: p for drv, (_, p) in latest.items()}
-                    except Exception:
+                """Fetch all drivers' final positions for a session in one API call.
+                Called sequentially — the position endpoint silently rate-limits
+                concurrent requests by returning empty lists."""
+                try:
+                    data = await asyncio.to_thread(
+                        _openf1_get_json, "position",
+                        {"session_key": session_key},
+                        20, "h2h_pos",
+                    )
+                    if not isinstance(data, list):
                         return {}
+                    latest: dict = {}
+                    for r in data:
+                        if not isinstance(r, dict):
+                            continue
+                        drv = str(r.get("driver_number") or "")
+                        dt = str(r.get("date") or "")
+                        try:
+                            pos = int(r["position"])
+                        except Exception:
+                            continue
+                        if drv not in latest or dt >= latest[drv][0]:
+                            latest[drv] = (dt, pos)
+                    return {drv: p for drv, (_, p) in latest.items()}
+                except Exception:
+                    return {}
 
+            # Sequential to avoid silent rate-limiting from the position endpoint
             all_keys = race_keys + quali_keys
-            all_results = await asyncio.gather(
-                *[asyncio.create_task(_session_final_positions(sk)) for sk in all_keys]
-            )
+            all_results = []
+            for sk in all_keys:
+                all_results.append(await _session_final_positions(sk))
 
             n_race = len(race_keys)
             for i, positions in enumerate(all_results):
@@ -4986,7 +4993,7 @@ async def _ensure_live_thread(
     _set_race_thread_weekend_state(round_key, guild.id, "active")
     return created
 
-async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optional[tuple[datetime, datetime, Dict[str, Any], list]]:
+async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optional[tuple[datetime, datetime, Dict[str, Any], list, Dict[str, Any]]]:
     latest = await _openf1_get(http, "sessions", {"session_key": "latest"}, caller="race_supervisor_latest")
     if not latest:
         return None
@@ -4994,7 +5001,8 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     if not _openf1_is_f1_session(latest[0]):
         return None
 
-    meeting_key = latest[0].get("meeting_key")
+    latest_session = latest[0]
+    meeting_key = latest_session.get("meeting_key")
     if not meeting_key:
         return None
 
@@ -5021,7 +5029,7 @@ async def _pick_current_meeting_and_window(http: aiohttp.ClientSession) -> Optio
     window_end = max(ends) + post_pad
 
     meta = relevant[0]
-    return window_start, window_end, meta, relevant
+    return window_start, window_end, meta, relevant, latest_session
 
 async def _post_deferred_quali_boundary(
     gid: int,
