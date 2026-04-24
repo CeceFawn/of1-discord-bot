@@ -179,10 +179,13 @@
   <!-- ── NAVBAR ───────────────────────────────────────────────── -->
   <nav class="fixed top-0 left-0 right-0 z-50 bg-f1dark/90 backdrop-blur border-b border-white/10">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-      <a href="/" class="flex items-center gap-2">
-        <span id="of1-logo" class="text-f1red font-black text-2xl tracking-tight">OF1</span>
-        <span class="text-white/40 text-sm font-medium hidden sm:block">Orlando F1</span>
-      </a>
+      <div class="flex items-center gap-5">
+        <a href="/" class="flex items-center gap-2">
+          <span id="of1-logo" class="text-f1red font-black text-2xl tracking-tight">OF1</span>
+          <span class="text-white/40 text-sm font-medium hidden sm:block">Orlando F1</span>
+        </a>
+        <a href="/gallery" class="text-white/60 hover:text-white text-sm font-medium transition-colors">Gallery</a>
+      </div>
       {% if next_session %}
       <div class="flex items-center gap-3">
         <span id="party-trigger" title="">🏎️</span>
