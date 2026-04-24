@@ -7,7 +7,7 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, jsonify, Response
+from flask import Flask, render_template, jsonify, Response, request, abort
 from dotenv import load_dotenv
 
 EASTERN = ZoneInfo("America/New_York")
@@ -15,6 +15,42 @@ EASTERN = ZoneInfo("America/New_York")
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 app = Flask(__name__)
+
+# Simple per-IP rate limiter: max 60 requests per 60 seconds
+_SITE_RATE: dict[str, list[float]] = {}
+_SITE_RATE_LOCK = threading.Lock()
+
+def _site_client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    return forwarded or request.remote_addr or "unknown"
+
+@app.before_request
+def _site_rate_limit():
+    ip = _site_client_ip()
+    now = time.time()
+    with _SITE_RATE_LOCK:
+        hits = [t for t in _SITE_RATE.get(ip, []) if now - t < 60]
+        if len(hits) >= 120:
+            abort(429)
+        hits.append(now)
+        _SITE_RATE[ip] = hits
+
+@app.after_request
+def _site_security_headers(response):
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self';"
+    )
+    response.headers["Server"] = "OF1"
+    return response
 
 # ----------------------------
 # Social / site config from env

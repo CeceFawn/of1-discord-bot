@@ -186,8 +186,9 @@ MAX_ATTEMPTS = 8
 WINDOW_SECONDS = 10 * 60  # 10 minutes
 
 def _client_ip() -> str:
-    # NOTE: if you later put this behind a reverse proxy, handle X-Forwarded-For carefully.
-    return request.remote_addr or "unknown"
+    # X-Forwarded-For is set by nginx/Caddy; take only the first (original client) IP.
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    return forwarded or request.remote_addr or "unknown"
 
 def _ip_allowed() -> bool:
     if not ALLOWED_IPS:
@@ -261,6 +262,24 @@ def _csrf_token() -> str:
 
 def _csrf_input() -> str:
     return f'<input type="hidden" name="_csrf" value="{_csrf_token()}">'
+
+@app.after_request
+def _security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https://cdn.discordapp.com; "
+        "connect-src 'self';"
+    )
+    response.headers["Server"] = "OF1"
+    return response
+
 
 @app.before_request
 def _csrf_protect():
