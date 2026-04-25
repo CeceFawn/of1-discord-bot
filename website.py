@@ -257,6 +257,18 @@ def _openf1_get(endpoint: str, params: dict) -> list:
     return []
 
 
+def _gp_name(s: dict) -> str:
+    """Return the most specific race name for an OpenF1 session dict."""
+    name = str(s.get("meeting_name") or "").strip()
+    if name:
+        return name
+    circuit = str(s.get("circuit_short_name") or "").strip()
+    if circuit:
+        return f"{circuit} Grand Prix"
+    country = str(s.get("country_name") or "F1").strip()
+    return f"{country} Grand Prix"
+
+
 def _parse_meeting_window(sessions: list) -> tuple[datetime, datetime] | None:
     """Return (window_start, window_end) for a list of sessions, or None."""
     starts, ends = [], []
@@ -281,12 +293,7 @@ def _parse_meeting_window(sessions: list) -> tuple[datetime, datetime] | None:
 def _meeting_info(sessions: list) -> dict:
     """Extract display info for a meeting from its session list."""
     lat = sessions[0]
-    meeting_name = (
-        lat.get("meeting_name")
-        or lat.get("country_name")
-        or lat.get("circuit_short_name")
-        or "Race Weekend"
-    )
+    meeting_name = _gp_name(lat) or "Race Weekend"
 
     race_session = None
     for s in sessions:
@@ -474,7 +481,7 @@ def get_next_race() -> dict | None:
                 upcoming.sort(key=lambda x: x[0])
                 dt, s = upcoming[0]
                 return {
-                    "name": s.get("meeting_name") or s.get("session_name") or "Next Race",
+                    "name": _gp_name(s) or "Next Race",
                     "circuit": s.get("circuit_short_name") or "",
                     "country": s.get("country_name") or "",
                     "flag": s.get("country_code") or "",
@@ -571,6 +578,40 @@ def api_next_race():
     return jsonify(get_next_race() or {})
 
 
+
+
+_ERROR_HEAD = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title} · OF1</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0a0a0a] text-white min-h-screen flex flex-col items-center justify-center gap-6 font-sans px-6 text-center">
+  <span class="text-7xl font-black text-[#e8002d]">{code}</span>
+  <h1 class="text-2xl font-bold">{title}</h1>
+  <p class="text-white/50 max-w-sm">{desc}</p>
+  <a href="/" class="mt-2 inline-block bg-[#e8002d] hover:bg-[#c0001f] text-white font-semibold px-6 py-2.5 rounded-full transition-colors">Back to OF1</a>
+</body>
+</html>"""
+
+
+@app.errorhandler(404)
+def page_not_found(e):
+    html = _ERROR_HEAD.format(
+        code=404, title="Page not found",
+        desc="That page doesn't exist. Maybe it moved, or you followed a bad link."
+    )
+    return html, 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    html = _ERROR_HEAD.format(
+        code=500, title="Something went wrong",
+        desc="The server ran into a problem. Try again in a moment."
+    )
+    return html, 500
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+{
+  "name": "OF1 — Orlando F1",
+  "short_name": "OF1",
+  "description": "Orlando's home for Formula 1 fans. Watch parties, race coverage, and community.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#e8002d",
+  "icons": [
+    {
+      "src": "/static/schedule_halfbarrel.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

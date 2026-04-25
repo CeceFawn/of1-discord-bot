@@ -212,51 +212,61 @@
     return (i % layers) * step;
   }
 
-  pts.forEach((pt, i) => {
-    const depthOffset = getDepthOffset(i);
+  // Staggered lazy load: max 4 concurrent texture fetches to avoid hammering the server
+  const LOAD_CONCURRENCY = 4;
+  let activeLoads = 0;
+  const loadQueue = pts.map((pt, i) => ({ pt, i }));
 
-    function addMesh(mat, width, height) {
-      const mesh = new THREE.Mesh(makeCurvedTile(pt, width, height, depthOffset), mat);
-      mesh.userData.photo = PHOTOS[i];
-      mesh.renderOrder = i;
-      sphereGrp.add(mesh);
-      meshes.push(mesh);
-    }
+  function drainQueue() {
+    while (activeLoads < LOAD_CONCURRENCY && loadQueue.length) {
+      const { pt, i } = loadQueue.shift();
+      const depthOffset = getDepthOffset(i);
+      activeLoads++;
 
-    loader.load(PHOTOS[i], (tex) => {
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-
-      const img = tex.image;
-      const aspect = img && img.width && img.height ? (img.width / img.height) : 1;
-
-      // Keep similar area instead of similar height
-      let width, height;
-      if (aspect >= 1) {
-        width = baseTileSize;
-        height = baseTileSize / aspect;
-      } else {
-        width = baseTileSize * aspect;
-        height = baseTileSize;
+      function addMesh(mat, width, height) {
+        const mesh = new THREE.Mesh(makeCurvedTile(pt, width, height, depthOffset), mat);
+        mesh.userData.photo = PHOTOS[i];
+        mesh.renderOrder = i;
+        sphereGrp.add(mesh);
+        meshes.push(mesh);
       }
 
-      addMesh(new THREE.MeshBasicMaterial({
-        map: tex,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1
-      }), width, height);
+      loader.load(PHOTOS[i], (tex) => {
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        const img = tex.image;
+        const aspect = img && img.width && img.height ? (img.width / img.height) : 1;
+        let width, height;
+        if (aspect >= 1) {
+          width = baseTileSize;
+          height = baseTileSize / aspect;
+        } else {
+          width = baseTileSize * aspect;
+          height = baseTileSize;
+        }
+        addMesh(new THREE.MeshBasicMaterial({
+          map: tex,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1
+        }), width, height);
+        activeLoads--;
+        drainQueue();
+      }, undefined, () => {
+        addMesh(new THREE.MeshBasicMaterial({
+          color: 0x330008,
+          side: THREE.DoubleSide,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1
+        }), baseTileSize, baseTileSize);
+        activeLoads--;
+        drainQueue();
+      });
+    }
+  }
 
-    }, undefined, () => {
-      addMesh(new THREE.MeshBasicMaterial({
-        color: 0x330008,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1
-      }), baseTileSize, baseTileSize);
-    });
-  });
+  drainQueue();
 
   const currentQuat   = new THREE.Quaternion();
   const autoSpinQuat  = new THREE.Quaternion().setFromAxisAngle(

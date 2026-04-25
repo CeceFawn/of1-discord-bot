@@ -915,11 +915,11 @@ def _normalize_schedule_from_openf1(sessions: List[Dict[str, Any]], year: int) -
             continue
         base = obj["base"]
         season = str(base.get("year") or year)
+        _cs = str(base.get("circuit_short_name") or "").strip()
         race_name = (
             str(base.get("meeting_name") or "").strip()
-            or str(base.get("meeting_official_name") or "").strip()
-            or (f"{str(base.get('country_name') or '').strip()} Grand Prix".strip() if str(base.get("country_name") or "").strip() else "")
-            or (f"{str(base.get('location') or '').strip()} Grand Prix".strip() if str(base.get("location") or "").strip() else "")
+            or (f"{_cs} Grand Prix" if _cs else "")
+            or (f"{str(base.get('location') or '').strip()} Grand Prix" if str(base.get("location") or "").strip() else "")
             or f"{str(base.get('country_name') or 'F1').strip()} Grand Prix"
         )
         circuit_name = str(base.get("circuit_short_name") or base.get("location") or "Unknown Circuit").strip()
@@ -6796,11 +6796,11 @@ def _openf1_meeting_groups_for_year(year: int) -> List[Dict[str, Any]]:
         if race_dt is None:
             continue
         base = obj.get("base") or {}
+        _cs2 = str(base.get("circuit_short_name") or "").strip()
         race_name = (
             str(base.get("meeting_name") or "").strip()
-            or str(base.get("meeting_official_name") or "").strip()
-            or (f"{str(base.get('country_name') or '').strip()} Grand Prix".strip() if str(base.get("country_name") or "").strip() else "")
-            or (f"{str(base.get('location') or '').strip()} Grand Prix".strip() if str(base.get("location") or "").strip() else "")
+            or (f"{_cs2} Grand Prix" if _cs2 else "")
+            or (f"{str(base.get('location') or '').strip()} Grand Prix" if str(base.get("location") or "").strip() else "")
             or f"{str(base.get('country_name') or 'F1').strip()} Grand Prix"
         )
         rows.append(

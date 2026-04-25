@@ -26,6 +26,10 @@
   <!-- Sitemap hint -->
   <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
 
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#e8002d" />
+
   <!-- JSON-LD structured data -->
   <script type="application/ld+json">
   {
@@ -177,34 +181,36 @@
 <body class="bg-f1dark text-white font-sans antialiased">
 
   <!-- ── NAVBAR ───────────────────────────────────────────────── -->
-  <nav class="fixed top-0 left-0 right-0 z-50 bg-f1dark/90 backdrop-blur border-b border-white/10">
+  <nav aria-label="Main navigation" class="fixed top-0 left-0 right-0 z-50 bg-f1dark/90 backdrop-blur border-b border-white/10">
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
       <div class="flex items-center gap-5">
-        <a href="/" class="flex items-center gap-2">
+        <a href="/" aria-label="OF1 — Orlando F1 home" class="flex items-center gap-2">
           <span id="of1-logo" class="text-f1red font-black text-2xl tracking-tight">OF1</span>
-          <span class="text-white/40 text-sm font-medium hidden sm:block">Orlando F1</span>
+          <span class="text-white/40 text-sm font-medium hidden sm:block" aria-hidden="true">Orlando F1</span>
         </a>
         <a href="/gallery" class="text-white/60 hover:text-white text-sm font-medium transition-colors">Gallery</a>
       </div>
-      {% if next_session %}
       <div class="flex items-center gap-3">
-        <span id="party-trigger" title="">🏎️</span>
-        <div class="flex flex-col items-end">
+        <span id="party-trigger" aria-hidden="true">🏎️</span>
+        {% if next_session %}
+        <div class="flex flex-col items-end" aria-label="Next F1 session countdown">
           <span class="text-white/40 text-xs uppercase tracking-widest">{{ next_session.session_name }}{% if next_session.meeting_name %} · {{ next_session.meeting_name }}{% endif %}</span>
-          <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}">--:--:--</span>
+          <span id="nav-countdown" class="text-white font-bold text-lg tabular-nums" data-target="{{ next_session.date_iso }}" aria-live="polite" aria-label="Time until next session">--:--:--</span>
         </div>
+        {% else %}
+        <a href="https://www.formula1.com/en/racing/2025" target="_blank" rel="noopener" class="text-white/40 hover:text-white text-xs uppercase tracking-widest transition-colors">Schedule →</a>
+        {% endif %}
       </div>
-      {% endif %}
     </div>
   </nav>
 
   <!-- ── HERO ─────────────────────────────────────────────────── -->
-  <section class="pt-32 pb-20 px-6 text-center">
+  <section aria-labelledby="hero-heading" class="pt-32 pb-20 px-6 text-center">
     <div class="select-none max-w-3xl mx-auto">
       <div id="hero-badge" class="inline-block bg-f1red/10 border border-f1red/30 text-f1red text-xs font-semibold uppercase tracking-widest px-4 py-1.5 rounded-full mb-6">
         Orlando's F1 Community
       </div>
-      <h1 class="text-6xl sm:text-8xl font-black tracking-tighter mb-4">
+      <h1 id="hero-heading" class="text-6xl sm:text-8xl font-black tracking-tighter mb-4">
         <span id="hero-logo" class="text-f1red">OF1</span>
       </h1>
       <p class="text-white/50 text-lg sm:text-xl max-w-xl mx-auto">
@@ -215,7 +221,7 @@
 
   <!-- ── WATCH PARTY ──────────────────────────────────────────── -->
   {% if watch_party and watch_party.get('active') %}
-  <section class="px-6 pb-24">
+  <section aria-label="Watch party details" class="px-6 pb-24">
     <div class="max-w-2xl mx-auto">
       <a id="watch-party-card" href="{{ discord_invite }}" target="_blank" rel="noopener"
          class="sheen-card block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
@@ -282,7 +288,7 @@
   {% endif %}
 
   <!-- ── SCHEDULE FLYERS ──────────────────────────────────────── -->
-  <section class="px-6 pb-16">
+  <section aria-label="Watch party schedule" class="px-6 pb-16">
     <div class="max-w-2xl mx-auto">
       <div class="text-white/40 text-xs font-semibold uppercase tracking-widest mb-4">2026 Watch Party Schedule</div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -297,13 +303,13 @@
   </section>
 
   <!-- ── SOCIALS ───────────────────────────────────────────────── -->
-  <section class="px-6 pb-24">
+  <section aria-label="Find us on social media" class="px-6 pb-24">
     <div class="max-w-2xl mx-auto">
       <div class="text-white/40 text-xs font-semibold uppercase tracking-widest mb-4">Find Us</div>
       <div class="flex flex-wrap gap-3">
 
         <!-- Instagram -->
-        <a href="https://www.instagram.com/orlandof1fans" target="_blank" rel="noopener"
+        <a href="https://www.instagram.com/orlandof1fans" target="_blank" rel="noopener" aria-label="OF1 on Instagram (opens in new tab)"
            class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
@@ -314,7 +320,7 @@
         </a>
 
         <!-- Facebook -->
-        <a href="https://www.facebook.com/orlandoF1fans" target="_blank" rel="noopener"
+        <a href="https://www.facebook.com/orlandoF1fans" target="_blank" rel="noopener" aria-label="OF1 on Facebook (opens in new tab)"
            class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
             <path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>
@@ -323,7 +329,7 @@
         </a>
 
         <!-- Linktree -->
-        <a href="https://linktr.ee/orlandof1" target="_blank" rel="noopener"
+        <a href="https://linktr.ee/orlandof1" target="_blank" rel="noopener" aria-label="OF1 on Linktree (opens in new tab)"
            class="party-social sheen-card flex items-center gap-2.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 transition-colors">
           <svg class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v13M8 7l4-4 4 4M6 11l6-3 6 3M9 17h6M10 21h4"/>
@@ -341,7 +347,7 @@
   </footer>
 
   <!-- ── LIGHTBOX ─────────────────────────────────────────────── -->
-  <div id="lightbox" style="display:none"
+  <div id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" style="display:none"
        class="fixed inset-0 z-50 flex items-center justify-center">
     <!-- backdrop -->
     <div class="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
@@ -353,7 +359,7 @@
            style="object-fit:contain;transition:transform 0.15s ease;transform-origin:center center;" />
     </div>
     <!-- close button -->
-    <button onclick="closeLightbox()"
+    <button onclick="closeLightbox()" aria-label="Close photo viewer"
             class="absolute top-4 right-4 z-20 text-white/70 hover:text-white bg-black/40 hover:bg-black/70 rounded-full w-10 h-10 flex items-center justify-center text-xl transition-colors">
       ✕
     </button>
