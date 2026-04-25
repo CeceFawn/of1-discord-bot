@@ -3354,7 +3354,9 @@ async def h2h(ctx, *, query: str):
 
     # ── Season head-to-head via position endpoint ──────────────
     race_d1 = race_d2 = race_total = 0
+    sprint_d1 = sprint_d2 = sprint_total = 0
     quali_d1 = quali_d2 = quali_total = 0
+    sq_d1 = sq_d2 = sq_total = 0
 
     if num1 and num2:
         async with ctx.typing():
@@ -3372,7 +3374,7 @@ async def h2h(ctx, *, query: str):
                     raw = await asyncio.to_thread(
                         _openf1_get_json, "sessions",
                         {"year": now.year, "session_type": session_type},
-                        30, f"h2h_sess_{session_type.lower()}",
+                        30, f"h2h_sess_{session_type.lower().replace(' ', '_')}",
                     )
                 except Exception:
                     return []
@@ -3396,10 +3398,14 @@ async def h2h(ctx, *, query: str):
                     keys.append(int(sk))
                 return keys
 
-            race_keys, quali_keys = await asyncio.gather(
-                _completed_session_keys("Race", 3),
-                _completed_session_keys("Qualifying", 2),
-            )
+            # Fetch all four session types sequentially to avoid rate limiting
+            race_keys  = await _completed_session_keys("Race", 3)
+            sprint_keys = await _completed_session_keys("Sprint", 2)
+            quali_keys = await _completed_session_keys("Qualifying", 2)
+            # OpenF1 uses either "Sprint Qualifying" or "Sprint Shootout" depending on season
+            sq_keys    = await _completed_session_keys("Sprint Qualifying", 1)
+            if not sq_keys:
+                sq_keys = await _completed_session_keys("Sprint Shootout", 1)
 
             async def _session_final_positions(session_key: int) -> dict:
                 """Fetch all drivers' final positions for a session in one API call.
@@ -3429,30 +3435,35 @@ async def h2h(ctx, *, query: str):
                 except Exception:
                     return {}
 
-            # Sequential to avoid silent rate-limiting from the position endpoint
-            all_keys = race_keys + quali_keys
-            all_results = []
-            for sk in all_keys:
-                all_results.append(await _session_final_positions(sk))
+            segments = [
+                (race_keys,   "race"),
+                (sprint_keys, "sprint"),
+                (quali_keys,  "quali"),
+                (sq_keys,     "sq"),
+            ]
+            counters: Dict[str, List[int]] = {
+                "race":   [0, 0, 0],
+                "sprint": [0, 0, 0],
+                "quali":  [0, 0, 0],
+                "sq":     [0, 0, 0],
+            }
+            for keys, label in segments:
+                for sk in keys:
+                    positions = await _session_final_positions(sk)
+                    p1 = positions.get(num1)
+                    p2 = positions.get(num2)
+                    if p1 is None or p2 is None:
+                        continue
+                    counters[label][2] += 1
+                    if p1 < p2:
+                        counters[label][0] += 1
+                    elif p2 < p1:
+                        counters[label][1] += 1
 
-            n_race = len(race_keys)
-            for i, positions in enumerate(all_results):
-                p1 = positions.get(num1)
-                p2 = positions.get(num2)
-                if p1 is None or p2 is None:
-                    continue
-                if i < n_race:
-                    race_total += 1
-                    if p1 < p2:
-                        race_d1 += 1
-                    elif p2 < p1:
-                        race_d2 += 1
-                else:
-                    quali_total += 1
-                    if p1 < p2:
-                        quali_d1 += 1
-                    elif p2 < p1:
-                        quali_d2 += 1
+            race_d1,   race_d2,   race_total   = counters["race"]
+            sprint_d1, sprint_d2, sprint_total = counters["sprint"]
+            quali_d1,  quali_d2,  quali_total  = counters["quali"]
+            sq_d1,     sq_d2,     sq_total     = counters["sq"]
 
     # ── Build message ──────────────────────────────────────────
     pts_diff = pts1 - pts2
@@ -3470,20 +3481,22 @@ async def h2h(ctx, *, query: str):
     def _bar(a: int, b: int, name_a: str, name_b: str) -> str:
         if a == 0 and b == 0:
             return "  No data yet"
-        total = a + b
         winner = name_a if a > b else (name_b if b > a else None)
         w_str = f" — **{winner}** leads" if winner else " — level"
         return f"  {name_a} **{a}** — **{b}** {name_b}{w_str}"
 
-    race_section = (
-        f"🏁 **Race finishes** ({race_total} races)\n"
-        + _bar(race_d1, race_d2, name1, name2)
-    ) if num1 and num2 else ""
+    def _section(emoji: str, label: str, total: int, a: int, b: int) -> str:
+        unit = "session" if total == 1 else "sessions"
+        return f"{emoji} **{label}** ({total} {unit})\n{_bar(a, b, name1, name2)}"
 
-    quali_section = (
-        f"\n🅿 **Qualifying** ({quali_total} sessions)\n"
-        + _bar(quali_d1, quali_d2, name1, name2)
-    ) if num1 and num2 else ""
+    sections = []
+    if num1 and num2:
+        sections.append(_section("🏁", "Races", race_total, race_d1, race_d2))
+        if sprint_total > 0:
+            sections.append(_section("⚡", "Sprint Races", sprint_total, sprint_d1, sprint_d2))
+        sections.append(_section("🅿", "Qualifying", quali_total, quali_d1, quali_d2))
+        if sq_total > 0:
+            sections.append(_section("⚡🅿", "Sprint Qualifying", sq_total, sq_d1, sq_d2))
 
     msg = (
         f"**{name1}** ({code1}) vs **{name2}** ({code2})\n"
@@ -3493,7 +3506,7 @@ async def h2h(ctx, *, query: str):
         f"  {name2}: **P{pos2}** — {pts2} pts — {team2}\n"
         f"  {pts_line}\n"
         f"  {champ_line}\n"
-        + (f"\n{race_section}\n{quali_section}" if race_section else "")
+        + ("\n" + "\n\n".join(sections) if sections else "")
     )
     await ctx.send(msg)
 
