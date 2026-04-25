@@ -2189,7 +2189,7 @@ async def maybe_gate_channel(message: discord.Message, user_level: int) -> bool:
 # ----------------------------
 # Commands: XP
 # ----------------------------
-@bot.command(name="rank")
+@bot.hybrid_command(name="rank")
 async def rank(ctx, member: discord.Member = None):
     member = member or ctx.author
     if ctx.guild is None:
@@ -2211,7 +2211,7 @@ async def rank(ctx, member: discord.Member = None):
     )
 
     file = discord.File(io.BytesIO(png_bytes), filename="rank.png")
-    await ctx.send(file=file)
+    await ctx.send(file=file, ephemeral=True)
 
 @bot.command(name="setbg")
 async def setbg(ctx, name: str = None):
@@ -2512,24 +2512,80 @@ async def logrecent(ctx, lines: int = 10):
     except Exception as e:
         await ctx.send(f"❌ Could not read log: {e}")
 
-@bot.command(name="ping")
+@bot.hybrid_command(name="ping")
 async def ping(ctx):
     await ctx.send("Pong!")
 
-@bot.command(name="help")
+_HELP_CATEGORIES: Dict[str, Dict] = {
+    "f1": {
+        "label": "🏎 F1 Info",
+        "commands": ["schedule", "nextsession", "circuit", "driverstats", "teamstats", "h2h", "standingssetup"],
+    },
+    "predictions": {
+        "label": "🎯 Predictions",
+        "commands": [
+            "predictpole", "predictpodium", "predictp10",
+            "predictsprintpole", "predictsprintpodium", "predictsprintp8",
+            "mypredictions", "predictions", "predictionsboard",
+            "predictionleaderboard", "prstats",
+        ],
+    },
+    "quiz": {
+        "label": "🧠 Quiz & XP",
+        "commands": ["quiz", "quizscore", "rank", "xpleaderboard", "setbg", "cardbgs"],
+    },
+    "admin": {
+        "label": "⚙️ Admin",
+        "commands": [
+            "f1reminders", "f1reminderleads", "setupnotifications", "setupcolors",
+            "setupdrivers", "configreload", "standingssetup", "editmsg",
+            "botinfo", "serverlist", "logrecent", "xpset", "xpreset", "xpaudit", "xpgate",
+        ],
+    },
+}
+
+class HelpView(discord.ui.View):
+    def __init__(self, ctx, prefix: str):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+        self.prefix = prefix
+        self.current = "f1"
+        for key, meta in _HELP_CATEGORIES.items():
+            btn = discord.ui.Button(label=meta["label"], style=discord.ButtonStyle.secondary, custom_id=f"help_{key}")
+            btn.callback = self._make_callback(key)
+            self.add_item(btn)
+
+    def _make_callback(self, key: str):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.ctx.author.id:
+                await interaction.response.send_message("This help menu isn't for you — run `!help` yourself!", ephemeral=True)
+                return
+            self.current = key
+            await interaction.response.edit_message(content=self._page(key), view=self)
+        return callback
+
+    def _page(self, key: str) -> str:
+        meta = _HELP_CATEGORIES[key]
+        p = self.prefix
+        descs = _command_descriptions()
+        lines = [f"**{meta['label']}**\n"]
+        for name in meta["commands"]:
+            desc = descs.get(name, "")
+            lines.append(f"`{p}{name}` — {desc}" if desc else f"`{p}{name}`")
+        return "\n".join(lines)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        self.stop()
+
+
+@bot.hybrid_command(name="help")
 async def help(ctx):
-    visible = []
+    """Show categorized help for all bot commands."""
     prefix = getattr(ctx, "clean_prefix", None) or "!"
-    for cmd in bot.commands:
-        try:
-            if await cmd.can_run(ctx):
-                visible.append(f"{prefix}{cmd.name} - {_command_description_for(cmd)}")
-        except Exception:
-            continue
-    if visible:
-        await ctx.send("**Available Commands:**\n" + "\n".join(visible))
-    else:
-        await ctx.send("❌ You don't have access to any commands.")
+    view = HelpView(ctx, prefix)
+    await ctx.send(view._page("f1"), view=view, ephemeral=True)
 
 def _command_examples(prefix: str) -> Dict[str, str]:
     p = prefix or "!"
@@ -2690,59 +2746,156 @@ async def commands_dm_list(ctx):
     except Exception:
         await ctx.send("❌ I couldn't DM you. Check your privacy settings and try again.")
 
-@bot.command(name="quiz", aliases=["f1quiz"])
-async def quiz(ctx, *filters: str):
+class QuizView(discord.ui.View):
+    """Multiple-choice button quiz. One correct answer among 4 shuffled options."""
+
+    def __init__(self, guild_id: int, correct_answer: str, options: List[str],
+                 active_record: dict, timeout: float = 120.0):
+        super().__init__(timeout=timeout)
+        self.guild_id = guild_id
+        self.correct_key = _clean_text_key(correct_answer)
+        self.answered = False  # First correct answer wins; only locks once
+        labels = ["A", "B", "C", "D"]
+        styles = [
+            discord.ButtonStyle.primary,
+            discord.ButtonStyle.secondary,
+            discord.ButtonStyle.success,
+            discord.ButtonStyle.danger,
+        ]
+        for i, option in enumerate(options):
+            btn = discord.ui.Button(
+                label=f"{labels[i]}. {option[:50]}",
+                style=styles[i],
+                custom_id=f"quiz_{guild_id}_{i}",
+            )
+            btn.callback = self._make_callback(option)
+            self.add_item(btn)
+
+        # Store active record so on_timeout can expire it properly
+        self._active = active_record
+
+    def _make_callback(self, option: str):
+        async def callback(interaction: discord.Interaction):
+            if self.answered:
+                await interaction.response.send_message("⌛ This question is already answered!", ephemeral=True)
+                return
+            active = F1_QUIZ_ACTIVE.get(self.guild_id)
+            if not active or time.time() > float(active.get("expires_at", 0)):
+                F1_QUIZ_ACTIVE.pop(self.guild_id, None)
+                self.stop()
+                await interaction.response.send_message("⌛ This quiz question expired.", ephemeral=True)
+                return
+            guess_key = _clean_text_key(option)
+            all_valid = active.get("answers") or []
+            if guess_key in all_valid or guess_key == self.correct_key:
+                self.answered = True
+                points = max(1, int(active.get("points", 1) or 1))
+                difficulty = str(active.get("difficulty") or "easy").title()
+                category = str(active.get("category") or "general").replace("_", " ").title()
+                scores = _quiz_scores_for_guild(self.guild_id)
+                uid = str(interaction.user.id)
+                scores[uid] = int(scores.get(uid, 0) or 0) + points
+                _save_state_quiet()
+                _quiz_remove_pending_overrides(self.guild_id, str(active.get("question_key") or ""))
+                F1_QUIZ_ACTIVE.pop(self.guild_id, None)
+                # Disable all buttons
+                for item in self.children:
+                    item.disabled = True
+                    if hasattr(item, "label") and _clean_text_key(item.label.split(". ", 1)[-1]) in all_valid:
+                        item.style = discord.ButtonStyle.success
+                self.stop()
+                await interaction.response.edit_message(
+                    content=interaction.message.content + f"\n\n✅ **{interaction.user.display_name}** got it! (**+{points}** pt{'s' if points != 1 else ''} · {category} · {difficulty})",
+                    view=self,
+                )
+            else:
+                await interaction.response.send_message("❌ Not quite — try again while the question is open!", ephemeral=True)
+        return callback
+
+    async def on_timeout(self):
+        active = F1_QUIZ_ACTIVE.get(self.guild_id)
+        if active and not self.answered:
+            F1_QUIZ_ACTIVE.pop(self.guild_id, None)
+        for item in self.children:
+            item.disabled = True
+        self.stop()
+
+
+@bot.hybrid_command(name="quiz", aliases=["f1quiz"])
+@commands.cooldown(1, 15, commands.BucketType.guild)
+async def quiz(ctx, difficulty: str = "", category: str = ""):
+    """Start a multiple-choice F1 quiz question. Optional: difficulty (easy/medium/hard) and category."""
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
     if not F1_QUIZ_QUESTIONS:
         return await ctx.send("❌ No quiz questions configured.")
+
     difficulty_filters: set[str] = set()
     category_filters: set[str] = set()
     known_difficulties = set(QUIZ_DIFFICULTY_POINTS.keys())
     known_categories = {_quiz_category_for_question(q) for q in F1_QUIZ_QUESTIONS}
-    unknown_filters: List[str] = []
 
-    for f in filters:
-        token = _clean_text_key(f).replace(" ", "_")
+    for token_raw in [difficulty, category]:
+        token = _clean_text_key(token_raw).replace(" ", "_")
         if not token:
             continue
         if token in known_difficulties:
             difficulty_filters.add(token)
-            continue
-        if token in known_categories:
+        elif token in known_categories:
             category_filters.add(token)
-            continue
-        unknown_filters.append(f)
-
-    if unknown_filters:
-        return await ctx.send(
-            "❌ Unknown quiz filter(s): "
-            + ", ".join(f"`{x}`" for x in unknown_filters)
-            + "\\nUse difficulty (`easy`, `medium`, `hard`, `expert`) and/or categories like `rules`, `circuits`, `strategy`, `bot_xp`, `weekend_format`."
-        )
+        else:
+            return await ctx.send(
+                f"❌ Unknown filter `{token_raw}`. "
+                "Use a difficulty (`easy`, `medium`, `hard`, `expert`) or a category like `circuits`, `strategy`, `rules`."
+            )
 
     q = _quiz_pick_question(ctx.guild.id, difficulty_filters, category_filters)
     if q is None:
         return await ctx.send("❌ No quiz questions match those filters.")
-    difficulty = str(q.get("difficulty") or "easy").lower().strip()
-    category = _quiz_category_for_question(q)
+
+    diff = str(q.get("difficulty") or "easy").lower().strip()
+    cat = _quiz_category_for_question(q)
     points = _quiz_points_for_question(q)
-    F1_QUIZ_ACTIVE[ctx.guild.id] = {
+    correct_display = (q.get("answers") or ["?"])[0]
+
+    # Build distractors: pick 3 other questions' first answers, avoiding duplicates
+    other_qs = [x for x in F1_QUIZ_QUESTIONS if x is not q]
+    random.shuffle(other_qs)
+    distractors: List[str] = []
+    correct_key = _clean_text_key(correct_display)
+    for oq in other_qs:
+        if len(distractors) >= 3:
+            break
+        d = (oq.get("answers") or [None])[0]
+        if not d:
+            continue
+        if _clean_text_key(d) == correct_key:
+            continue
+        if any(_clean_text_key(d) == _clean_text_key(x) for x in distractors):
+            continue
+        distractors.append(str(d))
+
+    options = [correct_display] + distractors
+    random.shuffle(options)
+
+    active_record = {
         "question": q["q"],
         "question_key": _quiz_question_key(q),
         "answers": [_clean_text_key(a) for a in q.get("answers", [])],
         "asked_at": time.time(),
         "expires_at": time.time() + 120,
         "asked_by": ctx.author.id,
-        "difficulty": difficulty,
-        "category": category,
+        "difficulty": diff,
+        "category": cat,
         "points": points,
     }
+    F1_QUIZ_ACTIVE[ctx.guild.id] = active_record
+
+    view = QuizView(ctx.guild.id, correct_display, options, active_record, timeout=120.0)
     await ctx.send(
-        "🧠 **F1 Quiz Time!**\n"
-        f"{q['q']}\n"
-        f"Category: **{category.replace('_', ' ').title()}** · Difficulty: **{difficulty.title()}** · Worth: **{points}** point{'s' if points != 1 else ''}\n"
-        "Reply with `!quizanswer <answer>` within 2 minutes."
+        f"🧠 **F1 Quiz!** — {cat.replace('_', ' ').title()} · {diff.title()} · **{points}** pt{'s' if points != 1 else ''}\n"
+        f"**{q['q']}**",
+        view=view,
     )
 
 @bot.command(name="quizanswer")
@@ -2796,7 +2949,7 @@ async def quizanswer(ctx, *, answer: str):
     except Exception as e:
         logging.warning(f"[Quiz] Failed to register pending override for message {ctx.message.id}: {e}")
 
-@bot.command(name="quizscore", aliases=["quizleaderboard"])
+@bot.hybrid_command(name="quizscore", aliases=["quizleaderboard"])
 async def quizscore(ctx):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -2809,7 +2962,7 @@ async def quizscore(ctx):
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else uid
         lines.append(f"{i:>2}. {name} — **{pts}**")
-    await ctx.send("🧠 **F1 Quiz Leaderboard**\n" + "\n".join(lines))
+    await ctx.send("🧠 **F1 Quiz Leaderboard**\n" + "\n".join(lines), ephemeral=True)
 
 # ----------------------------
 # Standings updater
@@ -3036,7 +3189,7 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
 # ----------------------------
 # Commands: F1 schedule / reminders / circuit info
 # ----------------------------
-@bot.command(name="schedule")
+@bot.hybrid_command(name="schedule")
 async def schedule(ctx, count: int = 8):
     count = max(1, min(20, int(count)))
     try:
@@ -3048,20 +3201,13 @@ async def schedule(ctx, count: int = 8):
     if not items:
         return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
 
-    tz = _f1_tz()
-    tz_name = _f1_tz_name() if tz != timezone.utc else "UTC"
     lines = []
     for item in items:
-        delta = item["dt"] - datetime.now(timezone.utc)
-        hrs = int(delta.total_seconds() // 3600)
-        mins = int((delta.total_seconds() % 3600) // 60)
-        countdown = f"in {hrs}h {mins}m" if delta.total_seconds() > 0 else "started"
-        lines.append(
-            f"• **{item['race_name']}** — {item['session_label']} at `{_fmt_dt_local(item['dt'], tz)}` ({countdown})"
-        )
-    await ctx.send(f"📅 **Upcoming F1 Sessions** ({tz_name})\n" + "\n".join(lines))
+        unix_ts = int(item["dt"].timestamp())
+        lines.append(f"• **{item['race_name']}** — {item['session_label']} <t:{unix_ts}:F> (<t:{unix_ts}:R>)")
+    await ctx.send("📅 **Upcoming F1 Sessions**\n" + "\n".join(lines))
 
-@bot.command(name="nextsession", aliases=["nextf1"])
+@bot.hybrid_command(name="nextsession", aliases=["nextf1"])
 async def nextsession(ctx):
     try:
         items = await upcoming_f1_sessions(limit=1)
@@ -3071,14 +3217,10 @@ async def nextsession(ctx):
     if not items:
         return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
     item = items[0]
-    delta = item["dt"] - datetime.now(timezone.utc)
-    total_minutes = max(0, int(delta.total_seconds() // 60))
-    days, rem = divmod(total_minutes, 1440)
-    hrs, mins = divmod(rem, 60)
+    unix_ts = int(item["dt"].timestamp())
     await ctx.send(
         f"⏭️ **Next F1 session:** **{item['race_name']} — {item['session_label']}**\n"
-        f"🕒 `{_fmt_dt_local(item['dt'])}` ({_f1_tz_name()})\n"
-        f"⏳ In **{days}d {hrs}h {mins}m**"
+        f"🕒 <t:{unix_ts}:F> — <t:{unix_ts}:R>"
     )
 
 def _f1_reminder_cfg() -> Dict[str, Any]:
@@ -3227,7 +3369,7 @@ async def f1reminderleads(ctx, *, minutes: str):
     save_config(CFG)
     await ctx.send(f"✅ F1 reminder leads set to: `{', '.join(str(x) for x in leads)}` minutes.")
 
-@bot.command(name="circuit")
+@bot.hybrid_command(name="circuit")
 async def circuit(ctx, *, name: str):
     key, info = _circuit_lookup(name)
     if not info:
@@ -3244,16 +3386,42 @@ async def circuit(ctx, *, name: str):
         f"- Race distance: **{race_distance if race_distance is not None else '?'} km**"
     )
 
-@bot.command(name="driverstats", aliases=["driver"])
+async def _driver_name_autocomplete(interaction: discord.Interaction, current: str):
+    try:
+        rows = await _openf1_driver_standings_rows(limit=30)
+        cur = current.lower()
+        choices = []
+        for r in rows:
+            name = str(r.get("name") or "")
+            if cur in name.lower() or cur in str(r.get("code") or "").lower():
+                choices.append(discord.app_commands.Choice(name=name, value=name))
+        return choices[:25]
+    except Exception:
+        return []
+
+async def _team_name_autocomplete(interaction: discord.Interaction, current: str):
+    try:
+        rows = await _openf1_constructor_standings_rows(limit=20)
+        cur = current.lower()
+        return [
+            discord.app_commands.Choice(name=str(r.get("name") or ""), value=str(r.get("name") or ""))
+            for r in rows if cur in str(r.get("name") or "").lower()
+        ][:25]
+    except Exception:
+        return []
+
+@bot.hybrid_command(name="driverstats", aliases=["driver"])
+@commands.cooldown(1, 10, commands.BucketType.user)
+@discord.app_commands.autocomplete(query=_driver_name_autocomplete)
 async def driverstats(ctx, *, query: str):
     try:
         rows = await _openf1_driver_standings_rows(limit=30)
     except Exception as e:
         logging.error(f"[F1] driverstats failed: {e}")
-        return await ctx.send("Could not fetch driver standings from OpenF1.")
+        return await ctx.send("⚠️ Could not fetch driver standings right now. Try again shortly.")
 
     if not rows:
-        return await ctx.send("No driver standings available from OpenF1.")
+        return await ctx.send("ℹ️ No driver standings available yet.")
 
     q = _clean_text_key(query)
     match = None
@@ -3263,7 +3431,7 @@ async def driverstats(ctx, *, query: str):
             match = row
             break
     if not match:
-        return await ctx.send("Driver not found in current standings.")
+        return await ctx.send(f"❌ Driver `{query}` not found in current standings.")
 
     await ctx.send(
         f"**{match.get('name', 'Unknown')}** ({match.get('code') or match.get('driver_number') or '?'})\n"
@@ -3273,16 +3441,18 @@ async def driverstats(ctx, *, query: str):
         f"- Team: **{match.get('team', 'Unknown')}**"
     )
 
-@bot.command(name="teamstats", aliases=["team"])
+@bot.hybrid_command(name="teamstats", aliases=["team"])
+@commands.cooldown(1, 10, commands.BucketType.user)
+@discord.app_commands.autocomplete(query=_team_name_autocomplete)
 async def teamstats(ctx, *, query: str):
     try:
         rows = await _openf1_constructor_standings_rows(limit=20)
     except Exception as e:
         logging.error(f"[F1] teamstats failed: {e}")
-        return await ctx.send("Could not fetch constructor standings from OpenF1.")
+        return await ctx.send("⚠️ Could not fetch constructor standings right now. Try again shortly.")
 
     if not rows:
-        return await ctx.send("No constructor standings available from OpenF1.")
+        return await ctx.send("ℹ️ No constructor standings available yet.")
 
     q = _clean_text_key(query)
     match = None
@@ -3292,7 +3462,7 @@ async def teamstats(ctx, *, query: str):
             match = row
             break
     if not match:
-        return await ctx.send("Team not found in current standings.")
+        return await ctx.send(f"❌ Team `{query}` not found in current standings.")
 
     await ctx.send(
         f"**{match.get('name', 'Unknown Team')}**\n"
@@ -3300,7 +3470,8 @@ async def teamstats(ctx, *, query: str):
         f"- Points: **{match.get('points', '0')}**\n"
         f"- Wins: **{match.get('wins', 'N/A')}**"
     )
-@bot.command(name="h2h", aliases=["headtohead", "versus"])
+@bot.hybrid_command(name="h2h", aliases=["headtohead", "versus"])
+@commands.cooldown(1, 30, commands.BucketType.user)
 async def h2h(ctx, *, query: str):
     """Compare two F1 drivers head-to-head. E.g. !h2h verstappen norris"""
     import re as _re
@@ -3310,7 +3481,7 @@ async def h2h(ctx, *, query: str):
     else:
         words = query.split()
         if len(words) < 2:
-            return await ctx.send("Usage: `!h2h <driver1> <driver2>` — e.g. `!h2h verstappen norris`")
+            return await ctx.send("ℹ️ Usage: `!h2h <driver1> <driver2>` — e.g. `!h2h verstappen norris`")
         mid = max(1, len(words) // 2)
         q1, q2 = " ".join(words[:mid]), " ".join(words[mid:])
 
@@ -3318,10 +3489,10 @@ async def h2h(ctx, *, query: str):
         rows = await _openf1_driver_standings_rows(limit=0)
     except Exception as e:
         logging.error(f"[F1] h2h standings failed: {e}")
-        return await ctx.send("Could not fetch standings. Try again shortly.")
+        return await ctx.send("⚠️ Could not fetch standings. Try again shortly.")
 
     if not rows:
-        return await ctx.send("No driver standings available yet.")
+        return await ctx.send("ℹ️ No driver standings available yet.")
 
     def _find(q: str):
         qk = _clean_text_key(q)
@@ -3664,7 +3835,7 @@ def _lock_status_text(meta: Dict[str, Any], category: str) -> str:
         return f"⏳ Open — locks in {hours}h {minutes}m"
     return f"⏳ Open — locks in {minutes}m"
 
-@bot.command(name="mypredictions")
+@bot.hybrid_command(name="mypredictions")
 async def mypredictions(ctx):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3684,7 +3855,7 @@ async def mypredictions(ctx):
         sp_txt = " | ".join(str(x) for x in sprint_podium) if isinstance(sprint_podium, list) and sprint_podium else "—"
         lines.append(f"**Sprint Podium** {_lock_status_text(meta, 'sprint_podium')}: `{sp_txt}`")
         lines.append(f"**Sprint P8** {_lock_status_text(meta, 'sprint_p8')}: `{entry.get('sprint_p8') or '—'}`")
-    await ctx.send("\n".join(lines))
+    await ctx.send("\n".join(lines), ephemeral=True)
 
 @bot.command(name="predictions", aliases=["predicthelp"])
 async def predictions(ctx):
@@ -3957,7 +4128,7 @@ async def predresults(ctx, *, round_key: str = None):
         msg = msg[:1850] + "\n… (truncated)"
     await ctx.send(msg)
 
-@bot.command(name="prstats", aliases=["predstats", "myprstats"])
+@bot.hybrid_command(name="prstats", aliases=["predstats", "myprstats"])
 async def prstats(ctx, member: Optional[discord.Member] = None):
     """Show a user's prediction standings position and their best single-round score."""
     if ctx.guild is None:
@@ -3992,7 +4163,7 @@ async def prstats(ctx, member: Optional[discord.Member] = None):
         lines.append(f"⭐ Best round: **{best_round_name}** — **{best_round_pts} pts**")
     else:
         lines.append("⭐ Best round: no round scores recorded yet")
-    await ctx.send("\n".join(lines))
+    await ctx.send("\n".join(lines), ephemeral=True)
 
 @bot.command(name="predictionadjust", aliases=["predadjust"])
 @commands.has_permissions(administrator=True)
@@ -4295,6 +4466,15 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         logging.warning(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
         _record_alert("command_not_found", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=False)
+        return
+
+    if isinstance(error, commands.CommandOnCooldown):
+        retry = round(error.retry_after)
+        await ctx.send(f"⏳ You're doing that too fast. Try again in **{retry}s**.", ephemeral=True)
+        return
+
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"⚠️ Missing argument: `{error.param.name}`. Use `/help` or `!help` for usage.", ephemeral=True)
         return
 
     if isinstance(error, commands.CheckFailure):

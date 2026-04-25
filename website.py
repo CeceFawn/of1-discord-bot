@@ -68,7 +68,10 @@ OPENF1_BASE = "https://api.openf1.org/v1"
 PRE_HOURS  = 24
 POST_HOURS = 12
 
-_cache: dict = {}  # key -> (fetched_at, data)
+_cache: dict = {}        # openf1 key -> (fetched_at, data)
+_CACHE_TTL  = 300        # serve stale data until 5 minutes old, then re-fetch
+_FUNC_CACHE: dict = {}   # high-level function cache (next_race, member_counts, etc.)
+_FUNC_CACHE_TTL = 300    # 5 minutes
 
 # ----------------------------
 # OAuth token cache (mirrors bot's logic)
@@ -232,7 +235,11 @@ def _openf1_get(endpoint: str, params: dict) -> list:
     cached = _cache.get(cache_key)
     now_ts = time.time()
 
-    # Try a fresh fetch first
+    # Serve from cache if still fresh
+    if cached and now_ts - cached[0] < _CACHE_TTL:
+        return cached[1]
+
+    # Try a fresh fetch
     try:
         resp = requests.get(f"{OPENF1_BASE}/{endpoint}", params=params,
                             headers=_openf1_headers(), timeout=10)
@@ -244,7 +251,7 @@ def _openf1_get(endpoint: str, params: dict) -> list:
     except Exception:
         pass
 
-    # Fall back to cached data if available
+    # Fall back to stale cache if available
     if cached:
         return cached[1]
     return []
@@ -405,6 +412,15 @@ def get_current_race_weekend() -> dict | None:
     return None
 
 
+def _cached_call(key: str, fn):
+    entry = _FUNC_CACHE.get(key)
+    if entry and time.time() - entry[0] < _FUNC_CACHE_TTL:
+        return entry[1]
+    result = fn()
+    _FUNC_CACHE[key] = (time.time(), result)
+    return result
+
+
 def get_next_session() -> dict | None:
     """Return the next upcoming F1 session (any type) from OpenF1."""
     try:
@@ -499,9 +515,9 @@ def index():
     return render_template(
         "index.html",
         watch_party=watch_party,
-        next_race=get_next_race(),
-        next_session=get_next_session(),
-        member_counts=get_member_counts(),
+        next_race=_cached_call("next_race", get_next_race),
+        next_session=_cached_call("next_session", get_next_session),
+        member_counts=_cached_call("member_counts", get_member_counts),
         discord_invite=DISCORD_INVITE,
         instagram_url=INSTAGRAM_URL,
         twitter_url=TWITTER_URL,

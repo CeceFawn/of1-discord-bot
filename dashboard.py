@@ -28,6 +28,7 @@ from settings import LOG_PATH, STATE_PATH, RUNTIME_STATUS_PATH, RUNTIME_DB_PATH,
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GALLERY_DIR = os.path.join(BASE_DIR, "static", "gallery")
 F1_QUIZ_PATH = os.path.join(BASE_DIR, "f1_quiz.json")
+AUDIT_LOG_PATH = os.path.join(BASE_DIR, "audit.log")
 XP_STATE_PATH = os.path.join(BASE_DIR, "xp_state.json")
 SCHEDULED_MSGS_PATH = os.path.join(BASE_DIR, "scheduled_messages.json")
 _DISCORD_BOT_TOKEN_LOCAL = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
@@ -147,6 +148,22 @@ def _get_last_action():
     with _LAST_ACTION_LOCK:
         return dict(_LAST_ACTION)
 
+
+def _audit_log(action: str, detail: str = "") -> None:
+    try:
+        user = session.get("dash_user", "unknown")
+    except Exception:
+        user = "system"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    line = f"[{ts}] {user} | {action}"
+    if detail:
+        line += f" | {detail}"
+    try:
+        with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
 # ----------------------------
 # Auth config
 # ----------------------------
@@ -158,6 +175,7 @@ _https = (os.getenv("DASHBOARD_HTTPS", "false").strip().lower() in ("1", "true",
 app.config["SESSION_COOKIE_SECURE"]   = _https
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
 
 RAW_USERS = (os.getenv("DASHBOARD_USERS_JSON") or "{}").strip()
 try:
@@ -168,7 +186,7 @@ try:
         raise ValueError("must map usernames to bcrypt hash strings")
 except Exception as e:
     raise RuntimeError(f"DASHBOARD_USERS_JSON is not valid JSON: {e}")
-PASSWORD_LOGIN_ENABLED = bool(DASH_USERS)
+PASSWORD_LOGIN_ENABLED = False  # Discord OAuth only
 
 DISCORD_CLIENT_ID = (os.getenv("DASHBOARD_DISCORD_CLIENT_ID") or "").strip()
 DISCORD_CLIENT_SECRET = (os.getenv("DASHBOARD_DISCORD_CLIENT_SECRET") or "").strip()
@@ -294,6 +312,21 @@ def _csrf_protect():
     if not token or not expected or not hmac.compare_digest(token, expected):
         abort(400)
 
+
+_QUIZ_UNDO_ENDPOINTS = {
+    "quiz_mgr", "quiz_mgr_delete", "quiz_mgr_delete_bulk",
+    "quiz_mgr_undo", "quiz_mgr_add", "quiz_mgr_edit",
+    "quiz_mgr_clear_filter", "quiz_mgr_import", "static",
+}
+
+@app.before_request
+def _clear_quiz_undo_on_navigate():
+    if session.get("quiz_undo_data") and request.endpoint not in _QUIZ_UNDO_ENDPOINTS:
+        session.pop("quiz_undo_data", None)
+        session.pop("quiz_undo_type", None)
+        session.pop("quiz_undo_idx", None)
+        session.pop("quiz_undo_indices", None)
+
 # ----------------------------
 # UI helpers
 # ----------------------------
@@ -302,7 +335,7 @@ BASE_TEMPLATE = """
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>OF1 Dashboard</title>
+  <title>{{ page_title }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
   <meta name="csrf-token" content="{{ csrf_token }}">
@@ -340,9 +373,14 @@ BASE_TEMPLATE = """
         <div class="font-extrabold text-white text-lg leading-none">OF1</div>
         <div class="text-xs text-gray-500">Dashboard</div>
       </div>
-      {% if bot_name %}
-        <div class="ml-auto text-xs text-gray-600 truncate max-w-[80px]" title="{{ bot_name }}">{{ bot_name }}</div>
-      {% endif %}
+      <div class="ml-auto flex items-center gap-1.5">
+        {% if bot_ok is not none %}
+          <span class="inline-block w-2 h-2 rounded-full {% if bot_ok %}bg-green-500{% else %}bg-red-500{% endif %}" title="Bot {% if bot_ok %}running{% else %}stopped{% endif %}"></span>
+        {% endif %}
+        {% if bot_name %}
+          <span class="text-xs text-gray-600 truncate max-w-[80px]" title="{{ bot_name }}">{{ bot_name }}</span>
+        {% endif %}
+      </div>
     </div>
 
     <!-- Nav links -->
@@ -375,6 +413,13 @@ BASE_TEMPLATE = """
           <path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
         </svg>
         OpenF1 Health
+      </a>
+      <a href="{{ url_for('audit_log') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Audit Log
       </a>
 
       <p class="px-3 pt-3 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Community</p>
@@ -601,6 +646,23 @@ BASE_TEMPLATE = """
 def _escape(s: str) -> str:
     return s.replace("<", "&lt;").replace(">", "&gt;")
 
+_SECTION_TITLES = {
+    "logs": "Logs",
+    "status": "Status",
+    "cmd_log": "Command Log",
+    "openf1_health": "OpenF1 Health",
+    "watch_party_editor": "Watch Party",
+    "discord_events": "Discord Events",
+    "gallery_mgr": "Gallery",
+    "member_stats": "Member Stats",
+    "quiz_mgr": "Quiz Manager",
+    "xp_mgr": "XP Manager",
+    "announce": "Announce",
+    "schedule_msgs": "Schedule",
+    "race_live": "Race Live",
+    "audit_log": "Audit Log",
+}
+
 def _render(body: str, flash: str = ""):
     bot_name = None
     try:
@@ -609,15 +671,28 @@ def _render(body: str, flash: str = ""):
     except Exception:
         bot_name = None
 
+    try:
+        section = _SECTION_TITLES.get(request.endpoint or "", "")
+    except Exception:
+        section = ""
+    page_title = f"OF1 Dashboard — {section}" if section else "OF1 Dashboard"
+
+    try:
+        bot_ok, _ = _service_is_active(BOT_SYSTEMD_SERVICE)
+    except Exception:
+        bot_ok = None
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return render_template_string(
         BASE_TEMPLATE,
         body=body,
         flash=flash,
         bot_name=bot_name,
+        bot_ok=bot_ok,
         now=now,
         csrf_input=_csrf_input(),
         csrf_token=_csrf_token(),
+        page_title=page_title,
     )
 
 def _build_logs_view_data(tail_n: int, show_filtered: bool) -> dict:
@@ -1047,6 +1122,7 @@ def login():
 
             if valid_login:
                 _clear_attempts()
+                session.permanent = True
                 session["dash_user"] = username
                 return redirect(url_for("logs"))
             _record_attempt()
@@ -1187,6 +1263,7 @@ def discord_oauth_callback():
     if discord_user_id not in DISCORD_ALLOWED_USER_IDS:
         return render_template_string("<html><body style='background:#111;color:#eee;font-family:system-ui;padding:30px;'>Discord account not allowlisted for dashboard access.<br><a style='color:#9cf;' href='{{ url_for(\"login\") }}'>Back to login</a></body></html>"), 403
 
+    session.permanent = True
     session["dash_user"] = f"{display} (Discord)"
     session["dash_auth_method"] = "discord"
     session["discord_user_id"] = discord_user_id
@@ -1256,6 +1333,12 @@ def logs():
         + '</div>'
         + f"<div id='lastActionBox'>{data['last_html']}</div>"
         + f"<div id='deployStatusBox'>{data.get('deploy_html','')}</div>"
+        + """<div class="flex items-center gap-2">
+          <input id="logSearch" type="text" placeholder="Filter log lines…"
+            class="w-56 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />
+          <span id="logMatchCount" class="text-xs text-gray-600"></span>
+          <button id="logSearchClear" type="button" class="text-xs text-gray-600 hover:text-gray-300 hidden">&#x2715; Clear</button>
+        </div>"""
         + f"<pre id='liveLogsPre' class='text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] border border-[#222] rounded-xl p-4 overflow-x-auto max-h-[70vh] overflow-y-auto'>{data['safe_logs']}</pre>"
         + "</div>"
         + """
@@ -1264,7 +1347,35 @@ def logs():
             const pre = document.getElementById('liveLogsPre');
             const lastBox = document.getElementById('lastActionBox');
             const deployBox = document.getElementById('deployStatusBox');
-            if (!pre || !lastBox || !deployBox) return;
+            const searchInput = document.getElementById('logSearch');
+            const matchCount = document.getElementById('logMatchCount');
+            const clearBtn = document.getElementById('logSearchClear');
+            if (!pre) return;
+
+            // --- Log keyword filter ---
+            let rawLines = null;
+            function applyFilter() {
+              if (!rawLines) rawLines = pre.textContent.split('\\n');
+              const kw = (searchInput ? searchInput.value : '').toLowerCase();
+              if (!kw) {
+                pre.textContent = rawLines.join('\\n');
+                if (matchCount) matchCount.textContent = '';
+                if (clearBtn) clearBtn.classList.add('hidden');
+                return;
+              }
+              if (clearBtn) clearBtn.classList.remove('hidden');
+              const filtered = rawLines.filter(l => l.toLowerCase().includes(kw));
+              pre.textContent = filtered.join('\\n');
+              if (matchCount) matchCount.textContent = filtered.length + ' line' + (filtered.length !== 1 ? 's' : '');
+            }
+            if (searchInput) {
+              searchInput.addEventListener('input', applyFilter);
+              searchInput.addEventListener('keydown', function(e){ if(e.key==='Escape'){searchInput.value='';applyFilter();} });
+            }
+            if (clearBtn) clearBtn.addEventListener('click', function(){ searchInput.value=''; applyFilter(); });
+
+            // --- Live polling ---
+            if (!lastBox || !deployBox) return;
             const url = new URL(window.location.href);
             url.searchParams.set('ajax', '1');
             let inFlight = false;
@@ -1277,17 +1388,14 @@ def logs():
                 if (!res.ok) return;
                 const data = await res.json();
                 if (typeof data.safe_logs === 'string') {
+                  rawLines = null; // reset cached lines on new data
                   pre.innerHTML = data.safe_logs;
-                  if (wasNearBottom) pre.scrollTop = pre.scrollHeight;
+                  applyFilter();
+                  if (wasNearBottom && !(searchInput && searchInput.value)) pre.scrollTop = pre.scrollHeight;
                 }
-                if (typeof data.last_html === 'string') {
-                  lastBox.innerHTML = data.last_html;
-                }
-                if (typeof data.deploy_html === 'string') {
-                  deployBox.innerHTML = data.deploy_html;
-                }
+                if (typeof data.last_html === 'string') lastBox.innerHTML = data.last_html;
+                if (typeof data.deploy_html === 'string') deployBox.innerHTML = data.deploy_html;
               } catch (_err) {
-                // ignore transient polling errors
               } finally {
                 inFlight = false;
               }
@@ -1660,6 +1768,7 @@ def bot_action(action: str):
         if not state_ok:
             combined = (combined + "\n" if combined else "") + f"Expected active={expected_active}, got active={is_active}"
         _set_last_action(action, final_ok, combined or ("OK" if final_ok else "FAILED"))
+        _audit_log(f"bot_{action}", f"ok={final_ok}")
         return redirect(url_for("logs"))
 
     # deploy actions: run in background so the request returns quickly
@@ -1679,6 +1788,7 @@ def bot_action(action: str):
     t = threading.Thread(target=_deploy_worker, kwargs={"target": target}, daemon=True, name=f"dashboard-deploy-{target}-worker")
     t.start()
     _set_last_action(f"deploy_{target}", True, f"Deploy started in background (thread={t.name}). Refresh Logs in a few seconds.")
+    _audit_log(f"deploy_{target}")
     return redirect(url_for("logs"))
 
 # Backwards-compat route name (your old template called /restart)
@@ -2954,6 +3064,7 @@ def gallery_mgr_upload():
         dest = os.path.join(GALLERY_DIR, safe)
         f.save(dest)
         saved += 1
+    _audit_log("gallery_upload", f"count={saved}")
     return redirect(url_for("gallery_mgr"))
 
 
@@ -2966,6 +3077,7 @@ def gallery_mgr_delete():
         ext = os.path.splitext(fname)[1].lower()
         if ext in _GALLERY_ALLOWED_EXT and os.path.isfile(target):
             os.remove(target)
+            _audit_log("gallery_delete", fname)
     return redirect(url_for("gallery_mgr"))
 
 
@@ -3034,6 +3146,33 @@ def quiz_mgr():
         'rounded-lg px-3 py-1.5 hover:bg-[#222] hover:text-gray-200">&#x2715; Clear Filter</a>'
     ) if any_filter else ""
 
+    # Undo bar
+    undo_data = session.get("quiz_undo_data")
+    undo_type = session.get("quiz_undo_type", "single")
+    if undo_data:
+        if undo_type == "bulk":
+            n = len(undo_data) if isinstance(undo_data, list) else 1
+            undo_label = f"{n} question{'s' if n != 1 else ''}"
+        else:
+            q_preview = (undo_data.get("q", "") if isinstance(undo_data, dict) else "question")[:50]
+            undo_label = f"“{q_preview}”"
+        undo_bar = (
+            f'<div class="flex items-center gap-3 bg-[#0d0d1a] border border-[#2a2a50] rounded-xl px-4 py-2.5">'
+            f'<span class="text-sm text-gray-300">Deleted {_escape(undo_label)}</span>'
+            f'<form method="post" action="/quiz_mgr/undo" class="inline">{_csrf_input()}'
+            f'<button class="text-sm text-blue-400 hover:text-blue-300 font-medium ml-2 underline underline-offset-2">Undo</button>'
+            f'</form>'
+            f'</div>'
+        )
+    else:
+        undo_bar = ""
+
+    # Import flash message
+    import_flash = session.pop("quiz_import_flash", "")
+    import_flash_html = (
+        f'<div class="bg-[#111] border border-[#222] rounded-xl px-4 py-2.5 text-sm">{import_flash}</div>'
+    ) if import_flash else ""
+
     rows = ""
     csrf = _csrf_input()
     for i, q in enumerate(questions):
@@ -3050,14 +3189,14 @@ def quiz_mgr():
             f'<tr class="border-b border-[#1a1a1a] hover:bg-[#0d0d0d]" id="qrow_{idx}">'
             f'<td class="px-3 py-2"><input type="checkbox" class="q-select accent-blue-500 w-4 h-4 cursor-pointer" value="{idx}" /></td>'
             f'<td class="px-3 py-2 text-sm text-gray-200">{_escape(q.get("q",""))}</td>'
-            f'<td class="px-3 py-2 text-xs text-gray-400">{_escape(ans[:80])}</td>'
-            f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("category",""))}</td>'
-            f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(q.get("difficulty",""))}</td>'
+            f'<td class="hidden md:table-cell px-3 py-2 text-xs text-gray-400">{_escape(ans[:80])}</td>'
+            f'<td class="hidden sm:table-cell px-3 py-2 text-xs text-gray-500">{_escape(q.get("category",""))}</td>'
+            f'<td class="hidden sm:table-cell px-3 py-2 text-xs text-gray-500">{_escape(q.get("difficulty",""))}</td>'
             f'<td class="px-3 py-2 whitespace-nowrap">'
             f'<button type="button" onclick="toggleEdit({idx})" class="text-xs text-blue-400 hover:text-blue-300 mr-2">Edit</button>'
-            f'<form method="post" action="/quiz_mgr/delete" onsubmit="return confirm(\'Delete this question?\')" class="inline">'
+            f'<form method="post" action="/quiz_mgr/delete" class="inline">'
             f'{csrf}<input type="hidden" name="idx" value="{idx}" />'
-            f'<button class="text-xs text-red-400 hover:text-red-300">Delete</button>'
+            f'<button type="button" onclick="confirmSingleDelete(this)" class="text-xs text-red-400 hover:text-red-300">Delete</button>'
             f'</form>'
             f'</td>'
             f'</tr>'
@@ -3068,9 +3207,9 @@ def quiz_mgr():
             f'<textarea name="question" rows="2" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 resize-none w-full">{_escape(q.get("q",""))}</textarea>'
             f'<input name="answers" value="{_escape(ans)}" placeholder="Answers (comma-separated)"'
             f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 w-full" />'
-            f'<div class="flex gap-2">'
+            f'<div class="flex gap-2 flex-wrap">'
             f'<input name="category" value="{_escape(q.get("category",""))}" placeholder="Category"'
-            f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 flex-1" />'
+            f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 flex-1 min-w-[120px]" />'
             f'<select name="difficulty" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600">{diff_opts_edit}</select>'
             f'<button class="bg-blue-700 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors">Save</button>'
             f'<button type="button" onclick="toggleEdit({idx})" class="text-sm text-gray-500 hover:text-gray-300 px-3 py-2">Cancel</button>'
@@ -3081,16 +3220,31 @@ def quiz_mgr():
         )
 
     body = f"""
+    <!-- Confirm modal -->
+    <div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div class="bg-[#111] border border-[#333] rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+        <h2 class="text-white font-semibold text-base mb-2" id="modal-title">Confirm delete</h2>
+        <p class="text-gray-400 text-sm mb-5" id="modal-body">Are you sure?</p>
+        <div class="flex gap-3 justify-end">
+          <button id="modal-cancel" class="text-sm text-gray-400 hover:text-white px-4 py-2 rounded-lg hover:bg-[#1a1a1a]">Cancel</button>
+          <button id="modal-confirm" class="text-sm bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <div class="space-y-4 max-w-5xl">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <h1 class="text-xl font-bold text-white">Quiz Manager</h1>
         <span class="text-xs text-gray-500">{len(questions)} questions · {len(shown)} shown</span>
       </div>
 
+      {undo_bar}
+      {import_flash_html}
+
       <!-- Filters -->
       <form method="get" class="flex gap-2 flex-wrap items-end">
         <input name="q" value="{_escape(q_filter)}" placeholder="Search question…"
-               class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 w-56 focus:outline-none focus:border-gray-500" />
+               class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 w-48 sm:w-56 focus:outline-none focus:border-gray-500" />
         <select name="cat" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500">
           <option value="">All categories</option>{cat_opts}
         </select>
@@ -3102,12 +3256,12 @@ def quiz_mgr():
       </form>
 
       <!-- Bulk action bar (shown when checkboxes are selected) -->
-      <div id="bulk-bar" class="hidden items-center gap-3 bg-[#111] border border-[#333] rounded-xl px-4 py-2.5">
+      <div id="bulk-bar" class="hidden items-center gap-3 bg-[#111] border border-[#333] rounded-xl px-4 py-2.5 flex-wrap">
         <span id="bulk-count" class="text-sm text-gray-300 font-medium">0 selected</span>
-        <form id="bulk-delete-form" method="post" action="/quiz_mgr/delete_bulk" onsubmit="return confirmBulkDelete()">
+        <form id="bulk-delete-form" method="post" action="/quiz_mgr/delete_bulk">
           {_csrf_input()}
           <div id="bulk-indices"></div>
-          <button class="bg-red-800 hover:bg-red-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors">Delete Selected</button>
+          <button type="button" id="bulk-delete-btn" class="bg-red-800 hover:bg-red-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors">Delete Selected</button>
         </form>
         <button type="button" onclick="clearSelection()" class="text-sm text-gray-500 hover:text-gray-300">Deselect All</button>
       </div>
@@ -3122,9 +3276,9 @@ def quiz_mgr():
                       class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 resize-none w-full"></textarea>
             <input name="answers" placeholder="Answers (comma-separated)" required
                    class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 w-full" />
-            <div class="flex gap-2">
+            <div class="flex gap-2 flex-wrap">
               <input name="category" placeholder="Category (e.g. circuits)"
-                     class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 flex-1" />
+                     class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 flex-1 min-w-[120px]" />
               <select name="difficulty" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">
                 <option value="easy">Easy</option>
                 <option value="medium">Medium</option>
@@ -3136,15 +3290,27 @@ def quiz_mgr():
         </form>
       </details>
 
+      <!-- Import questions -->
+      <details class="bg-[#111] border border-[#222] rounded-xl">
+        <summary class="px-4 py-3 text-sm text-gray-300 cursor-pointer select-none font-medium">⬆ Import Questions (JSON)</summary>
+        <form method="post" action="/quiz_mgr/import" enctype="multipart/form-data" class="p-4 space-y-3 border-t border-[#222]">
+          {_csrf_input()}
+          <p class="text-xs text-gray-500">Upload a JSON file — an array of objects with <code class="font-mono bg-[#1a1a1a] px-1 rounded">q</code>, <code class="font-mono bg-[#1a1a1a] px-1 rounded">answers</code>, and optionally <code class="font-mono bg-[#1a1a1a] px-1 rounded">category</code> and <code class="font-mono bg-[#1a1a1a] px-1 rounded">difficulty</code> keys.</p>
+          <input type="file" name="quiz_file" accept=".json"
+                 class="text-sm text-gray-400 file:bg-[#1a1a1a] file:border file:border-[#333] file:text-gray-300 file:text-xs file:px-3 file:py-1.5 file:rounded-lg file:mr-3 file:cursor-pointer" />
+          <button class="bg-[#1a3a5c] hover:bg-[#1e4a7a] text-white text-sm px-4 py-2 rounded-lg transition-colors">Import</button>
+        </form>
+      </details>
+
       <!-- Table -->
       <div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">
         <table class="w-full text-left">
           <thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">
             <th class="px-3 py-2"><input type="checkbox" id="select-all" class="accent-blue-500 w-4 h-4 cursor-pointer" title="Select all visible" /></th>
             <th class="px-3 py-2">Question</th>
-            <th class="px-3 py-2">Answers</th>
-            <th class="px-3 py-2">Category</th>
-            <th class="px-3 py-2">Difficulty</th>
+            <th class="hidden md:table-cell px-3 py-2">Answers</th>
+            <th class="hidden sm:table-cell px-3 py-2">Category</th>
+            <th class="hidden sm:table-cell px-3 py-2">Difficulty</th>
             <th class="px-3 py-2"></th>
           </tr></thead>
           <tbody>{rows or '<tr><td colspan="6" class="px-3 py-4 text-gray-500 text-sm">No questions match.</td></tr>'}</tbody>
@@ -3187,9 +3353,44 @@ def quiz_mgr():
       updateBulkBar();
     }}
 
-    function confirmBulkDelete() {{
-      const n = document.querySelectorAll('.q-select:checked').length;
-      return confirm('Delete ' + n + ' question' + (n !== 1 ? 's' : '') + '? This cannot be undone.');
+    // --- Confirm modal ---
+    const modal = document.getElementById('confirm-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalBody = document.getElementById('modal-body');
+    const modalConfirm = document.getElementById('modal-confirm');
+    const modalCancel = document.getElementById('modal-cancel');
+    let _pendingAction = null;
+
+    function showModal(title, body, onConfirm) {{
+      modalTitle.textContent = title;
+      modalBody.textContent = body;
+      _pendingAction = onConfirm;
+      modal.classList.remove('hidden');
+    }}
+    if (modalCancel) modalCancel.addEventListener('click', function() {{ modal.classList.add('hidden'); _pendingAction = null; }});
+    if (modal) modal.addEventListener('click', function(e) {{ if (e.target === modal) {{ modal.classList.add('hidden'); _pendingAction = null; }} }});
+    if (modalConfirm) modalConfirm.addEventListener('click', function() {{
+      modal.classList.add('hidden');
+      if (_pendingAction) _pendingAction();
+      _pendingAction = null;
+    }});
+    document.addEventListener('keydown', function(e) {{ if (e.key === 'Escape') {{ modal.classList.add('hidden'); _pendingAction = null; }} }});
+
+    function confirmSingleDelete(btn) {{
+      const form = btn.closest('form');
+      showModal('Delete question?', 'This will be deleted — you can undo immediately after.', function() {{ form.submit(); }});
+    }}
+
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    if (bulkDeleteBtn) {{
+      bulkDeleteBtn.addEventListener('click', function() {{
+        const n = document.querySelectorAll('.q-select:checked').length;
+        showModal(
+          'Delete ' + n + ' question' + (n !== 1 ? 's' : '') + '?',
+          'These will be deleted — you can undo immediately after.',
+          function() {{ document.getElementById('bulk-delete-form').submit(); }}
+        );
+      }});
     }}
 
     const selectAll = document.getElementById('select-all');
@@ -3228,6 +3429,7 @@ def quiz_mgr_add():
         qs = _load_quiz()
         qs.append({"q": question, "answers": answers, "category": category, "difficulty": difficulty})
         _save_quiz(qs)
+        _audit_log("quiz_add", f"q={question[:60]!r}")
     return redirect(url_for("quiz_mgr"))
 
 
@@ -3246,6 +3448,7 @@ def quiz_mgr_edit():
             if 0 <= idx < len(qs):
                 qs[idx] = {"q": question, "answers": answers, "category": category, "difficulty": difficulty}
                 _save_quiz(qs)
+                _audit_log("quiz_edit", f"idx={idx} q={question[:60]!r}")
     except Exception:
         pass
     return redirect(url_for("quiz_mgr"))
@@ -3259,8 +3462,36 @@ def quiz_mgr_delete():
         idx = int(request.form.get("idx", -1))
         qs = _load_quiz()
         if 0 <= idx < len(qs):
-            qs.pop(idx)
+            removed = qs.pop(idx)
             _save_quiz(qs)
+            _audit_log("quiz_delete", f"idx={idx} q={str(removed.get('q',''))[:60]!r}")
+            session["quiz_undo_type"] = "single"
+            session["quiz_undo_data"] = removed
+            session["quiz_undo_idx"] = idx
+    except Exception:
+        pass
+    return redirect(url_for("quiz_mgr"))
+
+
+@app.route("/quiz_mgr/undo", methods=["POST"])
+@login_required
+def quiz_mgr_undo():
+    _csrf_protect()
+    undo_type = session.pop("quiz_undo_type", None)
+    undo_data = session.pop("quiz_undo_data", None)
+    session.pop("quiz_undo_idx", None)
+    session.pop("quiz_undo_indices", None)
+    try:
+        if undo_type == "single" and isinstance(undo_data, dict) and undo_data.get("q"):
+            qs = _load_quiz()
+            qs.append(undo_data)
+            _save_quiz(qs)
+            _audit_log("quiz_undo_single")
+        elif undo_type == "bulk" and isinstance(undo_data, list):
+            qs = _load_quiz()
+            qs.extend(q for q in undo_data if isinstance(q, dict) and q.get("q"))
+            _save_quiz(qs)
+            _audit_log("quiz_undo_bulk", f"count={len(undo_data)}")
     except Exception:
         pass
     return redirect(url_for("quiz_mgr"))
@@ -3281,16 +3512,48 @@ def quiz_mgr_delete_bulk():
     _csrf_protect()
     try:
         raw = request.form.getlist("idx")
-        # Sort descending so popping by index doesn't shift remaining indices
         indices = sorted({int(x) for x in raw if x.isdigit()}, reverse=True)
         if indices:
             qs = _load_quiz()
+            removed = []
             for idx in indices:
                 if 0 <= idx < len(qs):
-                    qs.pop(idx)
+                    removed.append(qs.pop(idx))
             _save_quiz(qs)
+            _audit_log("quiz_delete_bulk", f"count={len(removed)}")
+            session["quiz_undo_type"] = "bulk"
+            session["quiz_undo_data"] = list(reversed(removed))
     except Exception:
         pass
+    return redirect(url_for("quiz_mgr"))
+
+
+@app.route("/quiz_mgr/import", methods=["POST"])
+@login_required
+def quiz_mgr_import():
+    _csrf_protect()
+    flash_msg = ""
+    f = request.files.get("quiz_file")
+    if not f or not f.filename:
+        flash_msg = "No file selected."
+    else:
+        try:
+            raw = json.load(f)
+            if isinstance(raw, dict) and isinstance(raw.get("questions"), list):
+                raw = raw["questions"]
+            if not isinstance(raw, list):
+                raise ValueError("Expected a JSON array")
+            valid = [q for q in raw if isinstance(q, dict) and q.get("q") and q.get("answers")]
+            if not valid:
+                raise ValueError("No valid questions found (each needs 'q' and 'answers')")
+            qs = _load_quiz()
+            qs.extend(valid)
+            _save_quiz(qs)
+            _audit_log("quiz_import", f"count={len(valid)}")
+            flash_msg = f"✅ Imported {len(valid)} question{'s' if len(valid) != 1 else ''}."
+        except Exception as e:
+            flash_msg = f"❌ Import failed: {_escape(str(e))}"
+    session["quiz_import_flash"] = flash_msg
     return redirect(url_for("quiz_mgr"))
 
 
@@ -3544,6 +3807,7 @@ def announce():
         if channel_id and content:
             ok, msg = _discord_send_message(channel_id, content)
             flash_msg = f'{"✅" if ok else "❌"} {_escape(msg)}'
+            _audit_log("announce", f"channel={channel_id} ok={ok} len={len(content)}")
         else:
             flash_msg = "❌ Channel and message are required."
 
@@ -3951,6 +4215,44 @@ def openf1_health():
       <p class="text-xs text-gray-600">Trace window resets every 60 seconds — counters reflect the current window only.</p>
     </div>
     <script>setTimeout(() => location.reload(), 20000);</script>
+    """
+    return _render(body)
+
+
+# ─────────────────────────────────────────────────────────────
+# Audit Log viewer
+# ─────────────────────────────────────────────────────────────
+@app.route("/audit_log")
+@login_required
+def audit_log():
+    tail = request.args.get("tail", "200")
+    try:
+        tail_n = max(50, min(2000, int(tail)))
+    except Exception:
+        tail_n = 200
+    try:
+        with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-tail_n:]
+        safe = _escape("".join(lines))
+    except FileNotFoundError:
+        safe = "No audit log yet — actions will appear here after the first admin action."
+    except Exception as e:
+        safe = f"Unable to read audit log: {_escape(str(e))}"
+
+    body = f"""
+    <div class="space-y-4 max-w-4xl">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <h1 class="text-xl font-bold text-white">Audit Log</h1>
+        <form method="get" class="flex items-center gap-2">
+          <label class="text-xs text-gray-500">Lines</label>
+          <input name="tail" value="{tail_n}"
+            class="w-20 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />
+          <button class="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 text-sm rounded-lg px-4 py-1.5 hover:bg-[#222]">Apply</button>
+        </form>
+      </div>
+      <p class="text-xs text-gray-600">Records every admin action: quiz edits, deploys, gallery changes, announcements.</p>
+      <pre class="text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] border border-[#222] rounded-xl p-4 overflow-x-auto max-h-[75vh] overflow-y-auto">{safe}</pre>
+    </div>
     """
     return _render(body)
 
