@@ -2303,10 +2303,10 @@ def wp_autofill_f1():
         race_name = next_race.get("raceName", "")
         date_str = next_race.get("date", "")
         time_str = (next_race.get("time") or "").rstrip("Z")
-        # Format date/time for display
+        # Format date/time for display — watch party starts 1 hour before race
         try:
-            from datetime import datetime as _dt
-            dt = _dt.fromisoformat(f"{date_str}T{time_str}+00:00")
+            from datetime import datetime as _dt, timedelta
+            dt = _dt.fromisoformat(f"{date_str}T{time_str}+00:00") - timedelta(hours=1)
             date_display = dt.strftime("%-m/%-d/%Y")
             time_display = dt.strftime("%-I:%M %p UTC")
             datetime_utc = dt.strftime("%Y-%m-%dT%H:%M")
