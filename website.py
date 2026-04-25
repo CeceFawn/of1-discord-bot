@@ -511,18 +511,20 @@ def index():
     # field (title, date, time) in the JSON takes priority over the auto value,
     # so you can override just the fields you need.
     if not watch_party.get("override"):
+        has_dt_utc = bool(watch_party.get("datetime_utc"))
         race = get_current_race_weekend()
         if race:
             watch_party["active"] = True
             if not watch_party.get("title"):
                 watch_party["title"] = f"{race['race_name']} Watch Party"
-            if not watch_party.get("date") and race.get("date_display"):
-                watch_party["date"] = race["date_display"]
-            if not watch_party.get("time"):
-                if race.get("time_display"):
-                    watch_party["time"] = race["time_display"]
-                else:
-                    watch_party.pop("time", None)
+            if not has_dt_utc:
+                if not watch_party.get("date") and race.get("date_display"):
+                    watch_party["date"] = race["date_display"]
+                if not watch_party.get("time"):
+                    if race.get("time_display"):
+                        watch_party["time"] = race["time_display"]
+                    else:
+                        watch_party.pop("time", None)
 
     return render_template(
         "index.html",

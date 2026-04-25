@@ -249,16 +249,26 @@
         </div>
         <h2 class="text-2xl font-bold mb-2">{{ watch_party.get('title', 'Watch Party') }}</h2>
         <div class="flex flex-wrap gap-4 mt-4 text-sm text-white/60">
+          {% if watch_party.get('datetime_utc') %}
+          <div class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            <span class="wp-utc-date" data-wp-utc="{{ watch_party.datetime_utc }}"></span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span class="wp-utc-time" data-wp-utc="{{ watch_party.datetime_utc }}"></span>
+          </div>
+          {% else %}
           {% if watch_party.get('date') %}
           <div class="flex items-center gap-1.5">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>
-            {% if next_race and next_race.date_iso %}
-            <span data-localdate="{{ next_race.date_iso }}">{{ watch_party.date }}</span>
-            {% else %}
             {{ watch_party.date }}
-            {% endif %}
           </div>
           {% endif %}
           {% if watch_party.get('time') %}
@@ -268,6 +278,7 @@
             </svg>
             {{ watch_party.time }}
           </div>
+          {% endif %}
           {% endif %}
           {% if watch_party.get('location') %}
           <div class="flex items-start gap-1.5">
@@ -625,6 +636,22 @@
         el.textContent = new Date(el.dataset.localdate).toLocaleDateString(
           undefined, {weekday:'short', month:'long', day:'numeric'}
         );
+      } catch(e) {}
+    });
+
+    // Watch party UTC datetime → viewer's local timezone
+    document.querySelectorAll('[data-wp-utc]').forEach(function(el) {
+      try {
+        var raw = el.dataset.wpUtc;
+        // datetime-local values have no timezone; append Z to treat as UTC
+        if (raw && !raw.endsWith('Z') && !raw.includes('+')) raw = raw + 'Z';
+        var dt = new Date(raw);
+        if (isNaN(dt.getTime())) return;
+        if (el.classList.contains('wp-utc-date')) {
+          el.textContent = dt.toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'});
+        } else if (el.classList.contains('wp-utc-time')) {
+          el.textContent = dt.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit', timeZoneName:'short'});
+        }
       } catch(e) {}
     });
   </script>

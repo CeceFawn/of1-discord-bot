@@ -1904,7 +1904,7 @@ def _save_wp(data: dict) -> None:
     os.replace(tmp, WATCH_PARTY_PATH)
 
 # Auto-filled fields that have a Reset button (clears to "" to let auto-detect take over)
-_AUTO_FIELDS = {"title", "date", "time"}
+_AUTO_FIELDS = {"title", "date", "time", "datetime_utc"}
 # Fields that are always manual (no reset)
 _MANUAL_FIELDS = {"details", "location"}
 
@@ -1920,6 +1920,10 @@ def watch_party_editor():
     active_venues = set(wp.get("_active_venues") or [])
     override = bool(wp.get("override"))
     wp_active = bool(wp.get("active", True))
+
+    # Build datetime-local input value from stored UTC string (YYYY-MM-DDTHH:MM)
+    raw_dt_utc = str(wp.get("datetime_utc") or "")
+    wp_dt_utc_input = raw_dt_utc[:16].replace(" ", "T") if raw_dt_utc and "T" in raw_dt_utc else ""
 
     def _val(k):
         return _escape(str(wp.get(k) or ""))
@@ -2014,8 +2018,20 @@ def watch_party_editor():
           </button>
         </div>
         {_field_row("Title", "title", auto=True)}
-        {_field_row("Date", "date", auto=True)}
-        {_field_row("Time", "time", auto=True)}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <label style="width:70px;color:#aaa;font-size:13px;">Date &amp; Time</label>
+          <input id="wp_datetime_utc" type="datetime-local" value="{wp_dt_utc_input}"
+            style="flex:1;min-width:200px;background:#000;color:#eee;border:1px solid #333;padding:7px 10px;border-radius:8px;font-size:14px;" />
+          <span style="color:#555;font-size:11px;white-space:nowrap;">UTC</span>
+          <button type="button" onclick="wpSaveDatetime()"
+            style="background:#1f6f3f;color:#fff;border:1px solid #2a8f52;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">
+            Save
+          </button>
+          <button type="button" onclick="wpResetDatetime()"
+            style="background:#222;color:#aaa;border:1px solid #444;padding:5px 10px;border-radius:8px;cursor:pointer;white-space:nowrap;">
+            Reset
+          </button>
+        </div>
       </div>
 
       <!-- Manual fields -->
@@ -2112,6 +2128,22 @@ def watch_party_editor():
           }} catch(e) {{ toast('Request failed.', false); }}
         }};
 
+        window.wpSaveDatetime = async function() {{
+          const val = document.getElementById('wp_datetime_utc').value;
+          try {{
+            const d = await post('/watch_party/field', {{ field: 'datetime_utc', value: val }});
+            toast(d.ok ? 'Date & time saved (UTC).' : ('Error: ' + d.error), d.ok);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
+        window.wpResetDatetime = async function() {{
+          document.getElementById('wp_datetime_utc').value = '';
+          try {{
+            const d = await post('/watch_party/field', {{ field: 'datetime_utc', value: '' }});
+            toast(d.ok ? 'Date & time reset to auto-detect.' : ('Error: ' + d.error), d.ok);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
         window.wpReset = async function(field) {{
           document.getElementById('wp_' + field).value = '';
           try {{
@@ -2133,11 +2165,15 @@ def watch_party_editor():
             const r = await fetch('/watch_party/autofill_f1', {{credentials: 'same-origin'}});
             const d = await r.json();
             if (!d.ok) {{ toast('Error: ' + d.error, false); return; }}
-            ['title','date','time'].forEach(k => {{
+            ['title'].forEach(k => {{
               const el = document.getElementById('wp_' + k);
               if (el && d[k]) el.value = d[k];
             }});
-            toast('Fields filled from F1 calendar — click Save to apply each field.', true);
+            if (d.datetime_utc) {{
+              const el = document.getElementById('wp_datetime_utc');
+              if (el) el.value = d.datetime_utc;
+            }}
+            toast('Fields filled from F1 calendar — click Save on each field to apply.', true);
           }} catch(e) {{ toast('Request failed.', false); }}
         }};
 
@@ -2273,10 +2309,12 @@ def wp_autofill_f1():
             dt = _dt.fromisoformat(f"{date_str}T{time_str}+00:00")
             date_display = dt.strftime("%-m/%-d/%Y")
             time_display = dt.strftime("%-I:%M %p UTC")
+            datetime_utc = dt.strftime("%Y-%m-%dT%H:%M")
         except Exception:
             date_display = date_str
             time_display = time_str
-        return jsonify({"ok": True, "title": race_name, "date": date_display, "time": time_display})
+            datetime_utc = ""
+        return jsonify({"ok": True, "title": race_name, "date": date_display, "time": time_display, "datetime_utc": datetime_utc})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
