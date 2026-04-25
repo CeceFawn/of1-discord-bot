@@ -188,7 +188,10 @@
           <span id="of1-logo" class="text-f1red font-black text-2xl tracking-tight">OF1</span>
           <span class="text-white/40 text-sm font-medium hidden sm:block" aria-hidden="true">Orlando F1</span>
         </a>
-        <a href="/gallery" class="text-white/60 hover:text-white text-sm font-medium transition-colors">Gallery</a>
+        <!-- Desktop nav links -->
+        <div class="hidden sm:flex items-center gap-5">
+          <a href="/gallery" class="text-white/60 hover:text-white text-sm font-medium transition-colors">Gallery</a>
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <span id="party-trigger" aria-hidden="true">🏎️</span>
@@ -200,6 +203,18 @@
         {% else %}
         <a href="https://www.formula1.com/en/racing/2025" target="_blank" rel="noopener" class="text-white/40 hover:text-white text-xs uppercase tracking-widest transition-colors">Schedule →</a>
         {% endif %}
+        <!-- Hamburger button — mobile only -->
+        <button id="nav-toggle" class="sm:hidden flex flex-col justify-center items-center w-8 h-8 gap-1.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-f1red" aria-expanded="false" aria-controls="nav-mobile-menu" aria-label="Toggle navigation menu">
+          <span class="nav-bar block w-5 h-0.5 bg-white/70 transition-all duration-200 origin-center"></span>
+          <span class="nav-bar block w-5 h-0.5 bg-white/70 transition-all duration-200"></span>
+          <span class="nav-bar block w-5 h-0.5 bg-white/70 transition-all duration-200 origin-center"></span>
+        </button>
+      </div>
+    </div>
+    <!-- Mobile dropdown menu -->
+    <div id="nav-mobile-menu" class="hidden sm:hidden border-t border-white/10 bg-f1dark/95" aria-label="Mobile navigation">
+      <div class="max-w-6xl mx-auto px-6 py-3 flex flex-col gap-1">
+        <a href="/gallery" class="text-white/60 hover:text-white text-sm font-medium transition-colors py-2">Gallery</a>
       </div>
     </div>
   </nav>
@@ -225,8 +240,12 @@
     <div class="max-w-2xl mx-auto">
       <a id="watch-party-card" href="{{ discord_invite }}" target="_blank" rel="noopener"
          class="sheen-card block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
-        <div class="flex items-center gap-2 text-white/50 text-xs font-semibold uppercase tracking-widest mb-4">
-          🏁 Watch Party
+        <div class="flex items-center justify-between gap-2 mb-4">
+          <span class="text-white/50 text-xs font-semibold uppercase tracking-widest">🏁 Watch Party</span>
+          {% if next_race and next_race.date_iso %}
+          <span id="wp-race-badge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-f1red/10 border border-f1red/30 text-f1red tabular-nums"
+                data-race-target="{{ next_race.date_iso }}">…</span>
+          {% endif %}
         </div>
         <h2 class="text-2xl font-bold mb-2">{{ watch_party.get('title', 'Watch Party') }}</h2>
         <div class="flex flex-wrap gap-4 mt-4 text-sm text-white/60">
@@ -235,7 +254,11 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>
+            {% if next_race and next_race.date_iso %}
+            <span data-localdate="{{ next_race.date_iso }}">{{ watch_party.date }}</span>
+            {% else %}
             {{ watch_party.date }}
+            {% endif %}
           </div>
           {% endif %}
           {% if watch_party.get('time') %}
@@ -541,9 +564,24 @@
     const navEl = document.getElementById('nav-countdown');
     if (navEl) {
       const navTarget = new Date(navEl.dataset.target);
+      const SESSION_HIDE_MS = 3 * 60 * 60 * 1000; // hide nav countdown 3h after session start
+      let navTimer;
       function updateNav() {
         const diff = navTarget - Date.now();
-        if (diff <= 0) { navEl.textContent = 'Starting now'; return; }
+        if (diff <= -SESSION_HIDE_MS) {
+          // Session was 3+ hours ago — hide the whole countdown block
+          navEl.closest('div[aria-label]')?.classList.add('hidden');
+          clearInterval(navTimer);
+          return;
+        }
+        if (diff <= 0) {
+          navEl.textContent = 'In progress';
+          navEl.classList.add('text-green-400');
+          navEl.classList.remove('text-white');
+          return;
+        }
+        navEl.classList.remove('text-green-400');
+        navEl.classList.add('text-white');
         const d = Math.floor(diff / 86400000);
         const h = Math.floor((diff % 86400000) / 3600000);
         const m = Math.floor((diff % 3600000) / 60000);
@@ -553,8 +591,81 @@
           : `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
       }
       updateNav();
-      setInterval(updateNav, 1000);
+      navTimer = setInterval(updateNav, 1000);
     }
+  </script>
+
+  <!-- ── WATCH PARTY RACE BADGE COUNTDOWN ─────────────────────── -->
+  <script>
+    (function () {
+      const badge = document.getElementById('wp-race-badge');
+      if (!badge) return;
+      const raceTarget = new Date(badge.dataset.raceTarget);
+      function updateBadge() {
+        const diff = raceTarget - Date.now();
+        if (diff <= -3 * 3600000) { badge.style.display = 'none'; return; }
+        if (diff <= 0) { badge.textContent = 'Race in progress'; return; }
+        const d = Math.floor(diff / 86400000);
+        const h = Math.floor((diff % 86400000) / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        badge.textContent = d > 0
+          ? `Race in ${d}d ${h}h`
+          : h > 0 ? `Race in ${h}h ${String(m).padStart(2,'0')}m`
+          : `Race in ${m}m`;
+      }
+      updateBadge();
+      setInterval(updateBadge, 30000);
+    })();
+  </script>
+
+  <!-- ── LOCAL DATE REFORMAT ───────────────────────────────────── -->
+  <script>
+    document.querySelectorAll('[data-localdate]').forEach(function(el) {
+      try {
+        el.textContent = new Date(el.dataset.localdate).toLocaleDateString(
+          undefined, {weekday:'short', month:'long', day:'numeric'}
+        );
+      } catch(e) {}
+    });
+  </script>
+
+  <!-- ── MOBILE NAV HAMBURGER ──────────────────────────────────── -->
+  <script>
+    (function () {
+      const toggle = document.getElementById('nav-toggle');
+      const menu   = document.getElementById('nav-mobile-menu');
+      if (!toggle || !menu) return;
+      const bars = toggle.querySelectorAll('.nav-bar');
+      let open = false;
+
+      function setOpen(v) {
+        open = v;
+        toggle.setAttribute('aria-expanded', open);
+        menu.classList.toggle('hidden', !open);
+        // Animate bars into X
+        if (bars.length === 3) {
+          bars[0].style.transform = open ? 'translateY(8px) rotate(45deg)' : '';
+          bars[1].style.opacity   = open ? '0' : '';
+          bars[2].style.transform = open ? 'translateY(-8px) rotate(-45deg)' : '';
+        }
+      }
+
+      toggle.addEventListener('click', function () { setOpen(!open); });
+
+      // Close when a menu link is tapped
+      menu.querySelectorAll('a').forEach(function (a) {
+        a.addEventListener('click', function () { setOpen(false); });
+      });
+
+      // Close on Escape
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && open) setOpen(false);
+      });
+
+      // Close if viewport grows past sm breakpoint
+      const mq = window.matchMedia('(min-width: 640px)');
+      mq.addEventListener('change', function (e) { if (e.matches) setOpen(false); });
+    })();
   </script>
 
 </body>

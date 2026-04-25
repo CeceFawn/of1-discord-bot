@@ -144,6 +144,7 @@ async def build_rank_card_png(
     title: str = "Rookie",
     template_path: str | None = None,  # kept for backwards compat, ignored if bg_key set
     bg_key: str | None = None,
+    server_rank: int | None = None,
 ) -> bytes:
     """
     Returns PNG bytes for a rank card.
@@ -174,6 +175,8 @@ async def build_rank_card_png(
     draw.text((230, 45), username, font=font_name, fill=(240, 240, 245, 255))
     draw.text((230, 95), f"Title: {title}", font=font_small, fill=(180, 185, 195, 255))
     draw.text((730, 45), f"LVL {level}", font=font_name, fill=(120, 200, 255, 255))
+    if server_rank is not None:
+        draw.text((730, 95), f"#{server_rank}", font=font_small, fill=(180, 185, 195, 255))
 
     # 6) XP bar + numbers
     pct = 0.0 if xp_next <= 0 else (xp / xp_next)
@@ -305,10 +308,23 @@ def _xp_mark_dirty() -> None:
     global XP_DIRTY
     XP_DIRTY = True
 
+async def _send_staff_alert(msg: str) -> None:
+    """Send an alert to the configured staff_alert_channel_id, if set."""
+    channel_id = int(CFG.get("staff_alert_channel_id", 0) or 0)
+    if not channel_id:
+        return
+    try:
+        ch = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+        await ch.send(f"⚠️ **Bot Alert:** {msg}")
+    except Exception as e:
+        logging.warning(f"[Alert] Could not send staff alert: {e}")
+
+
 async def xp_flush_loop():
     """Periodic XP flush so we don't write on every message."""
     global XP_DIRTY
     await bot.wait_until_ready()
+    consecutive_failures = 0
     while not bot.is_closed():
         _loop_tick("xp_flush")
         try:
@@ -319,19 +335,29 @@ async def xp_flush_loop():
                 if XP_DIRTY:
                     await asyncio.to_thread(save_xp_state, XP_STATE)
                     XP_DIRTY = False
+                    consecutive_failures = 0
         except Exception as e:
             _loop_error("xp_flush")
             logging.error(f"[XP] Flush loop error: {e}")
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                await _send_staff_alert(f"XP flush has failed {consecutive_failures} times in a row: `{e}`")
 
 # ----------------------------
 # Instagram scrape
 # ----------------------------
+_INSTAGRAM_FAIL_COUNT: Dict[str, int] = {}
+
 def fetch_latest_instagram_post(username: str) -> Optional[str]:
     try:
         url = f"https://www.instagram.com/{username}/"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code != 200:
+            _INSTAGRAM_FAIL_COUNT[username] = _INSTAGRAM_FAIL_COUNT.get(username, 0) + 1
+            n = _INSTAGRAM_FAIL_COUNT[username]
+            if n >= 3:
+                logging.warning(f"[Instagram] Scraping @{username} failed {n} time(s) in a row (HTTP {response.status_code})")
             return None
 
         soup = BeautifulSoup(response.text, "html.parser")
@@ -340,9 +366,18 @@ def fetch_latest_instagram_post(username: str) -> Optional[str]:
             if "window._sharedData" in script.text:
                 shortcode = re.search(r'"shortcode":"(.*?)"', script.text)
                 if shortcode:
+                    _INSTAGRAM_FAIL_COUNT[username] = 0
                     return f"https://www.instagram.com/p/{shortcode.group(1)}/"
+        _INSTAGRAM_FAIL_COUNT[username] = _INSTAGRAM_FAIL_COUNT.get(username, 0) + 1
+        n = _INSTAGRAM_FAIL_COUNT[username]
+        if n >= 3:
+            logging.warning(f"[Instagram] Scraping @{username} found no post data {n} time(s) in a row")
         return None
-    except Exception:
+    except Exception as e:
+        _INSTAGRAM_FAIL_COUNT[username] = _INSTAGRAM_FAIL_COUNT.get(username, 0) + 1
+        n = _INSTAGRAM_FAIL_COUNT[username]
+        if n >= 3:
+            logging.warning(f"[Instagram] Scraping @{username} raised exception {n} time(s) in a row: {e}")
         return None
 
 # ----------------------------
@@ -359,7 +394,6 @@ JOLPICA_SCHEDULE_URL = "https://api.jolpi.ca/ergast/f1/current.json"
 F1_SCHEDULE_CACHE: Dict[str, Any] = {"ts": 0.0, "races": [], "fail_until": 0.0, "fail_count": 0}
 F1_REMINDER_TASK: Optional[asyncio.Task] = None
 F1_QUIZ_ACTIVE: Dict[int, Dict[str, Any]] = {}
-F1_QUIZ_PENDING_OVERRIDES: Dict[int, Dict[str, Any]] = {}
 
 SESSION_LABELS = {
     "FirstPractice": "FP1",
@@ -1453,134 +1487,6 @@ def _quiz_pick_question(guild_id: int, difficulty_filters: set[str], category_fi
     _save_state_quiet()
     return chosen
 
-def _quiz_remove_pending_overrides(guild_id: int, question_key: Optional[str] = None) -> None:
-    to_remove: List[int] = []
-    for msg_id, meta in F1_QUIZ_PENDING_OVERRIDES.items():
-        if int(meta.get("guild_id", 0) or 0) != int(guild_id):
-            continue
-        if question_key and str(meta.get("question_key") or "") != str(question_key):
-            continue
-        to_remove.append(msg_id)
-    for msg_id in to_remove:
-        F1_QUIZ_PENDING_OVERRIDES.pop(msg_id, None)
-
-def _quiz_learn_answer_variant(question_key: str, user_answer: str) -> bool:
-    normalized = _clean_text_key(user_answer)
-    if not normalized:
-        return False
-    changed = False
-    for q in F1_QUIZ_QUESTIONS:
-        if _quiz_question_key(q) != question_key:
-            continue
-        answers = q.get("answers")
-        if not isinstance(answers, list):
-            answers = []
-            q["answers"] = answers
-        existing_norm = {_clean_text_key(str(a)) for a in answers}
-        if normalized not in existing_norm:
-            answers.append(user_answer.strip())
-            changed = True
-        break
-    if not changed:
-        return False
-    try:
-        with open(F1_QUIZ_FILE, "w", encoding="utf-8") as f:
-            json.dump(F1_QUIZ_QUESTIONS, f, indent=2)
-            f.write("\n")
-        return True
-    except Exception as e:
-        logging.error(f"[Quiz] Failed to save learned answer variant: {e}")
-        return False
-
-async def _quiz_process_reaction_override(payload: discord.RawReactionActionEvent) -> bool:
-    if str(payload.emoji) != "🟢":
-        return False
-    pending = F1_QUIZ_PENDING_OVERRIDES.get(payload.message_id)
-    if not pending:
-        return False
-    if payload.guild_id is None or payload.channel_id is None:
-        return False
-    if int(pending.get("guild_id", 0) or 0) != int(payload.guild_id):
-        return False
-    if int(pending.get("channel_id", 0) or 0) != int(payload.channel_id):
-        return False
-    if bool(pending.get("resolved")):
-        return True
-
-    guild = bot.get_guild(payload.guild_id)
-    if guild is None:
-        return True
-
-    member = getattr(payload, "member", None)
-    if member is None:
-        try:
-            member = await guild.fetch_member(payload.user_id)
-        except Exception:
-            return True
-    if member is None or not getattr(member.guild_permissions, "administrator", False):
-        return True
-
-    active = F1_QUIZ_ACTIVE.get(guild.id)
-    question_key = str(pending.get("question_key") or "")
-    if not active or str(active.get("question_key") or "") != question_key:
-        return True
-    if time.time() > float(active.get("expires_at", 0) or 0):
-        F1_QUIZ_ACTIVE.pop(guild.id, None)
-        _quiz_remove_pending_overrides(guild.id, question_key)
-        return True
-
-    pending["resolved"] = True
-    user_id = int(pending.get("user_id", 0) or 0)
-    points = max(1, int(pending.get("points", 1) or 1))
-    difficulty = str(pending.get("difficulty") or "easy").lower().strip()
-    category = str(pending.get("category") or "general").lower().strip()
-    raw_guess = str(pending.get("guess_raw") or "").strip()
-    guess_key = _clean_text_key(raw_guess)
-
-    if guess_key:
-        answers = active.setdefault("answers", [])
-        if guess_key not in answers:
-            answers.append(guess_key)
-        _quiz_learn_answer_variant(question_key, raw_guess)
-
-    scores = _quiz_scores_for_guild(guild.id)
-    uid = str(user_id)
-    scores[uid] = int(scores.get(uid, 0) or 0) + points
-    _save_state_quiet()
-
-    F1_QUIZ_ACTIVE.pop(guild.id, None)
-    _quiz_remove_pending_overrides(guild.id, question_key)
-
-    channel = bot.get_channel(payload.channel_id)
-    if channel is None:
-        try:
-            channel = await bot.fetch_channel(payload.channel_id)
-        except Exception:
-            channel = None
-    if channel is not None:
-        try:
-            reply_id = int(pending.get("bot_reply_message_id", 0) or 0)
-            if reply_id:
-                bot_reply = await channel.fetch_message(reply_id)
-                await bot_reply.edit(
-                    content=(
-                        f"✅ Correct, <@{user_id}>! (fixed) "
-                        f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
-                        f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
-                    )
-                )
-            else:
-                await channel.send(
-                    f"✅ Correct, <@{user_id}>! (fixed) "
-                    f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
-                    f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
-                )
-        except Exception as e:
-            logging.warning(f"[Quiz] Failed to edit override response: {e}")
-    logging.info(
-        f"[Quiz] Override accepted by {member.id} for user {user_id} on question '{question_key[:60]}'"
-    )
-    return True
 
 def _circuit_lookup(query: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     q = _clean_text_key(query)
@@ -2201,6 +2107,14 @@ async def rank(ctx, member: discord.Member = None):
     title = "Rookie" if level < 5 else "Regular" if level < 15 else "Veteran"
     bg_key = (rec.get("card") or {}).get("bg_url") or "default"
 
+    # Compute server rank by total XP
+    all_rows = get_top_users_by_xp(XP_STATE, ctx.guild.id, limit=10000)
+    uid_str = str(member.id)
+    try:
+        server_rank = next(i + 1 for i, (uid, _, _) in enumerate(all_rows) if uid == uid_str)
+    except StopIteration:
+        server_rank = None
+
     png_bytes = await build_rank_card_png(
         member=member,
         level=level,
@@ -2208,6 +2122,7 @@ async def rank(ctx, member: discord.Member = None):
         xp_next=xp_next,
         title=title,
         bg_key=bg_key,
+        server_rank=server_rank,
     )
 
     file = discord.File(io.BytesIO(png_bytes), filename="rank.png")
@@ -2242,26 +2157,33 @@ async def cardbgs(ctx):
     await ctx.send("🎨 **Available rank card backgrounds:**\n" + "\n".join(f"• `{k}`" for k in available))
 
 
-@bot.command(name="xpleaderboard", aliases=["xptop"])
-async def xpleaderboard(ctx, limit: int = 10):
-    """Top XP users in this server."""
+@bot.hybrid_command(name="xpleaderboard", aliases=["xptop"])
+async def xpleaderboard(ctx, page: int = 1):
+    """Top XP users in this server. Use page parameter to navigate."""
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
-    limit = max(3, min(20, int(limit)))
-
-    rows = get_top_users_by_xp(XP_STATE, ctx.guild.id, limit=limit)
-    if not rows:
+    per_page = 10
+    page = max(1, int(page))
+    all_rows = get_top_users_by_xp(XP_STATE, ctx.guild.id, limit=10000)
+    if not all_rows:
         return await ctx.send("No XP data yet.")
+    total_pages = max(1, (len(all_rows) + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    start = (page - 1) * per_page
+    rows = all_rows[start:start + per_page]
 
     lines: List[str] = []
-    for i, (uid, xp, lvl) in enumerate(rows, start=1):
+    for i, (uid, xp, lvl) in enumerate(rows, start=start + 1):
         member = ctx.guild.get_member(int(uid))
         name = member.display_name if member else f"<@{uid}>"
-        # Recompute level in case someone edited XP manually
         real_lvl = xp_level_from_total(xp)
         lines.append(f"{i:>2}. {name} — **L{real_lvl}** ({xp} XP)")
 
-    await ctx.send("\U0001F3C6 **XP Leaderboard**\n" + "\n".join(lines))
+    footer = f"Page {page}/{total_pages}" if total_pages > 1 else ""
+    header = "🏆 **XP Leaderboard**"
+    if footer:
+        header += f" — {footer}"
+    await ctx.send(header + "\n" + "\n".join(lines))
 
 @bot.hybrid_command(name="xpset")
 @commands.has_permissions(administrator=True)
@@ -2604,7 +2526,6 @@ def _command_examples(prefix: str) -> Dict[str, str]:
         "driverstats": f"{p}driver verstappen",
         "teamstats": f"{p}team ferrari",
         "quiz": f"{p}quiz hard strategy",
-        "quizanswer": f"{p}quizanswer virtual safety car",
         "quizscore": f"{p}quizscore",
         "predictpole": f"{p}predictpole Verstappen",
         "predictsprintpole": f"{p}predictsprintpole Norris",
@@ -2658,7 +2579,6 @@ def _command_descriptions() -> Dict[str, str]:
         "driverstats": "Show current stats for a driver.",
         "teamstats": "Show current stats for a constructor/team.",
         "quiz": "Start an F1 quiz question (supports difficulty/category filters).",
-        "quizanswer": "Answer the currently active quiz question.",
         "quizscore": "Show the F1 quiz leaderboard.",
         "predictpole": "Submit your qualifying pole prediction.",
         "predictsprintpole": "Submit your sprint shootout pole prediction.",
@@ -2796,7 +2716,6 @@ class QuizView(discord.ui.View):
                 uid = str(interaction.user.id)
                 scores[uid] = int(scores.get(uid, 0) or 0) + points
                 _save_state_quiet()
-                _quiz_remove_pending_overrides(self.guild_id, str(active.get("question_key") or ""))
                 F1_QUIZ_ACTIVE.pop(self.guild_id, None)
                 # Disable all buttons
                 for item in self.children:
@@ -2821,8 +2740,19 @@ class QuizView(discord.ui.View):
         self.stop()
 
 
+async def _quiz_difficulty_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    diffs = list(QUIZ_DIFFICULTY_POINTS.keys())
+    return [discord.app_commands.Choice(name=d, value=d) for d in diffs if cur in d][:25]
+
+async def _quiz_category_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    cats = sorted({_quiz_category_for_question(q) for q in F1_QUIZ_QUESTIONS})
+    return [discord.app_commands.Choice(name=c.replace("_", " ").title(), value=c) for c in cats if cur in c][:25]
+
 @bot.hybrid_command(name="quiz", aliases=["f1quiz"])
 @commands.cooldown(1, 15, commands.BucketType.guild)
+@discord.app_commands.autocomplete(difficulty=_quiz_difficulty_autocomplete, category=_quiz_category_autocomplete)
 async def quiz(ctx, difficulty: str = "", category: str = ""):
     """Start a multiple-choice F1 quiz question. Optional: difficulty (easy/medium/hard) and category."""
     if ctx.guild is None:
@@ -2858,12 +2788,16 @@ async def quiz(ctx, difficulty: str = "", category: str = ""):
     points = _quiz_points_for_question(q)
     correct_display = (q.get("answers") or ["?"])[0]
 
-    # Build distractors: pick 3 other questions' first answers, avoiding duplicates
+    # Build distractors: prefer same-category questions, fall back to any category
     other_qs = [x for x in F1_QUIZ_QUESTIONS if x is not q]
-    random.shuffle(other_qs)
+    same_cat = [x for x in other_qs if _quiz_category_for_question(x) == cat]
+    diff_cat = [x for x in other_qs if _quiz_category_for_question(x) != cat]
+    random.shuffle(same_cat)
+    random.shuffle(diff_cat)
+    candidate_qs = same_cat + diff_cat
     distractors: List[str] = []
     correct_key = _clean_text_key(correct_display)
-    for oq in other_qs:
+    for oq in candidate_qs:
         if len(distractors) >= 3:
             break
         d = (oq.get("answers") or [None])[0]
@@ -2897,57 +2831,6 @@ async def quiz(ctx, difficulty: str = "", category: str = ""):
         f"**{q['q']}**",
         view=view,
     )
-
-@bot.command(name="quizanswer")
-async def quizanswer(ctx, *, answer: str):
-    if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
-    active = F1_QUIZ_ACTIVE.get(ctx.guild.id)
-    if not active:
-        return await ctx.send("\u2139\uFE0F No active quiz question. Start one with `!quiz`.")
-    if time.time() > float(active.get("expires_at", 0)):
-        F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
-        return await ctx.send("⌛ That quiz question expired. Start a new one with `!quiz`.")
-
-    guess = _clean_text_key(answer)
-    answers = active.get("answers") or []
-    if guess in answers:
-        scores = _quiz_scores_for_guild(ctx.guild.id)
-        uid = str(ctx.author.id)
-        points = max(1, int(active.get("points", 1) or 1))
-        difficulty = str(active.get("difficulty") or "easy").lower().strip()
-        category = str(active.get("category") or "general").lower().strip()
-        scores[uid] = int(scores.get(uid, 0) or 0) + points
-        _save_state_quiet()
-        _quiz_remove_pending_overrides(ctx.guild.id, str(active.get("question_key") or ""))
-        F1_QUIZ_ACTIVE.pop(ctx.guild.id, None)
-        return await ctx.send(
-            f"✅ Correct, {ctx.author.mention}! "
-            f"({category.replace('_', ' ').title()} · {difficulty.title()}) "
-            f"You earned **{points}** quiz point{'s' if points != 1 else ''}."
-        )
-
-    wrong_reply = await ctx.send(
-        "❌ Not quite. Try again while the question is still open. "
-        "(Admins can react 🟢 to your `!quizanswer` message to mark a valid alternate wording as correct.)"
-    )
-    try:
-        F1_QUIZ_PENDING_OVERRIDES[ctx.message.id] = {
-            "guild_id": ctx.guild.id,
-            "channel_id": ctx.channel.id,
-            "user_id": ctx.author.id,
-            "question_key": str(active.get("question_key") or _clean_text_key(str(active.get("question") or ""))),
-            "guess_raw": answer.strip(),
-            "guess_key": guess,
-            "bot_reply_message_id": wrong_reply.id,
-            "difficulty": str(active.get("difficulty") or "easy"),
-            "category": str(active.get("category") or "general"),
-            "points": int(active.get("points", 1) or 1),
-            "resolved": False,
-            "created_at": time.time(),
-        }
-    except Exception as e:
-        logging.warning(f"[Quiz] Failed to register pending override for message {ctx.message.id}: {e}")
 
 @bot.hybrid_command(name="quizscore", aliases=["quizleaderboard"])
 async def quizscore(ctx):
@@ -3190,22 +3073,40 @@ async def standingssetup(ctx, which: str = "both", refresh_minutes: int = 5):
 # Commands: F1 schedule / reminders / circuit info
 # ----------------------------
 @bot.hybrid_command(name="schedule")
-async def schedule(ctx, count: int = 8):
-    count = max(1, min(20, int(count)))
+async def schedule(ctx, count: int = 5):
+    count = max(1, min(10, int(count)))
     try:
-        items = await upcoming_f1_sessions(limit=count)
+        items = await upcoming_f1_sessions(limit=count * 10)
     except Exception as e:
         logging.error(f"[F1] schedule failed: {e}")
         return await ctx.send("❌ Could not fetch the F1 schedule right now.")
 
     if not items:
-        return await ctx.send("\u2139\uFE0F No upcoming sessions found.")
+        return await ctx.send("ℹ️ No upcoming sessions found.")
 
-    lines = []
+    # Group sessions by race weekend
+    weekends: dict = {}
     for item in items:
-        unix_ts = int(item["dt"].timestamp())
-        lines.append(f"• **{item['race_name']}** — {item['session_label']} <t:{unix_ts}:F> (<t:{unix_ts}:R>)")
-    await ctx.send("📅 **Upcoming F1 Sessions**\n" + "\n".join(lines))
+        key = (item.get("round"), item["race_name"])
+        if key not in weekends:
+            weekends[key] = []
+        weekends[key].append(item)
+
+    blocks = list(weekends.items())[:count]
+    first_session = True
+    lines = ["📅 **F1 Schedule**"]
+    for (_round, race_name), sessions in blocks:
+        lines.append(f"\n**{race_name}**")
+        for sess in sessions:
+            unix_ts = int(sess["dt"].timestamp())
+            label = sess["session_label"]
+            if first_session:
+                lines.append(f"› **{label}** — <t:{unix_ts}:F> ← next")
+                first_session = False
+            else:
+                lines.append(f"· {label} — <t:{unix_ts}:R>")
+
+    await ctx.send("\n".join(lines))
 
 @bot.hybrid_command(name="nextsession", aliases=["nextf1"])
 async def nextsession(ctx):
@@ -3369,7 +3270,23 @@ async def f1reminderleads(ctx, *, minutes: str):
     save_config(CFG)
     await ctx.send(f"✅ F1 reminder leads set to: `{', '.join(str(x) for x in leads)}` minutes.")
 
+async def _circuit_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    seen: set = set()
+    choices = []
+    # Prefer canonical circuit names, then aliases
+    for canonical in sorted(CIRCUIT_INFO.keys()):
+        if cur in canonical.lower() and canonical not in seen:
+            choices.append(discord.app_commands.Choice(name=canonical, value=canonical))
+            seen.add(canonical)
+    for alias, canonical in sorted(CIRCUIT_ALIASES.items()):
+        if cur in alias.lower() and alias not in seen:
+            choices.append(discord.app_commands.Choice(name=alias, value=alias))
+            seen.add(alias)
+    return choices[:25]
+
 @bot.hybrid_command(name="circuit")
+@discord.app_commands.autocomplete(name=_circuit_autocomplete)
 async def circuit(ctx, *, name: str):
     key, info = _circuit_lookup(name)
     if not info:
@@ -3712,7 +3629,8 @@ def _pred_entry_summary(entry: Dict[str, Any], req: Optional[Dict[str, Any]] = N
         lines.append(f"- Sprint P8: `{entry.get('sprint_p8') or '—'}`")
     return "\n".join(lines)
 
-@bot.command(name="predictpole")
+@bot.hybrid_command(name="predictpole")
+@discord.app_commands.autocomplete(driver=_driver_name_autocomplete)
 async def predictpole(ctx, *, driver: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3725,9 +3643,12 @@ async def predictpole(ctx, *, driver: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["pole"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ Pole pick saved for **{meta['race_name']}**: `{entry['pole']}`")
+    await _try_update_predictions_board(ctx.guild, meta)
+    lock_text = _prediction_category_lock_text(meta, "pole")
+    await ctx.send(f"✅ Pole pick saved for **{meta['race_name']}**: `{entry['pole']}` — locks at `{lock_text}`")
 
-@bot.command(name="predictsprintpole", aliases=["predictsppole"])
+@bot.hybrid_command(name="predictsprintpole", aliases=["predictsppole"])
+@discord.app_commands.autocomplete(driver=_driver_name_autocomplete)
 async def predictsprintpole(ctx, *, driver: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3743,9 +3664,11 @@ async def predictsprintpole(ctx, *, driver: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_pole"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ Sprint pole pick saved for **{meta['race_name']}**: `{entry['sprint_pole']}`")
+    await _try_update_predictions_board(ctx.guild, meta)
+    lock_text = _prediction_category_lock_text(meta, "sprint_pole")
+    await ctx.send(f"✅ Sprint pole pick saved for **{meta['race_name']}**: `{entry['sprint_pole']}` — locks at `{lock_text}`")
 
-@bot.command(name="predictpodium")
+@bot.hybrid_command(name="predictpodium")
 async def predictpodium(ctx, *, picks: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3761,9 +3684,11 @@ async def predictpodium(ctx, *, picks: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["podium"] = podium
     _save_state_quiet()
-    await ctx.send(f"✅ Podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
+    await _try_update_predictions_board(ctx.guild, meta)
+    lock_text = _prediction_category_lock_text(meta, "podium")
+    await ctx.send(f"✅ Podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }` — locks at `{lock_text}`")
 
-@bot.command(name="predictsprintpodium", aliases=["predictsppodium"])
+@bot.hybrid_command(name="predictsprintpodium", aliases=["predictsppodium"])
 async def predictsprintpodium(ctx, *, picks: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3782,9 +3707,12 @@ async def predictsprintpodium(ctx, *, picks: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_podium"] = podium
     _save_state_quiet()
-    await ctx.send(f"✅ Sprint podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }`")
+    await _try_update_predictions_board(ctx.guild, meta)
+    lock_text = _prediction_category_lock_text(meta, "sprint_podium")
+    await ctx.send(f"✅ Sprint podium pick saved for **{meta['race_name']}**: `{ ' | '.join(podium) }` — locks at `{lock_text}`")
 
-@bot.command(name="predictp10")
+@bot.hybrid_command(name="predictp10")
+@discord.app_commands.autocomplete(driver=_driver_name_autocomplete)
 async def predictp10(ctx, *, driver: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3797,9 +3725,12 @@ async def predictp10(ctx, *, driver: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["p10"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ P10 pick saved for **{meta['race_name']}**: `{entry['p10']}`")
+    await _try_update_predictions_board(ctx.guild, meta)
+    lock_text = _prediction_category_lock_text(meta, "p10")
+    await ctx.send(f"✅ P10 pick saved for **{meta['race_name']}**: `{entry['p10']}` — locks at `{lock_text}`")
 
-@bot.command(name="predictsprintp8", aliases=["predictspp8"])
+@bot.hybrid_command(name="predictsprintp8", aliases=["predictspp8"])
+@discord.app_commands.autocomplete(driver=_driver_name_autocomplete)
 async def predictsprintp8(ctx, *, driver: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3815,7 +3746,9 @@ async def predictsprintp8(ctx, *, driver: str):
     entry = _pred_user_entry(meta["key"], ctx.guild.id, ctx.author.id)
     entry["sprint_p8"] = _normalize_driver_pick(driver)
     _save_state_quiet()
-    await ctx.send(f"✅ Sprint P8 pick saved for **{meta['race_name']}**: `{entry['sprint_p8']}`")
+    await _try_update_predictions_board(ctx.guild, meta)
+    lock_text = _prediction_category_lock_text(meta, "sprint_p8")
+    await ctx.send(f"✅ Sprint P8 pick saved for **{meta['race_name']}**: `{entry['sprint_p8']}` — locks at `{lock_text}`")
 
 def _lock_status_text(meta: Dict[str, Any], category: str) -> str:
     """Return a human-friendly lock status string for a prediction category."""
@@ -3825,15 +3758,10 @@ def _lock_status_text(meta: Dict[str, Any], category: str) -> str:
     if lock_dt is None:
         return "⏳ Open"
     now = datetime.now(timezone.utc)
-    remaining = lock_dt - now
-    total_seconds = int(remaining.total_seconds())
-    if total_seconds <= 0:
+    if lock_dt <= now:
         return "🔒 Locked"
-    hours, rem = divmod(total_seconds, 3600)
-    minutes = rem // 60
-    if hours > 0:
-        return f"⏳ Open — locks in {hours}h {minutes}m"
-    return f"⏳ Open — locks in {minutes}m"
+    ts = int(lock_dt.timestamp())
+    return f"⏳ Open — locks <t:{ts}:R>"
 
 @bot.hybrid_command(name="mypredictions")
 async def mypredictions(ctx):
@@ -3857,7 +3785,7 @@ async def mypredictions(ctx):
         lines.append(f"**Sprint P8** {_lock_status_text(meta, 'sprint_p8')}: `{entry.get('sprint_p8') or '—'}`")
     await ctx.send("\n".join(lines), ephemeral=True)
 
-@bot.command(name="predictions", aliases=["predicthelp"])
+@bot.hybrid_command(name="predictions", aliases=["predicthelp"])
 async def predictions(ctx):
     meta = await _prediction_round_context()
     req = _prediction_session_requirements(meta)
@@ -3877,28 +3805,27 @@ async def predictions(ctx):
     lines.append("- `!prstats` — your prediction standings")
     await ctx.send("\n".join(lines))
 
-@bot.command(name="predictionsboard", aliases=["predboard"])
-async def predictionsboard(ctx):
-    if ctx.guild is None:
-        return await ctx.send("❌ This must be used in a server.")
-    meta = await _prediction_round_context()
+def _build_predictions_board_text(meta: Dict[str, Any], guild: discord.Guild, page: int = 1, per_page: int = 10) -> str:
     rnd = _pred_round_obj(meta["key"])
     req = _prediction_session_requirements(meta)
-    # Ordered list of (category, display_label) for this weekend
     cat_defs = [("pole", "Pole"), ("podium", "Podium"), ("p10", "P10")]
     if "sprint_quali" in req:
         cat_defs.append(("sprint_pole", "SP Pole"))
     if "sprint" in req:
         cat_defs.append(("sprint_podium", "SP Podium"))
         cat_defs.append(("sprint_p8", "SP P8"))
-    # Which categories are currently locked (safe to show picks)
     locked_cats = {cat for cat, _ in cat_defs if _prediction_category_locked(meta, cat)}
-    guild_entries = ((rnd.get("entries") or {}).get(str(ctx.guild.id)) or {})
+    guild_entries = ((rnd.get("entries") or {}).get(str(guild.id)) or {})
     if not guild_entries:
-        return await ctx.send(f"ℹ️ No predictions submitted yet for **{meta['race_name']}**.")
+        return f"ℹ️ No predictions submitted yet for **{meta['race_name']}**."
+    all_items = list(guild_entries.items())
+    total_pages = max(1, (len(all_items) + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * per_page
+    page_items = all_items[start:start + per_page]
     lines = []
-    for uid, entry in list(guild_entries.items())[:20]:
-        member = ctx.guild.get_member(int(uid))
+    for uid, entry in page_items:
+        member = guild.get_member(int(uid))
         name = member.display_name if member else uid
         filled = sum(1 for cat, _ in cat_defs if entry.get(cat))
         header = f"**{name}** — {filled}/{len(cat_defs)} picks"
@@ -3916,10 +3843,53 @@ async def predictionsboard(ctx):
             lines.append(f"{header}\n  {', '.join(pick_parts)}")
         else:
             lines.append(header)
-    msg = f"📋 **Predictions board** for **{meta['race_name']}**\n" + "\n".join(lines)
-    if len(msg) > 1900:
-        msg = msg[:1850] + "\n… (truncated)"
-    await ctx.send(msg)
+    header_line = f"📋 **Predictions board** for **{meta['race_name']}**"
+    if total_pages > 1:
+        header_line += f" — Page {page}/{total_pages}"
+    text = header_line + "\n" + "\n".join(lines)
+    if len(text) > 1900:
+        text = text[:1850] + "\n… (truncated)"
+    return text
+
+
+async def _try_update_predictions_board(guild: discord.Guild, meta: Dict[str, Any]) -> None:
+    """Silently try to edit the pinned predictions board message for this guild+round."""
+    board_key = f"{guild.id}:{meta['key']}"
+    ref = (_state_bucket("predictions").get("board_messages") or {}).get(board_key)
+    if not ref:
+        return
+    channel = bot.get_channel(int(ref.get("channel_id", 0)))
+    if channel is None:
+        return
+    try:
+        msg = await channel.fetch_message(int(ref["msg_id"]))
+        await msg.edit(content=_build_predictions_board_text(meta, guild))
+    except Exception:
+        pass
+
+
+@bot.hybrid_command(name="predictionsboard", aliases=["predboard"])
+async def predictionsboard(ctx, page: int = 1):
+    if ctx.guild is None:
+        return await ctx.send("❌ This must be used in a server.")
+    meta = await _prediction_round_context()
+    text = _build_predictions_board_text(meta, ctx.guild, page=page)
+    board_key = f"{ctx.guild.id}:{meta['key']}"
+    boards = _state_bucket("predictions").setdefault("board_messages", {})
+    ref = boards.get(board_key)
+    # Try to edit an existing board message first
+    if ref:
+        try:
+            ch = bot.get_channel(int(ref.get("channel_id", 0))) or await bot.fetch_channel(int(ref["channel_id"]))
+            existing = await ch.fetch_message(int(ref["msg_id"]))
+            await existing.edit(content=text)
+            return
+        except Exception:
+            pass
+    # Send fresh and remember the message
+    sent = await ctx.send(text)
+    boards[board_key] = {"msg_id": sent.id, "channel_id": sent.channel.id}
+    _save_state_quiet()
 
 @bot.hybrid_command(name="predictionslock")
 @commands.has_permissions(administrator=True)
@@ -3939,8 +3909,18 @@ async def predictionsunlock(ctx):
     _save_state_quiet()
     await ctx.send(f"🔓 Predictions unlocked for **{meta['race_name']}** (`{meta['key']}`).")
 
-@bot.command(name="predictionsetresult")
+_PRED_CATEGORIES = ["pole", "podium", "p10", "sprint_pole", "sprint_podium", "sprint_p8"]
+
+async def _pred_category_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    return [
+        discord.app_commands.Choice(name=c, value=c)
+        for c in _PRED_CATEGORIES if cur in c
+    ][:25]
+
+@bot.hybrid_command(name="predictionsetresult")
 @commands.has_permissions(administrator=True)
+@discord.app_commands.autocomplete(category=_pred_category_autocomplete)
 async def predictionsetresult(ctx, category: str, *, value: str):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -3992,7 +3972,7 @@ async def predictionsetresult(ctx, category: str, *, value: str):
     if not auto_posted:
         await ctx.send(f"✅ Saved `{category}` result for **{meta['race_name']}**.")
 
-@bot.command(name="predictionscore")
+@bot.hybrid_command(name="predictionscore")
 @commands.has_permissions(administrator=True)
 async def predictionscore(ctx, session: str = "auto"):
     if ctx.guild is None:
@@ -4032,7 +4012,7 @@ async def predictionscore(ctx, session: str = "auto"):
     if not did_any:
         await ctx.send("\u2139\uFE0F No scoreable prediction sessions yet (missing actuals or already scored).")
 
-@bot.command(name="predictionleaderboard", aliases=["fantasypoints", "predictlb"])
+@bot.hybrid_command(name="predictionleaderboard", aliases=["fantasypoints", "predictlb"])
 async def predictionleaderboard(ctx):
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
@@ -4047,7 +4027,17 @@ async def predictionleaderboard(ctx):
         lines.append(f"{rank_i:>2}. {name} — **{pts} pts**")
     await ctx.send("\U0001F3C6 **Prediction Leaderboard (Fantasy Points)**\n" + "\n".join(lines))
 
-@bot.command(name="predresults", aliases=["roundresults", "predhistory"])
+async def _pred_round_key_autocomplete(interaction: discord.Interaction, current: str):
+    root = _predictions_root()
+    keys = sorted((root.get("rounds") or {}).keys(), reverse=True)
+    cur = current.lower()
+    return [
+        discord.app_commands.Choice(name=k, value=k)
+        for k in keys if cur in k
+    ][:25]
+
+@bot.hybrid_command(name="predresults", aliases=["roundresults", "predhistory"])
+@discord.app_commands.autocomplete(round_key=_pred_round_key_autocomplete)
 async def predresults(ctx, *, round_key: str = None):
     """Show prediction scores and actuals for a specific past round.
     Usage: !predresults            (current/most recent round)
@@ -4219,6 +4209,8 @@ async def on_ready():
     setattr(bot, "of1_dashboard_send_to_thread", of1_dashboard_send_to_thread)
     setattr(bot, "of1_dashboard_kill_race_live", of1_dashboard_kill_race_live)
     setattr(bot, "of1_dashboard_start_race_live", of1_dashboard_start_race_live)
+    setattr(bot, "of1_pred_snapshot", of1_pred_snapshot)
+    setattr(bot, "of1_pred_set_result", of1_pred_set_result)
 
     ensure_standings_task_running()
     _ensure_background_task("PERIODIC_ROLE_RECOVERY_TASK", periodic_reaction_role_check, "Recovery")
@@ -4256,8 +4248,6 @@ async def on_ready():
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.user_id == bot.user.id:
-        return
-    if await _quiz_process_reaction_override(payload):
         return
     if payload.message_id not in allowed_reaction_panel_message_ids():
         return
@@ -7048,7 +7038,7 @@ def of1_race_live_snapshot() -> dict:
     }
 
 
-def of1_apply_race_setting(key: str, value) -> tuple:
+def of1_apply_race_setting(key: str, value, guild_id: int = 0) -> tuple:
     """Apply a race-live setting by key. Returns (ok: bool, message: str)."""
     try:
         if key == "delay_seconds":
@@ -7060,6 +7050,11 @@ def of1_apply_race_setting(key: str, value) -> tuple:
         if key == "ops_channel_id":
             v = _set_race_live_ops_channel_id(int(value))
             return True, f"ops_channel_id set to {v}"
+        if key == "session_key":
+            sk = int(value)
+            if guild_id:
+                RACE_LIVE_SESSION_KEYS[int(guild_id)] = sk
+            return True, f"session_key set to {sk}" + (f" for guild {guild_id}" if guild_id else "")
         return False, f"Unknown setting key: '{key}'"
     except Exception as e:
         return False, str(e)
@@ -7105,6 +7100,15 @@ async def of1_dashboard_start_race_live(guild_id: int) -> tuple:
 
 @bot.listen("on_command")
 async def _cmd_log_listener(ctx):
+    _log_ctx_command(ctx)
+
+@bot.after_invoke
+async def _after_invoke_log(ctx):
+    # Catches hybrid commands invoked as slash commands (on_command doesn't fire for those)
+    if getattr(ctx, 'interaction', None):
+        _log_ctx_command(ctx)
+
+def _log_ctx_command(ctx) -> None:
     try:
         from runtime_store import insert_cmd_log
         insert_cmd_log(
@@ -7114,7 +7118,7 @@ async def _cmd_log_listener(ctx):
             guild=str(ctx.guild) if ctx.guild else "DM",
             guild_id=str(ctx.guild.id) if ctx.guild else "",
             command=ctx.command.name if ctx.command else "?",
-            full=(ctx.message.content or "")[:300],
+            full=(getattr(ctx.message, 'content', None) or f"/{ctx.command.name if ctx.command else '?'}")[:300],
         )
     except Exception:
         pass
@@ -7210,6 +7214,29 @@ def of1_quiz_save(questions: list) -> tuple:
         os.replace(tmp, F1_QUIZ_FILE)
         F1_QUIZ_QUESTIONS = clean
         return True, f"Saved {len(clean)} questions"
+    except Exception as e:
+        return False, str(e)
+
+
+def of1_pred_snapshot() -> dict:
+    """Return current predictions data for the dashboard."""
+    import copy
+    root = _predictions_root()
+    return copy.deepcopy({"rounds": root.get("rounds", {}), "totals": root.get("totals", {})})
+
+
+def of1_pred_set_result(round_key: str, category: str, value) -> tuple:
+    """Set an actual result for a prediction round. value may be a str or list."""
+    try:
+        rnd = _pred_round_obj(round_key)
+        actual = rnd.setdefault("actual", {})
+        valid_cats = {"pole", "p10", "sprint_pole", "sprint_p8", "podium", "sprint_podium"}
+        if category not in valid_cats:
+            return False, f"Invalid category '{category}'"
+        actual[category] = value
+        rnd["scored"] = False
+        _save_state_quiet()
+        return True, f"Set {category} = {value!r} for {round_key}"
     except Exception as e:
         return False, str(e)
 

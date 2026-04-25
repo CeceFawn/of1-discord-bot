@@ -451,6 +451,13 @@ BASE_TEMPLATE = """
         </svg>
         Member Stats
       </a>
+      <a href="{{ url_for('predictions_view') }}"
+         class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-sm transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        Predictions
+      </a>
 
       <p class="px-3 pt-3 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Bot Tools</p>
       <a href="{{ url_for('quiz_mgr') }}"
@@ -496,7 +503,8 @@ BASE_TEMPLATE = """
     <div class="p-2 border-t border-[#222] space-y-0.5">
       <p class="px-3 pt-1 pb-0.5 text-[10px] uppercase tracking-widest text-gray-600">Bot Controls</p>
 
-      <form data-async-refresh="1" action="{{ url_for('bot_action', action='restart') }}" method="post">
+      <form data-async-refresh="1" action="{{ url_for('bot_action', action='restart') }}" method="post"
+            onsubmit="return confirm('Restart the bot? It will be offline for a few seconds.')">
         {{ csrf_input|safe }}
         <button class="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-red-400 hover:bg-[#1a1a1a] text-sm transition-colors cursor-pointer">
           <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -519,20 +527,24 @@ BASE_TEMPLATE = """
           </svg>
         </button>
         <div id="deployMenu" class="hidden absolute bottom-full left-0 right-0 mb-1 bg-[#181818] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden z-50 py-1">
-          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployall') }}" method="post">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deployall') }}" method="post"
+                onsubmit="return confirm('Deploy all? Bot + website + dashboard will reload.')">
             {{ csrf_input|safe }}
             <button class="w-full text-left px-4 py-2 text-gray-300 hover:bg-[#222] text-sm">Deploy All</button>
           </form>
           <div class="my-1 border-t border-[#2a2a2a]"></div>
-          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploybot') }}" method="post">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploybot') }}" method="post"
+                onsubmit="return confirm('Deploy bot only?')">
             {{ csrf_input|safe }}
             <button class="w-full text-left px-4 py-2 text-gray-400 hover:bg-[#222] text-sm">Bot only</button>
           </form>
-          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploywebsite') }}" method="post">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploywebsite') }}" method="post"
+                onsubmit="return confirm('Deploy website only?')">
             {{ csrf_input|safe }}
             <button class="w-full text-left px-4 py-2 text-gray-400 hover:bg-[#222] text-sm">Website only</button>
           </form>
-          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploydashboard') }}" method="post">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='deploydashboard') }}" method="post"
+                onsubmit="return confirm('Deploy dashboard only? Page will reload.')">
             {{ csrf_input|safe }}
             <button class="w-full text-left px-4 py-2 text-gray-400 hover:bg-[#222] text-sm">Dashboard only</button>
           </form>
@@ -552,11 +564,13 @@ BASE_TEMPLATE = """
           </svg>
         </button>
         <div id="moreMenu" class="hidden absolute bottom-full left-0 right-0 mb-1 bg-[#181818] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden z-50 py-1">
-          <form data-async-refresh="1" action="{{ url_for('bot_action', action='start') }}" method="post">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='start') }}" method="post"
+                onsubmit="return confirm('Start the bot process?')">
             {{ csrf_input|safe }}
             <button class="w-full text-left px-4 py-2 text-gray-300 hover:bg-[#222] text-sm">Start Bot</button>
           </form>
-          <form data-async-refresh="1" action="{{ url_for('bot_action', action='stop') }}" method="post">
+          <form data-async-refresh="1" action="{{ url_for('bot_action', action='stop') }}" method="post"
+                onsubmit="return confirm('Stop the bot? It will go offline until restarted.')">
             {{ csrf_input|safe }}
             <button class="w-full text-left px-4 py-2 text-gray-300 hover:bg-[#222] text-sm">Stop Bot</button>
           </form>
@@ -645,6 +659,9 @@ BASE_TEMPLATE = """
 
 def _escape(s: str) -> str:
     return s.replace("<", "&lt;").replace(">", "&gt;")
+
+def _empty_row(ncols: int, msg: str = "No data") -> str:
+    return f'<tr><td colspan="{ncols}" class="px-3 py-4 text-gray-500 text-sm">{msg}</td></tr>'
 
 _SECTION_TITLES = {
     "logs": "Logs",
@@ -1333,11 +1350,18 @@ def logs():
         + '</div>'
         + f"<div id='lastActionBox'>{data['last_html']}</div>"
         + f"<div id='deployStatusBox'>{data.get('deploy_html','')}</div>"
-        + """<div class="flex items-center gap-2">
+        + """<div class="flex flex-wrap items-center gap-2">
           <input id="logSearch" type="text" placeholder="Filter log lines…"
-            class="w-56 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />
-          <span id="logMatchCount" class="text-xs text-gray-600"></span>
+            class="w-48 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />
           <button id="logSearchClear" type="button" class="text-xs text-gray-600 hover:text-gray-300 hidden">&#x2715; Clear</button>
+          <div class="flex items-center gap-1 ml-1">
+            <button class="log-sev-btn active text-xs px-2 py-1 rounded border" data-sev="DEBUG"    style="background:#1a1a2a;color:#88a;border-color:#336">DEBUG</button>
+            <button class="log-sev-btn active text-xs px-2 py-1 rounded border" data-sev="INFO"     style="background:#0a1a0a;color:#8c8;border-color:#363">INFO</button>
+            <button class="log-sev-btn active text-xs px-2 py-1 rounded border" data-sev="WARNING"  style="background:#1a1400;color:#cc8;border-color:#553">WARNING</button>
+            <button class="log-sev-btn active text-xs px-2 py-1 rounded border" data-sev="ERROR"    style="background:#1a0a0a;color:#f88;border-color:#633">ERROR</button>
+            <button class="log-sev-btn active text-xs px-2 py-1 rounded border" data-sev="CRITICAL" style="background:#2a0a0a;color:#f44;border-color:#844">CRITICAL</button>
+          </div>
+          <span id="logMatchCount" class="text-xs text-gray-600"></span>
         </div>"""
         + f"<pre id='liveLogsPre' class='text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] border border-[#222] rounded-xl p-4 overflow-x-auto max-h-[70vh] overflow-y-auto'>{data['safe_logs']}</pre>"
         + "</div>"
@@ -1352,22 +1376,52 @@ def logs():
             const clearBtn = document.getElementById('logSearchClear');
             if (!pre) return;
 
-            // --- Log keyword filter ---
+            // --- Log severity + keyword filter ---
             let rawLines = null;
+            const sevBtns = document.querySelectorAll('.log-sev-btn');
+            const hiddenSev = new Set();
+
+            function sevLineLevel(line) {
+              const u = line.toUpperCase();
+              for (const sev of ['CRITICAL','ERROR','WARNING','INFO','DEBUG']) {
+                if (u.includes(sev)) return sev;
+              }
+              return null;
+            }
+
             function applyFilter() {
               if (!rawLines) rawLines = pre.textContent.split('\\n');
               const kw = (searchInput ? searchInput.value : '').toLowerCase();
-              if (!kw) {
-                pre.textContent = rawLines.join('\\n');
-                if (matchCount) matchCount.textContent = '';
-                if (clearBtn) clearBtn.classList.add('hidden');
-                return;
-              }
-              if (clearBtn) clearBtn.classList.remove('hidden');
-              const filtered = rawLines.filter(l => l.toLowerCase().includes(kw));
+              if (clearBtn) kw ? clearBtn.classList.remove('hidden') : clearBtn.classList.add('hidden');
+              const filtered = rawLines.filter(l => {
+                if (kw && !l.toLowerCase().includes(kw)) return false;
+                const lev = sevLineLevel(l);
+                if (lev && hiddenSev.has(lev)) return false;
+                return true;
+              });
               pre.textContent = filtered.join('\\n');
-              if (matchCount) matchCount.textContent = filtered.length + ' line' + (filtered.length !== 1 ? 's' : '');
+              if (matchCount) {
+                const total = rawLines.filter(l => l.trim()).length;
+                matchCount.textContent = (filtered.length < total) ? filtered.length + '/' + total + ' lines' : '';
+              }
             }
+
+            sevBtns.forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                const sev = btn.dataset.sev;
+                if (hiddenSev.has(sev)) {
+                  hiddenSev.delete(sev);
+                  btn.classList.add('active');
+                  btn.style.opacity = '1';
+                } else {
+                  hiddenSev.add(sev);
+                  btn.classList.remove('active');
+                  btn.style.opacity = '0.35';
+                }
+                applyFilter();
+              });
+            });
+
             if (searchInput) {
               searchInput.addEventListener('input', applyFilter);
               searchInput.addEventListener('keydown', function(e){ if(e.key==='Escape'){searchInput.value='';applyFilter();} });
@@ -1540,21 +1594,41 @@ def status():
     else:
         log_alerts_html = "<div class='text-sm text-gray-600 py-2'>No recent error-like log lines.</div>"
 
-    # loop health modules
+    # loop health modules — (display_name, running_key, heartbeat_key)
     modules = [
-        ("Race Supervisor",   bool(loops.get("race_supervisor"))),
-        ("F1 Reminders",      bool(loops.get("f1_reminders"))),
-        ("Standings",         bool(loops.get("standings"))),
-        ("XP Flush",          bool(loops.get("xp_flush"))),
-        ("Role Recovery",     bool(loops.get("periodic_role_recovery"))),
+        ("Race Supervisor",  "race_supervisor",         "RACE_SUPERVISOR_TASK"),
+        ("F1 Reminders",     "f1_reminders",            "F1_REMINDER_TASK"),
+        ("Standings",        "standings",               "STANDINGS_TASK"),
+        ("XP Flush",         "xp_flush",                "XP_FLUSH_TASK"),
+        ("Role Recovery",    "periodic_role_recovery",  "PERIODIC_ROLE_RECOVERY_TASK"),
+        ("Runtime Status",   "runtime_status",          "RUNTIME_STATUS_TASK"),
+        ("Driver Cache",     "driver_cache_validation", "DRIVER_CACHE_VALIDATION_TASK"),
     ]
+    now_ts = time.time()
     module_grid = ""
-    for name, ok in modules:
+    for name, loop_key, hb_key in modules:
+        ok = bool(loops.get(loop_key))
+        hb_iso = hb.get(hb_key) or hb.get(loop_key) or ""
+        hb_age_str = ""
+        if hb_iso:
+            try:
+                hb_dt = datetime.fromisoformat(hb_iso.replace("Z", "+00:00"))
+                age_s = int(now_ts - hb_dt.timestamp())
+                if age_s < 120:
+                    hb_age_str = f"{age_s}s ago"
+                elif age_s < 3600:
+                    hb_age_str = f"{age_s // 60}m ago"
+                else:
+                    hb_age_str = f"{age_s // 3600}h ago"
+            except Exception:
+                hb_age_str = ""
         bg = "bg-[#0f1f0f]" if ok else "bg-[#1f0f0f]"
         border = "border-green-900/40" if ok else "border-red-900/40"
+        hb_line = (f'<span class="text-xs text-gray-600 ml-auto mr-2">{_escape(hb_age_str)}</span>' if hb_age_str else '')
         module_grid += (
-            f'<div class="{bg} border {border} rounded-xl px-4 py-3 flex items-center justify-between">'
+            f'<div class="{bg} border {border} rounded-xl px-4 py-3 flex items-center gap-2">'
             f'<span class="text-sm text-gray-300">{name}</span>'
+            f'{hb_line}'
             f'{_dot_badge(ok)}'
             f'</div>'
         )
@@ -1845,6 +1919,7 @@ def watch_party_editor():
         venues.append({"name": "", "address": ""})
     active_venues = set(wp.get("_active_venues") or [])
     override = bool(wp.get("override"))
+    wp_active = bool(wp.get("active", True))
 
     def _val(k):
         return _escape(str(wp.get(k) or ""))
@@ -1890,9 +1965,27 @@ def watch_party_editor():
     override_border = "#c44" if override else "#2a8f52"
     override_label = "ON — using manual values" if override else "OFF — auto-detecting from schedule"
 
+    active_btn_bg = "#1f6f3f" if wp_active else "#8f2a2a"
+    active_btn_border = "#2a8f52" if wp_active else "#c44"
+    active_btn_label = "● ACTIVE — Card showing on website" if wp_active else "○ INACTIVE — Card hidden from website"
+
     page = f"""
       <h2 style="margin:0 0 16px 0;">Watch Party</h2>
       <meta name="wp-csrf" content="{_csrf_token()}" />
+
+      <!-- Active toggle (prominent) -->
+      <div style="margin-bottom:20px;padding:16px;background:#111;border:2px solid {'#2a8f52' if wp_active else '#8f2a2a'};border-radius:12px;">
+        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">Watch Party Visibility</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <button id="activeBtn" type="button" onclick="wpToggleActive()"
+            style="background:{active_btn_bg};color:#fff;border:1px solid {active_btn_border};padding:10px 20px;border-radius:10px;cursor:pointer;font-weight:700;font-size:15px;">
+            {active_btn_label}
+          </button>
+          <span style="color:#666;font-size:13px;">
+            Toggle whether the watch party card appears on the public website.
+          </span>
+        </div>
+      </div>
 
       <!-- Override toggle -->
       <div style="margin-bottom:20px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
@@ -1910,9 +2003,15 @@ def watch_party_editor():
 
       <!-- Auto-filled fields -->
       <div style="margin-bottom:20px;padding:14px;background:#1a1a1a;border:1px solid #333;border-radius:12px;">
-        <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px;">
-          Auto-filled fields
-          <span style="color:#555;font-weight:normal;text-transform:none;"> — leave blank to auto-detect, or fill in to override just this field</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <div style="color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em;">
+            Auto-filled fields
+            <span style="color:#555;font-weight:normal;text-transform:none;"> — leave blank to auto-detect, or fill in to override just this field</span>
+          </div>
+          <button type="button" onclick="wpAutofillF1()"
+            style="background:#1a3a6f;color:#7bb3ff;border:1px solid #2a5aaf;padding:5px 12px;border-radius:8px;cursor:pointer;font-size:12px;white-space:nowrap;">
+            📅 Auto-fill from F1 Calendar
+          </button>
         </div>
         {_field_row("Title", "title", auto=True)}
         {_field_row("Date", "date", auto=True)}
@@ -2021,6 +2120,27 @@ def watch_party_editor():
           }} catch(e) {{ toast('Request failed.', false); }}
         }};
 
+        window.wpToggleActive = async function() {{
+          try {{
+            const d = await post('/watch_party/toggle_active', {{}});
+            if (d.ok) window.location.reload();
+            else toast('Error: ' + d.error, false);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
+        window.wpAutofillF1 = async function() {{
+          try {{
+            const r = await fetch('/watch_party/autofill_f1', {{credentials: 'same-origin'}});
+            const d = await r.json();
+            if (!d.ok) {{ toast('Error: ' + d.error, false); return; }}
+            ['title','date','time'].forEach(k => {{
+              const el = document.getElementById('wp_' + k);
+              if (el && d[k]) el.value = d[k];
+            }});
+            toast('Fields filled from F1 calendar — click Save to apply each field.', true);
+          }} catch(e) {{ toast('Request failed.', false); }}
+        }};
+
         window.wpToggleOverride = async function() {{
           try {{
             const d = await post('/watch_party/toggle_override', {{}});
@@ -2119,6 +2239,58 @@ def wp_upload_flyer():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/watch_party/autofill_f1")
+@login_required
+def wp_autofill_f1():
+    """Fetch the next race from Jolpica and return pre-fill data."""
+    import requests as _req
+    from datetime import datetime, timezone
+    try:
+        url = "https://api.jolpi.ca/ergast/f1/current.json?limit=50"
+        r = _req.get(url, timeout=10)
+        r.raise_for_status()
+        races = r.json()["MRData"]["RaceTable"]["Races"]
+        now = datetime.now(timezone.utc)
+        next_race = None
+        for race in races:
+            date_str = race.get("date", "")
+            time_str = race.get("time", "00:00:00Z")
+            try:
+                dt = datetime.fromisoformat(f"{date_str}T{time_str.rstrip('Z')}+00:00")
+            except Exception:
+                continue
+            if dt >= now:
+                next_race = race
+                break
+        if not next_race:
+            return jsonify({"ok": False, "error": "No upcoming races found."})
+        race_name = next_race.get("raceName", "")
+        date_str = next_race.get("date", "")
+        time_str = (next_race.get("time") or "").rstrip("Z")
+        # Format date/time for display
+        try:
+            from datetime import datetime as _dt
+            dt = _dt.fromisoformat(f"{date_str}T{time_str}+00:00")
+            date_display = dt.strftime("%-m/%-d/%Y")
+            time_display = dt.strftime("%-I:%M %p UTC")
+        except Exception:
+            date_display = date_str
+            time_display = time_str
+        return jsonify({"ok": True, "title": race_name, "date": date_display, "time": time_display})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/watch_party/toggle_active", methods=["POST"])
+@login_required
+def wp_toggle_active():
+    with _WATCH_PARTY_LOCK:
+        wp = _load_wp()
+        wp["active"] = not bool(wp.get("active", True))
+        _save_wp(wp)
+    return jsonify({"ok": True, "active": wp["active"]})
+
+
 @app.route("/watch_party/toggle_override", methods=["POST"])
 @login_required
 def wp_toggle_override():
@@ -2190,11 +2362,26 @@ _DISCORD_EVENT_LOCATIONS = {
 @login_required
 def discord_events():
     page = f"""
+      <meta name="de-csrf" content="{_csrf_token()}" />
+
+      <!-- Existing Events -->
+      <div style="margin-bottom:32px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          <h2 style="margin:0;font-size:16px;">Upcoming Discord Events</h2>
+          <button onclick="deLoadEvents()" id="de-refresh-btn"
+            style="background:#1a1a1a;color:#aaa;border:1px solid #333;padding:4px 12px;border-radius:7px;font-size:12px;cursor:pointer;">
+            Refresh
+          </button>
+        </div>
+        <div id="de-events-list" style="display:flex;flex-direction:column;gap:8px;max-width:560px;">
+          <div style="color:#555;font-size:13px;">Loading…</div>
+        </div>
+      </div>
+
       <h2 style="margin:0 0 4px 0;">Create Discord Event</h2>
       <p style="color:#666;font-size:13px;margin:0 0 20px 0;">
         Creates a scheduled event in the Discord server. Times are Eastern.
       </p>
-      <meta name="de-csrf" content="{_csrf_token()}" />
 
       <div style="display:flex;flex-direction:column;gap:16px;max-width:560px;">
 
@@ -2415,10 +2602,134 @@ def discord_events():
           }}
         }};
 
+        // Load existing events on page load
+        window.deLoadEvents = async function() {{
+          const list = document.getElementById('de-events-list');
+          const btn  = document.getElementById('de-refresh-btn');
+          btn.textContent = 'Loading…'; btn.disabled = true;
+          try {{
+            const r = await fetch('/discord_events/list', {{credentials:'same-origin'}});
+            const data = await r.json();
+            if (!data.ok) {{
+              list.innerHTML = `<div style="color:#f88;font-size:13px;">Error: ${{data.error}}</div>`;
+              return;
+            }}
+            if (!data.events.length) {{
+              list.innerHTML = '<div style="color:#555;font-size:13px;">No upcoming events.</div>';
+              return;
+            }}
+            list.innerHTML = data.events.map(function(ev) {{
+              const start = ev.start ? new Date(ev.start) : null;
+              const end   = ev.end   ? new Date(ev.end)   : null;
+              const fmt = dt => dt ? dt.toLocaleString('en-US',{{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true,timeZone:'America/New_York'}}) + ' ET' : '';
+              const statusLabel = [,'SCHEDULED','ACTIVE','COMPLETED','CANCELLED'][ev.status] || '';
+              const statusColor = ev.status === 2 ? '#6f6' : ev.status >= 3 ? '#555' : '#aaa';
+              return `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;background:#1a1a1a;border:1px solid #333;border-radius:10px;">
+                <div style="min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${{ev.name}}</div>
+                  <div style="font-size:12px;color:#888;margin-top:3px;">${{fmt(start)}}${{end?' → '+fmt(end):''}}</div>
+                  ${{ev.location ? `<div style="font-size:11px;color:#555;margin-top:2px;">${{ev.location}}</div>` : ''}}
+                  <div style="font-size:11px;color:${{statusColor}};margin-top:3px;">${{statusLabel}}</div>
+                </div>
+                ${{ev.status <= 2 ? `<button onclick="deCancel('${{ev.id}}',this)"
+                  style="flex-shrink:0;background:#3a0d0d;color:#f88;border:1px solid #8f2a2a;padding:5px 11px;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap;">
+                  Cancel
+                </button>` : ''}}
+              </div>`;
+            }}).join('');
+          }} catch(e) {{
+            list.innerHTML = `<div style="color:#f88;font-size:13px;">Failed to load: ${{e.message}}</div>`;
+          }} finally {{
+            btn.textContent = 'Refresh'; btn.disabled = false;
+          }}
+        }};
+
+        window.deCancel = async function(eventId, btn) {{
+          if (!confirm('Cancel this Discord event? This cannot be undone.')) return;
+          btn.disabled = true; btn.textContent = '…';
+          try {{
+            const csrf = document.querySelector('meta[name="de-csrf"]').content;
+            const fd = new FormData();
+            fd.append('_csrf', csrf);
+            fd.append('event_id', eventId);
+            const r = await fetch('/discord_events/cancel', {{method:'POST', body:fd, credentials:'same-origin'}});
+            const data = await r.json();
+            if (data.ok) {{
+              deToast('Event cancelled.', true);
+              deLoadEvents();
+            }} else {{
+              deToast('❌ ' + data.error, false);
+              btn.disabled = false; btn.textContent = 'Cancel';
+            }}
+          }} catch(e) {{
+            deToast('❌ ' + e.message, false);
+            btn.disabled = false; btn.textContent = 'Cancel';
+          }}
+        }};
+
+        deLoadEvents();
+
       }})();
       </script>
     """
     return _render(page)
+
+
+@app.route("/discord_events/list")
+@login_required
+def discord_events_list():
+    if not _DISCORD_BOT_TOKEN or not _DISCORD_GUILD_ID:
+        return jsonify({"ok": False, "error": "Bot token or guild ID not configured."}), 500
+    try:
+        resp = requests.get(
+            f"https://discord.com/api/v10/guilds/{_DISCORD_GUILD_ID}/scheduled-events",
+            headers={"Authorization": f"Bot {_DISCORD_BOT_TOKEN}"},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": f"Network error: {e}"}), 502
+    if resp.status_code != 200:
+        return jsonify({"ok": False, "error": f"Discord API {resp.status_code}: {resp.text}"}), 502
+    events = resp.json()
+    out = []
+    for ev in events:
+        start = ev.get("scheduled_start_time", "")
+        end   = ev.get("scheduled_end_time", "")
+        loc   = (ev.get("entity_metadata") or {}).get("location") or ""
+        if not loc and ev.get("channel_id"):
+            loc = "Voice Channel"
+        out.append({
+            "id":    ev.get("id"),
+            "name":  ev.get("name"),
+            "start": start,
+            "end":   end,
+            "location": loc,
+            "status": ev.get("status", 1),
+        })
+    out.sort(key=lambda e: e["start"])
+    return jsonify({"ok": True, "events": out})
+
+
+@app.route("/discord_events/cancel", methods=["POST"])
+@login_required
+def discord_events_cancel():
+    _csrf_protect()
+    event_id = (request.form.get("event_id") or "").strip()
+    if not event_id:
+        return jsonify({"ok": False, "error": "Missing event_id."}), 400
+    if not _DISCORD_BOT_TOKEN or not _DISCORD_GUILD_ID:
+        return jsonify({"ok": False, "error": "Bot token or guild ID not configured."}), 500
+    try:
+        resp = requests.delete(
+            f"https://discord.com/api/v10/guilds/{_DISCORD_GUILD_ID}/scheduled-events/{event_id}",
+            headers={"Authorization": f"Bot {_DISCORD_BOT_TOKEN}"},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": f"Network error: {e}"}), 502
+    if resp.status_code in (200, 204):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": f"Discord API {resp.status_code}: {resp.text}"}), 502
 
 
 @app.route("/discord_events/create", methods=["POST"])
@@ -2619,11 +2930,21 @@ _RACE_LIVE_PAGE = """
 
 <!-- Active Session -->
 <div class="rl-card">
-  <div class="rl-label" style="display:flex;justify-content:space-between;">
+  <div class="rl-label" style="display:flex;justify-content:space-between;align-items:center;">
     <span>Current Session</span>
     <span id="session-ts" style="color:#444;font-size:11px;font-weight:400;"></span>
   </div>
   <div id="session-list">Loading…</div>
+  <div style="margin-top:12px;border-top:1px solid #1a1a1a;padding-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="font-size:11px;color:#555;">Manual session key:</span>
+    <select id="session-key-select"
+      style="background:#0a0a0a;color:#ccc;border:1px solid #2a2a2a;border-radius:6px;padding:3px 8px;font-size:12px;font-family:monospace;">
+      <option value="">— loading —</option>
+    </select>
+    <input id="session-key-gid" type="text" placeholder="Guild ID"
+      style="background:#0a0a0a;color:#ccc;border:1px solid #2a2a2a;border-radius:6px;padding:4px 8px;font-size:12px;font-family:monospace;width:130px;" />
+    <button class="rl-btn" onclick="applySessionKey()">Set Session Key</button>
+  </div>
 </div>
 
 <!-- Message Feed -->
@@ -2890,6 +3211,42 @@ async function applySetting(key, inputId) {
 document.getElementById('send-overlay').addEventListener('click', function(e){
   if (e.target === this) closeSendModal();
 });
+
+// ── Session key dropdown ──────────────────────────────────
+(async function loadSessionKeys() {
+  try {
+    const r = await fetch('/api/race/sessions', {credentials:'same-origin'});
+    const d = await r.json();
+    if (!d.ok || !d.sessions) return;
+    const sel = document.getElementById('session-key-select');
+    sel.innerHTML = '<option value="">— select —</option>' +
+      d.sessions.map(s =>
+        `<option value="${s.session_key}">${s.session_key} — ${escHtml(s.circuit_short_name)} ${escHtml(s.session_name)} (${s.date_start})</option>`
+      ).join('');
+    // Pre-fill guild ID from first guild
+    const gids = Object.keys(_state.guilds || {});
+    if (gids.length === 1) {
+      document.getElementById('session-key-gid').value = gids[0];
+    }
+  } catch(e) {}
+})();
+
+// Auto-fill guild from state once loaded
+evtSource.addEventListener('race_state', function() {
+  const gids = Object.keys(_state.guilds || {});
+  const gidEl = document.getElementById('session-key-gid');
+  if (gids.length === 1 && !gidEl.value) gidEl.value = gids[0];
+}, {once: true});
+
+async function applySessionKey() {
+  const sk = document.getElementById('session-key-select').value;
+  const gid = document.getElementById('session-key-gid').value.trim();
+  if (!sk) return alert('Select a session key.');
+  if (!gid) return alert('Enter a guild ID.');
+  // Use the set-session-key setting
+  const r = await _post('/api/race/settings', {key: 'session_key', value: parseInt(sk), guild_id: parseInt(gid)});
+  alert(r.message || (r.ok ? 'Done' : 'Error'));
+}
 </script>
 """
 
@@ -2961,17 +3318,49 @@ def api_race_start():
         return jsonify({"ok": False, "message": str(e)})
 
 
+@app.route("/api/race/sessions")
+@login_required
+def api_race_sessions():
+    """Fetch recent sessions from OpenF1 for session-key dropdown."""
+    try:
+        r = requests.get(
+            "https://api.openf1.org/v1/sessions",
+            params={"year": datetime.now(timezone.utc).year},
+            timeout=10,
+            headers={"User-Agent": "OF1-Dashboard"},
+        )
+        if r.status_code != 200:
+            return jsonify({"ok": False, "error": f"OpenF1 {r.status_code}"}), 502
+        sessions = r.json() or []
+        # Filter to the most recent 20, sorted descending
+        sorted_sess = sorted(sessions, key=lambda s: s.get("session_key") or 0, reverse=True)[:20]
+        out = [
+            {
+                "session_key": s.get("session_key"),
+                "session_name": s.get("session_name") or "",
+                "session_type": s.get("session_type") or "",
+                "circuit_short_name": s.get("circuit_short_name") or "",
+                "date_start": (s.get("date_start") or "")[:10],
+            }
+            for s in sorted_sess
+        ]
+        return jsonify({"ok": True, "sessions": out})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/race/settings", methods=["POST"])
 @login_required
 def api_race_settings():
     data = request.get_json(silent=True) or {}
-    key   = str(data.get("key")   or "").strip()
-    value = data.get("value")
+    key      = str(data.get("key")      or "").strip()
+    value    = data.get("value")
+    guild_id = int(data.get("guild_id") or 0)
     if not key:
         return jsonify({"ok": False, "message": "key required"})
     try:
         if bot_reference and hasattr(bot_reference, "of1_apply_race_setting"):
-            ok, message = bot_reference.of1_apply_race_setting(key, value)
+            ok, message = bot_reference.of1_apply_race_setting(key, value, guild_id=guild_id)
         else:
             return jsonify({"ok": False, "message": "Bot not connected"})
         return jsonify({"ok": ok, "message": message})
@@ -3048,6 +3437,38 @@ def gallery_mgr():
     return _render(body)
 
 
+def _compress_gallery_image(path: str, max_width: int = 1920, quality: int = 82) -> None:
+    """Compress/resize a gallery image in-place using Pillow."""
+    try:
+        from PIL import Image
+        ext = os.path.splitext(path)[1].lower()
+        with Image.open(path) as img:
+            w, h = img.size
+            if w <= max_width and os.path.getsize(path) < 150_000:
+                return
+            if w > max_width:
+                img = img.resize((max_width, int(h * max_width / w)), Image.LANCZOS)
+            exif = img.info.get("exif", b"")
+            kwargs: dict = {"optimize": True}
+            if ext in {".jpg", ".jpeg"}:
+                kwargs["quality"] = quality
+                kwargs["format"] = "JPEG"
+                if exif:
+                    kwargs["exif"] = exif
+            elif ext == ".webp":
+                kwargs["quality"] = quality
+                kwargs["format"] = "WebP"
+            elif ext == ".png":
+                kwargs["compress_level"] = 7
+                kwargs["format"] = "PNG"
+            else:
+                return
+            img.save(path, **kwargs)
+    except Exception as e:
+        import logging
+        logging.warning(f"[Gallery] Auto-compress failed for {path}: {e}")
+
+
 @app.route("/gallery_mgr/upload", methods=["POST"])
 @login_required
 def gallery_mgr_upload():
@@ -3063,6 +3484,7 @@ def gallery_mgr_upload():
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in f.filename)
         dest = os.path.join(GALLERY_DIR, safe)
         f.save(dest)
+        _compress_gallery_image(dest)
         saved += 1
     _audit_log("gallery_upload", f"count={saved}")
     return redirect(url_for("gallery_mgr"))
@@ -3641,14 +4063,16 @@ def xp_mgr():
         guild_tabs += f'<button onclick="showGuild(\'{gid}\')" id="tab_{gid}" class="px-3 py-1.5 text-sm rounded-lg border border-[#2a2a2a] text-gray-400 hover:text-white hover:bg-[#1a1a1a]">{gid}</button>'
 
         def _row(uid, rec, gid=gid, name_map=name_map):
+            disp = name_map.get(uid) or uid
             cell = _user_cell(uid, name_map)
             safe_gid = _escape(gid)
             safe_uid = _escape(uid)
             xp  = int((rec or {}).get("xp", 0) or 0)
             lvl = int((rec or {}).get("level", 0) or 0)
             msgs = int((rec or {}).get("messages", 0) or 0)
+            search_key = _escape(f"{disp} {uid}").lower()
             return (
-                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+                f'<tr class="xp-row border-b border-[#1a1a1a] hover:bg-[#111]" data-search="{search_key}">'
                 f'<td class="px-3 py-2 text-sm text-gray-300">{cell}</td>'
                 f'<td class="px-3 py-2 text-sm text-gray-200">{xp:,}</td>'
                 f'<td class="px-3 py-2 text-sm text-gray-400">{lvl}</td>'
@@ -3662,11 +4086,18 @@ def xp_mgr():
                 f'</tr>'
             )
 
-        user_rows = "".join(_row(uid, rec) for uid, rec in sorted_users[:50]) \
+        user_rows = "".join(_row(uid, rec) for uid, rec in sorted_users) \
             or '<tr><td colspan="5" class="px-3 py-3 text-gray-500 text-sm">No users.</td></tr>'
 
         tables += (
             f'<div id="guild_{gid}" class="guild-panel hidden">'
+            f'<div class="flex items-center gap-2 mb-2">'
+            f'<input type="text" placeholder="Search member…" oninput="xpSearch(this)"'
+            f' class="w-48 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />'
+            f'<span class="xp-count text-xs text-gray-600"></span>'
+            f'<a href="/xp_mgr/export_csv?guild_id={gid}" download="xp_{gid}.csv"'
+            f' class="ml-auto text-xs bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 px-3 py-1.5 rounded-lg hover:bg-[#222]">Export CSV</a>'
+            f'</div>'
             f'<div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">'
             f'<table class="w-full text-left">'
             f'<thead><tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">'
@@ -3674,7 +4105,7 @@ def xp_mgr():
             f'<th class="px-3 py-2">Level</th><th class="px-3 py-2">Messages</th><th class="px-3 py-2">Adjust</th>'
             f'</tr></thead>'
             f'<tbody>{user_rows}</tbody></table></div>'
-            f'<p class="text-xs text-gray-600 mt-2">Top 50 by XP. Hover a name to see user ID.</p>'
+            f'<p class="text-xs text-gray-600 mt-2">Hover a name to see user ID.</p>'
             f'</div>'
         )
 
@@ -3705,6 +4136,20 @@ def xp_mgr():
     const firstGuild = document.querySelector('.guild-panel');
     if (firstGuild) firstGuild.classList.remove('hidden');
 
+    function xpSearch(input) {{
+      const kw = input.value.toLowerCase();
+      const panel = input.closest('.guild-panel');
+      const rows = panel ? panel.querySelectorAll('.xp-row') : [];
+      let shown = 0;
+      rows.forEach(function(r) {{
+        const match = !kw || (r.dataset.search || '').includes(kw);
+        r.style.display = match ? '' : 'none';
+        if (match) shown++;
+      }});
+      const countEl = panel ? panel.querySelector('.xp-count') : null;
+      if (countEl) countEl.textContent = kw ? shown + '/' + rows.length + ' shown' : '';
+    }}
+
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     async function adjustXp(gid, uid) {{
       const amt = parseInt(document.getElementById('xp_amt_' + gid + '_' + uid)?.value || '0');
@@ -3721,6 +4166,39 @@ def xp_mgr():
     </script>
     """
     return _render(body)
+
+
+@app.route("/xp_mgr/export_csv")
+@login_required
+def xp_mgr_export_csv():
+    guild_id = (request.args.get("guild_id") or "").strip()
+    if not guild_id:
+        return "guild_id required", 400
+    if bot_reference and hasattr(bot_reference, "of1_xp_snapshot"):
+        xp_state = bot_reference.of1_xp_snapshot()
+    else:
+        xp_state = _load_xp_state_direct()
+    name_map = _get_name_map(guild_id)
+    guilds = xp_state.get("guilds") or {}
+    users = (guilds.get(guild_id) or {}).get("users") or {}
+    sorted_users = sorted(users.items(), key=lambda kv: int((kv[1] or {}).get("xp", 0) or 0), reverse=True)
+    import io, csv as _csv
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["user_id", "display_name", "xp", "level", "messages"])
+    for uid, rec in sorted_users:
+        disp = name_map.get(uid) or uid
+        xp   = int((rec or {}).get("xp", 0) or 0)
+        lvl  = int((rec or {}).get("level", 0) or 0)
+        msgs = int((rec or {}).get("messages", 0) or 0)
+        w.writerow([uid, disp, xp, lvl, msgs])
+    csv_bytes = buf.getvalue().encode("utf-8")
+    from flask import Response
+    return Response(
+        csv_bytes,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="xp_{guild_id}.csv"'},
+    )
 
 
 @app.route("/xp_mgr/adjust", methods=["POST"])
@@ -3776,6 +4254,28 @@ def _discord_list_channels(guild_id: str) -> list:
     return []
 
 
+def _discord_list_roles(guild_id: str) -> list:
+    token = _DISCORD_BOT_TOKEN_LOCAL or _DISCORD_BOT_TOKEN
+    if not token or not guild_id:
+        return []
+    try:
+        r = requests.get(
+            f"https://discord.com/api/v10/guilds/{guild_id}/roles",
+            headers={"Authorization": f"Bot {token}", "User-Agent": "OF1-Dashboard"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            roles = r.json() or []
+            return sorted(
+                [ro for ro in roles if isinstance(ro, dict) and not ro.get("managed") and ro.get("name") != "@everyone"],
+                key=lambda ro: int(ro.get("position") or 0),
+                reverse=True,
+            )
+    except Exception:
+        pass
+    return []
+
+
 def _discord_send_message(channel_id: str, content: str) -> tuple:
     token = _DISCORD_BOT_TOKEN_LOCAL or _DISCORD_BOT_TOKEN
     if not token:
@@ -3799,15 +4299,19 @@ def _discord_send_message(channel_id: str, content: str) -> tuple:
 def announce():
     guild_id = _DISCORD_GUILD_ID or (os.getenv("DISCORD_GUILD_ID") or "").strip()
     channels = _discord_list_channels(guild_id)
+    roles = _discord_list_roles(guild_id)
     flash_msg = ""
 
     if request.method == "POST":
         channel_id = (request.form.get("channel_id") or "").strip()
         content = (request.form.get("content") or "").strip()
+        role_id = (request.form.get("role_id") or "").strip()
         if channel_id and content:
+            if role_id:
+                content = f"<@&{role_id}>\n{content}"
             ok, msg = _discord_send_message(channel_id, content)
             flash_msg = f'{"✅" if ok else "❌"} {_escape(msg)}'
-            _audit_log("announce", f"channel={channel_id} ok={ok} len={len(content)}")
+            _audit_log("announce", f"channel={channel_id} ok={ok} len={len(content)} role={role_id or 'none'}")
         else:
             flash_msg = "❌ Channel and message are required."
 
@@ -3816,17 +4320,30 @@ def announce():
         for c in channels
     ) or '<option value="">No channels found — check bot token/guild ID</option>'
 
+    role_opts = '<option value="">None (no ping)</option>' + "".join(
+        f'<option value="{_escape(str(ro.get("id","")))}">@{_escape(str(ro.get("name","")))}</option>'
+        for ro in roles
+    )
+
     body = f"""
     <div class="space-y-4 max-w-2xl">
       <h1 class="text-xl font-bold text-white">Announcement Broadcaster</h1>
       {f'<div class="bg-[#111] border border-[#222] rounded-xl px-4 py-3 text-sm">{flash_msg}</div>' if flash_msg else ''}
       <form method="post" class="bg-[#111] border border-[#222] rounded-xl p-4 space-y-3">
         {_csrf_input()}
-        <div>
-          <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Channel</label>
-          <select name="channel_id" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">
-            {chan_opts}
-          </select>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Channel</label>
+            <select name="channel_id" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">
+              {chan_opts}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Role Ping <span class="text-gray-600 normal-case">(optional)</span></label>
+            <select name="role_id" class="w-full bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500">
+              {role_opts}
+            </select>
+          </div>
         </div>
         <div>
           <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Message</label>
@@ -3835,7 +4352,7 @@ def announce():
         </div>
         <button class="bg-[#1f6f3f] hover:bg-[#2a8f52] text-white text-sm px-5 py-2 rounded-lg transition-colors font-medium">Send to Discord</button>
       </form>
-      <p class="text-xs text-gray-600">Message is sent immediately as the bot to the selected channel. Supports Discord markdown.</p>
+      <p class="text-xs text-gray-600">Message is sent immediately as the bot to the selected channel. Supports Discord markdown. Role ping is prepended if selected.</p>
     </div>
     """
     return _render(body)
@@ -3906,10 +4423,14 @@ def schedule_msgs():
         ok_badge = '<span class="text-green-400 text-xs">Sent</span>' if (sent and m.get("sent_ok")) else \
                    ('<span class="text-red-400 text-xs">Failed</span>' if (sent and not m.get("sent_ok")) else \
                     '<span class="text-yellow-400 text-xs">Pending</span>')
-        send_dt = datetime.fromtimestamp(float(m.get("send_at_ts") or 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        send_ts = float(m.get("send_at_ts") or 0)
+        send_dt = datetime.fromtimestamp(send_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         msg_rows += (
             f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
-            f'<td class="px-3 py-2 text-xs text-gray-500">{_escape(send_dt)}</td>'
+            f'<td class="px-3 py-2 text-xs text-gray-500">'
+            f'{_escape(send_dt)}<br>'
+            f'<span class="rel-time text-gray-600" data-ts="{int(send_ts)}"></span>'
+            f'</td>'
             f'<td class="px-3 py-2 text-xs text-gray-400">{_escape(str(m.get("channel_id",""))[:20])}</td>'
             f'<td class="px-3 py-2 text-sm text-gray-300 max-w-xs truncate">{_escape((m.get("content") or "")[:80])}</td>'
             f'<td class="px-3 py-2">{ok_badge}</td>'
@@ -3952,6 +4473,26 @@ def schedule_msgs():
       </div>
       <p class="text-xs text-gray-600">Worker checks every 30 seconds and sends any due messages.</p>
     </div>
+    <script>
+    (function(){{
+      function relTime(ts) {{
+        const diff = Math.round((ts * 1000 - Date.now()) / 1000);
+        const abs = Math.abs(diff);
+        const past = diff < 0;
+        if (abs < 60)   return past ? 'just now' : 'in <1 min';
+        if (abs < 3600) return (past?'':'in ') + Math.round(abs/60) + ' min' + (past?' ago':'');
+        if (abs < 86400)return (past?'':'in ') + Math.round(abs/3600) + ' hr' + (past?' ago':'');
+        return (past?'':'in ') + Math.round(abs/86400) + ' day' + (Math.round(abs/86400)!==1?'s':'') + (past?' ago':'');
+      }}
+      function updateRelTimes() {{
+        document.querySelectorAll('.rel-time[data-ts]').forEach(function(el) {{
+          el.textContent = relTime(parseInt(el.dataset.ts));
+        }});
+      }}
+      updateRelTimes();
+      setInterval(updateRelTimes, 30000);
+    }})();
+    </script>
     """
     return _render(body)
 
@@ -3991,6 +4532,296 @@ def schedule_msgs_cancel():
         msgs = [m for m in msgs if str(m.get("id") or "") != msg_id]
         _save_scheduled_msgs(msgs)
     return redirect(url_for("schedule_msgs"))
+
+
+# ─────────────────────────────────────────────────────────────
+# Predictions Read-Only View
+# ─────────────────────────────────────────────────────────────
+@app.route("/predictions")
+@login_required
+def predictions_view():
+    state = load_state() or {}
+    pred_data = state.get("predictions") or {}
+    rounds = pred_data.get("rounds") or {}
+    totals_root = pred_data.get("totals") or {}
+
+    # Find the most recent/active round
+    guild_id = None
+    for rnd_key, rnd_obj in rounds.items():
+        entries = rnd_obj.get("entries") or {}
+        for gid in entries:
+            guild_id = gid
+            break
+        if guild_id:
+            break
+    if not guild_id:
+        # Try totals
+        if totals_root:
+            guild_id = next(iter(totals_root))
+
+    name_map = _get_name_map(guild_id) if guild_id else {}
+
+    CAT_LABELS = [
+        ("pole",           "Pole"),
+        ("podium",         "Podium"),
+        ("p10",            "P10"),
+        ("sprint_pole",    "SP Pole"),
+        ("sprint_podium",  "SP Podium"),
+        ("sprint_p8",      "SP P8"),
+    ]
+
+    round_sections = []
+    for rnd_key in sorted(rounds.keys(), reverse=True):
+        rnd_obj = rounds[rnd_key]
+        race_name = rnd_obj.get("race_name") or rnd_key
+        actual = rnd_obj.get("actual") or {}
+        scored = bool(rnd_obj.get("scored"))
+        guild_entries = (rnd_obj.get("entries") or {}).get(guild_id or "", {})
+        if not guild_entries:
+            continue
+
+        # Which cats have actual results set
+        cats_with_actuals = {cat for cat, _ in CAT_LABELS if actual.get(cat)}
+
+        user_rows = ""
+        for uid, entry in sorted(guild_entries.items(), key=lambda kv: kv[0]):
+            display = name_map.get(uid) or f"<{uid}>"
+            cells = ""
+            for cat, label in CAT_LABELS:
+                val = entry.get(cat)
+                if val is None:
+                    cells += f'<td class="px-3 py-2 text-sm text-gray-600">—</td>'
+                    continue
+                if isinstance(val, list):
+                    pick_str = " / ".join(str(x) for x in val)
+                else:
+                    pick_str = str(val)
+                # Check correctness if actuals available
+                style = "text-gray-300"
+                badge = ""
+                if cat in cats_with_actuals:
+                    actual_val = actual.get(cat)
+                    if isinstance(actual_val, list):
+                        correct = any(str(v).lower() in pick_str.lower() for v in actual_val)
+                    else:
+                        correct = str(actual_val or "").lower() in pick_str.lower()
+                    style = "text-green-400" if correct else "text-red-400"
+                cells += f'<td class="px-3 py-2 text-sm {style} font-medium">{_escape(pick_str)}</td>'
+
+            user_rows += (
+                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#0f0f0f]">'
+                f'<td class="px-3 py-2 text-sm text-gray-300">{_escape(display)}</td>'
+                f'{cells}'
+                f'</tr>'
+            )
+
+        # Actual row if scored
+        actual_row = ""
+        if cats_with_actuals:
+            actual_cells = ""
+            for cat, label in CAT_LABELS:
+                av = actual.get(cat)
+                if av is None:
+                    actual_cells += f'<td class="px-3 py-2 text-sm text-gray-600">—</td>'
+                elif isinstance(av, list):
+                    actual_cells += f'<td class="px-3 py-2 text-sm text-yellow-300 font-semibold">{_escape(" / ".join(str(x) for x in av))}</td>'
+                else:
+                    actual_cells += f'<td class="px-3 py-2 text-sm text-yellow-300 font-semibold">{_escape(str(av))}</td>'
+            actual_row = (
+                f'<tr class="border-b border-[#333] bg-[#0d0d00]">'
+                f'<td class="px-3 py-2 text-xs text-yellow-500 font-bold uppercase tracking-wider">Actual</td>'
+                f'{actual_cells}'
+                f'</tr>'
+            )
+
+        col_headers = "".join(
+            f'<th class="px-3 py-2 text-left text-xs text-gray-500 uppercase tracking-wider">{label}</th>'
+            for _, label in CAT_LABELS
+        )
+
+        scored_badge = '<span class="text-xs text-green-400 ml-2">● Scored</span>' if scored else ""
+        round_sections.append(
+            f'<div class="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">'
+            f'<div class="px-4 py-3 border-b border-[#222] text-sm font-semibold text-gray-200">'
+            f'{_escape(race_name)}{scored_badge}'
+            f'</div>'
+            f'<div class="overflow-x-auto">'
+            f'<table class="w-full text-left">'
+            f'<thead><tr class="border-b border-[#1a1a1a]">'
+            f'<th class="px-3 py-2 text-left text-xs text-gray-500 uppercase tracking-wider">User</th>'
+            f'{col_headers}'
+            f'</tr></thead>'
+            f'<tbody>'
+            f'{actual_row}'
+            f'{user_rows}'
+            f'</tbody></table></div></div>'
+        )
+
+    # Totals leaderboard
+    totals_rows = ""
+    totals_gid_data = totals_root.get(guild_id or "", {}) if guild_id else {}
+    if totals_gid_data:
+        sorted_totals = sorted(totals_gid_data.items(), key=lambda kv: int(kv[1] or 0), reverse=True)
+        for rank, (uid, pts) in enumerate(sorted_totals, 1):
+            display = name_map.get(uid) or f"<{uid}>"
+            totals_rows += (
+                f'<tr class="border-b border-[#1a1a1a] hover:bg-[#111]">'
+                f'<td class="px-3 py-2 text-sm text-gray-500">#{rank}</td>'
+                f'<td class="px-3 py-2 text-sm text-gray-300">{_escape(display)}</td>'
+                f'<td class="px-3 py-2 text-sm text-green-400 font-semibold">{int(pts or 0)} pts</td>'
+                f'</tr>'
+            )
+
+    totals_table = (
+        f'<div class="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">'
+        f'<div class="px-4 py-3 border-b border-[#222] text-sm font-semibold text-gray-200">Overall Leaderboard</div>'
+        f'<table class="w-full text-left"><thead>'
+        f'<tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">'
+        f'<th class="px-3 py-2">#</th><th class="px-3 py-2">User</th><th class="px-3 py-2">Points</th>'
+        f'</tr></thead><tbody>'
+        f'{totals_rows or _empty_row(3, "No scores yet.")}'
+        f'</tbody></table></div>'
+    )
+
+    # Build round key options for the set-result form
+    round_options = "".join(
+        f'<option value="{_escape(rk)}">{_escape((rounds[rk].get("race_name") or rk))}</option>'
+        for rk in sorted(rounds.keys(), reverse=True)
+        if rounds[rk].get("entries")
+    )
+
+    csrf = _csrf_token()
+    set_result_form = f"""
+    <div class="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">
+      <div class="px-4 py-3 border-b border-[#222] text-sm font-semibold text-gray-200">Set Actual Results</div>
+      <div class="p-4 space-y-3">
+        <meta name="pred-csrf" content="{csrf}" />
+        <div>
+          <label class="block text-xs text-gray-500 uppercase tracking-wider mb-1">Round</label>
+          <select id="pr-round" class="w-full bg-[#111] border border-[#333] text-gray-200 text-sm rounded-lg px-3 py-2">
+            {round_options or '<option value="">No rounds</option>'}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 uppercase tracking-wider mb-1">Category</label>
+          <select id="pr-cat" class="w-full bg-[#111] border border-[#333] text-gray-200 text-sm rounded-lg px-3 py-2">
+            <option value="pole">Pole</option>
+            <option value="p10">P10</option>
+            <option value="podium">Podium (P1 | P2 | P3)</option>
+            <option value="sprint_pole">Sprint Pole</option>
+            <option value="sprint_p8">Sprint P8</option>
+            <option value="sprint_podium">Sprint Podium (P1 | P2 | P3)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 uppercase tracking-wider mb-1">Value</label>
+          <input id="pr-value" type="text" placeholder="Verstappen  or  Verstappen | Norris | Leclerc"
+            class="w-full bg-[#111] border border-[#333] text-gray-200 text-sm rounded-lg px-3 py-2 outline-none" />
+          <div class="text-xs text-gray-600 mt-1">For podium categories use | to separate 3 names.</div>
+        </div>
+        <button onclick="prSubmit()"
+          class="w-full bg-[#1a3a1a] hover:bg-[#2a5a2a] border border-[#2a8f52] text-green-300 text-sm font-semibold py-2 rounded-lg transition-colors">
+          Save Result
+        </button>
+        <div id="pr-msg" class="hidden text-sm px-3 py-2 rounded-lg"></div>
+      </div>
+    </div>
+    <script>
+    (function(){{
+      window.prSubmit = async function() {{
+        const round = document.getElementById('pr-round').value;
+        const cat   = document.getElementById('pr-cat').value;
+        const val   = document.getElementById('pr-value').value.trim();
+        const msg   = document.getElementById('pr-msg');
+        if (!round) return prMsg('No round selected.', false);
+        if (!val)   return prMsg('Enter a value.', false);
+        const csrf  = document.querySelector('meta[name="pred-csrf"]').content;
+        const fd = new FormData();
+        fd.append('_csrf', csrf);
+        fd.append('round_key', round);
+        fd.append('category', cat);
+        fd.append('value', val);
+        try {{
+          const r = await fetch('/predictions/set_result', {{method:'POST', body:fd, credentials:'same-origin'}});
+          const d = await r.json();
+          prMsg(d.ok ? ('✅ ' + d.message) : ('❌ ' + d.error), d.ok);
+          if (d.ok) setTimeout(() => location.reload(), 1200);
+        }} catch(e) {{
+          prMsg('❌ ' + e.message, false);
+        }}
+      }};
+      function prMsg(text, ok) {{
+        const el = document.getElementById('pr-msg');
+        el.textContent = text;
+        el.className = 'text-sm px-3 py-2 rounded-lg ' + (ok ? 'bg-[#0d3320] text-green-300 border border-[#2a8f52]' : 'bg-[#3a0d0d] text-red-300 border border-[#8f2a2a]');
+        el.classList.remove('hidden');
+      }}
+    }})();
+    </script>
+    """
+
+    content = f"""
+    <div class="space-y-4 max-w-5xl">
+      <h1 class="text-xl font-bold text-white">Predictions</h1>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        <div class="lg:col-span-2 space-y-4">
+          {''.join(round_sections) or '<div class="text-gray-500 text-sm">No prediction rounds found.</div>'}
+        </div>
+        <div class="space-y-4">
+          {totals_table}
+          {set_result_form}
+        </div>
+      </div>
+    </div>
+    """
+    return _render(content)
+
+
+@app.route("/predictions/set_result", methods=["POST"])
+@login_required
+def predictions_set_result():
+    _csrf_protect()
+    round_key = (request.form.get("round_key") or "").strip()
+    category  = (request.form.get("category") or "").strip().lower()
+    raw_value = (request.form.get("value") or "").strip()
+
+    valid_cats = {"pole", "p10", "sprint_pole", "sprint_p8", "podium", "sprint_podium"}
+    if not round_key:
+        return jsonify({"ok": False, "error": "round_key is required"}), 400
+    if category not in valid_cats:
+        return jsonify({"ok": False, "error": f"Invalid category '{category}'"}), 400
+    if not raw_value:
+        return jsonify({"ok": False, "error": "value is required"}), 400
+
+    # Podium categories: parse "A | B | C"
+    if category in {"podium", "sprint_podium"}:
+        parts = [p.strip() for p in raw_value.split("|")]
+        parts = [p for p in parts if p]
+        if len(parts) != 3:
+            return jsonify({"ok": False, "error": "Podium requires exactly 3 names separated by |"}), 400
+        value = parts
+    else:
+        value = raw_value
+
+    if bot_reference and hasattr(bot_reference, "of1_pred_set_result"):
+        ok, msg = bot_reference.of1_pred_set_result(round_key, category, value)
+    else:
+        # Fallback: write directly to state file
+        try:
+            from storage import load_state, save_state
+            state = load_state() or {}
+            rounds = (state.setdefault("predictions", {})).setdefault("rounds", {})
+            rnd = rounds.setdefault(round_key, {"locked": False, "race_name": None, "actual": {}, "entries": {}, "scored": False})
+            rnd.setdefault("actual", {})[category] = value
+            rnd["scored"] = False
+            save_state(state)
+            ok, msg = True, f"Set {category} = {value!r}"
+        except Exception as e:
+            ok, msg = False, str(e)
+
+    if ok:
+        return jsonify({"ok": True, "message": msg})
+    return jsonify({"ok": False, "error": msg}), 400
 
 
 # ─────────────────────────────────────────────────────────────
@@ -4142,6 +4973,52 @@ def cmd_log():
 # ─────────────────────────────────────────────────────────────
 # OpenF1 API Health
 # ─────────────────────────────────────────────────────────────
+def _render_website_cache_section(data: dict) -> str:
+    if not data.get("ok"):
+        return '<p class="text-xs text-gray-600">Website cache unavailable — is the website process running?</p>'
+    func_entries = data.get("func_cache") or []
+    raw_count = int(data.get("raw_cache_count") or 0)
+    func_rows = ""
+    for e in func_entries:
+        age = int(e.get("age_s") or 0)
+        ttl = int(e.get("ttl_s") or 300)
+        pct = min(100, int(age * 100 / ttl)) if ttl else 0
+        bar_color = "bg-green-700" if pct < 60 else ("bg-yellow-600" if pct < 90 else "bg-red-700")
+        has_data = bool(e.get("has_data"))
+        func_rows += (
+            f'<tr class="border-b border-[#1a1a1a]">'
+            f'<td class="px-3 py-2 text-xs font-mono text-gray-300">{_escape(str(e.get("key","")))}</td>'
+            f'<td class="px-3 py-2 text-xs text-gray-500">{age}s / {ttl}s</td>'
+            f'<td class="px-3 py-2 w-24"><div class="h-1.5 rounded-full bg-[#222]"><div class="{bar_color} h-1.5 rounded-full" style="width:{pct}%"></div></div></td>'
+            f'<td class="px-3 py-2 text-xs {"text-green-400" if has_data else "text-gray-600"}">'
+            f'{"cached" if has_data else "empty"}</td>'
+            f'</tr>'
+        )
+    return (
+        f'<div class="overflow-x-auto bg-[#0a0a0a] border border-[#222] rounded-xl">'
+        f'<table class="w-full text-left"><thead>'
+        f'<tr class="border-b border-[#222] text-xs text-gray-500 uppercase tracking-widest">'
+        f'<th class="px-3 py-2">Key</th><th class="px-3 py-2">Age / TTL</th>'
+        f'<th class="px-3 py-2">Freshness</th><th class="px-3 py-2">State</th>'
+        f'</tr></thead><tbody>'
+        f'{func_rows or _empty_row(4, "No entries")}'
+        f'</tbody></table></div>'
+        f'<p class="text-xs text-gray-600">High-level cache entries. Raw OpenF1 response cache: {raw_count} entries.</p>'
+    )
+
+
+def _fetch_website_cache_stats() -> dict:
+    """Fetch cache stats from the website process (localhost only)."""
+    website_port = int(os.getenv("WEBSITE_PORT", "5001"))
+    try:
+        r = requests.get(f"http://127.0.0.1:{website_port}/api/cache_stats", timeout=3)
+        if r.status_code == 200:
+            return r.json() or {}
+    except Exception:
+        pass
+    return {}
+
+
 @app.route("/openf1_health")
 @login_required
 def openf1_health():
@@ -4149,6 +5026,8 @@ def openf1_health():
         trace = bot_reference.of1_openf1_health_snapshot()
     else:
         trace = {}
+
+    website_cache = _fetch_website_cache_stats()
 
     window_start = float(trace.get("window_start") or 0)
     window_age_s = int(time.time() - window_start) if window_start else 0
@@ -4213,6 +5092,10 @@ def openf1_health():
         </table>
       </div>
       <p class="text-xs text-gray-600">Trace window resets every 60 seconds — counters reflect the current window only.</p>
+
+      <!-- Website cache stats -->
+      <h2 class="text-base font-semibold text-white pt-2">Website Cache</h2>
+      {_render_website_cache_section(website_cache)}
     </div>
     <script>setTimeout(() => location.reload(), 20000);</script>
     """
@@ -4232,12 +5115,38 @@ def audit_log():
         tail_n = 200
     try:
         with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
-            lines = f.readlines()[-tail_n:]
-        safe = _escape("".join(lines))
+            raw_lines = f.readlines()[-tail_n:]
     except FileNotFoundError:
-        safe = "No audit log yet — actions will appear here after the first admin action."
-    except Exception as e:
-        safe = f"Unable to read audit log: {_escape(str(e))}"
+        raw_lines = []
+    except Exception:
+        raw_lines = []
+
+    # Extract unique action types from lines like: [ts] user | action | detail
+    action_types: list = []
+    seen: set = set()
+    for line in raw_lines:
+        parts = line.split("|")
+        if len(parts) >= 2:
+            action = parts[1].strip()
+            if action and action not in seen:
+                seen.add(action)
+                action_types.append(action)
+
+    safe = _escape("".join(raw_lines)) if raw_lines else "No audit log yet — actions will appear here after the first admin action."
+
+    action_btns = "".join(
+        f'<button class="al-type-btn active text-xs px-2 py-1 rounded border border-[#333] bg-[#1a1a1a] text-gray-300 hover:bg-[#222]" data-action="{_escape(a)}">{_escape(a)}</button>'
+        for a in action_types
+    ) if action_types else ""
+
+    filter_row = f"""
+    <div class="flex flex-wrap items-center gap-2">
+      <input id="alSearch" type="text" placeholder="Search…"
+        class="w-44 bg-[#0a0a0a] border border-[#2a2a2a] text-gray-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-gray-500" />
+      <button id="alClear" class="text-xs text-gray-600 hover:text-gray-300 hidden">&#x2715; Clear</button>
+      {('<span class="text-xs text-gray-600 mr-1">Action:</span>' + action_btns) if action_btns else ''}
+      <span id="alCount" class="text-xs text-gray-600 ml-auto"></span>
+    </div>""" if action_btns else ""
 
     body = f"""
     <div class="space-y-4 max-w-4xl">
@@ -4251,8 +5160,63 @@ def audit_log():
         </form>
       </div>
       <p class="text-xs text-gray-600">Records every admin action: quiz edits, deploys, gallery changes, announcements.</p>
-      <pre class="text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] border border-[#222] rounded-xl p-4 overflow-x-auto max-h-[75vh] overflow-y-auto">{safe}</pre>
+      {filter_row}
+      <pre id="alPre" class="text-xs text-gray-400 whitespace-pre-wrap bg-[#0a0a0a] border border-[#222] rounded-xl p-4 overflow-x-auto max-h-[75vh] overflow-y-auto">{safe}</pre>
     </div>
+    <script>
+    (function(){{
+      const pre = document.getElementById('alPre');
+      if (!pre) return;
+      const searchInput = document.getElementById('alSearch');
+      const clearBtn = document.getElementById('alClear');
+      const countEl  = document.getElementById('alCount');
+      const typeBtns = document.querySelectorAll('.al-type-btn');
+      let rawLines = null;
+      const hiddenActions = new Set();
+
+      function applyFilter() {{
+        if (!rawLines) rawLines = pre.textContent.split('\\n');
+        const kw = searchInput ? searchInput.value.toLowerCase() : '';
+        if (clearBtn) kw ? clearBtn.classList.remove('hidden') : clearBtn.classList.add('hidden');
+        const filtered = rawLines.filter(function(l) {{
+          if (kw && !l.toLowerCase().includes(kw)) return false;
+          if (hiddenActions.size > 0) {{
+            const parts = l.split('|');
+            if (parts.length >= 2) {{
+              const action = parts[1].trim();
+              if (hiddenActions.has(action)) return false;
+            }}
+          }}
+          return true;
+        }});
+        pre.textContent = filtered.join('\\n');
+        if (countEl) {{
+          const total = rawLines.filter(l => l.trim()).length;
+          countEl.textContent = filtered.filter(l => l.trim()).length < total ? filtered.filter(l=>l.trim()).length + '/' + total + ' lines' : '';
+        }}
+      }}
+
+      typeBtns.forEach(function(btn) {{
+        btn.addEventListener('click', function() {{
+          const action = btn.dataset.action;
+          if (hiddenActions.has(action)) {{
+            hiddenActions.delete(action);
+            btn.style.opacity = '1';
+          }} else {{
+            hiddenActions.add(action);
+            btn.style.opacity = '0.35';
+          }}
+          applyFilter();
+        }});
+      }});
+
+      if (searchInput) {{
+        searchInput.addEventListener('input', applyFilter);
+        searchInput.addEventListener('keydown', function(e) {{ if(e.key==='Escape'){{searchInput.value='';applyFilter();}} }});
+      }}
+      if (clearBtn) clearBtn.addEventListener('click', function() {{ searchInput.value=''; applyFilter(); }});
+    }})();
+    </script>
     """
     return _render(body)
 

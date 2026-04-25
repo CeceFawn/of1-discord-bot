@@ -3,7 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OF1 Gallery</title>
+  <title>OF1 Gallery — Orlando F1 Community</title>
+  <meta name="description" content="Photos from OF1 watch parties and F1 events in Orlando, Florida." />
+  <link rel="canonical" href="https://www.orlandof1.com/gallery" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:url"         content="https://www.orlandof1.com/gallery" />
+  <meta property="og:title"       content="OF1 Gallery — Orlando F1 Community" />
+  <meta property="og:description" content="Photos from OF1 watch parties and F1 events in Orlando, Florida." />
+  <meta property="og:image"       content="https://www.orlandof1.com{{ photos[0] if photos else '/static/schedule_halfbarrel.png' }}" />
+  <meta property="og:site_name"   content="OF1 — Orlando F1" />
+
+  <!-- Twitter card -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="OF1 Gallery — Orlando F1 Community" />
+  <meta name="twitter:description" content="Photos from OF1 watch parties and F1 events in Orlando, Florida." />
+  <meta name="twitter:image"       content="https://www.orlandof1.com{{ photos[0] if photos else '/static/schedule_halfbarrel.png' }}" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#e8002d" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
@@ -121,9 +142,21 @@
 
 <div id="canvas-container"></div>
 <div id="ui">Drag to spin &nbsp;·&nbsp; Click a photo to open</div>
+<div id="lb-progress" style="position:fixed;bottom:20px;right:20px;color:rgba(255,255,255,0.25);font-size:12px;font-family:Inter,sans-serif;pointer-events:none;letter-spacing:.05em;">0 / {{ photos|length }}</div>
 
-<div id="lightbox">
-  <div id="lb-close" title="Close">✕</div>
+<div id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer">
+  <div id="lb-close" title="Close" aria-label="Close photo viewer">✕</div>
+  <!-- prev/next arrows -->
+  <button id="lb-prev" aria-label="Previous photo"
+    style="position:fixed;left:16px;top:50%;transform:translateY(-50%);z-index:1002;background:rgba(255,255,255,0.08);border:none;color:#fff;font-size:24px;width:44px;height:44px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s;">‹</button>
+  <button id="lb-next" aria-label="Next photo"
+    style="position:fixed;right:16px;top:50%;transform:translateY(-50%);z-index:1002;background:rgba(255,255,255,0.08);border:none;color:#fff;font-size:24px;width:44px;height:44px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s;">›</button>
+  <!-- counter + copy link -->
+  <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:1002;display:flex;align-items:center;gap:12px;">
+    <span id="lb-counter" style="color:rgba(255,255,255,0.4);font-size:13px;font-family:Inter,sans-serif;"></span>
+    <button id="lb-copy" aria-label="Copy photo link"
+      style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.6);font-size:12px;font-family:Inter,sans-serif;padding:5px 12px;border-radius:20px;cursor:pointer;transition:background .2s;">Copy link</button>
+  </div>
   <img id="lb-img" src="" alt="Gallery photo" />
 </div>
 
@@ -250,6 +283,8 @@
           polygonOffsetFactor: -1,
           polygonOffsetUnits: -1
         }), width, height);
+        lbLoadedCount++;
+        updateProgress();
         activeLoads--;
         drainQueue();
       }, undefined, () => {
@@ -260,6 +295,8 @@
           polygonOffsetFactor: -1,
           polygonOffsetUnits: -1
         }), baseTileSize, baseTileSize);
+        lbLoadedCount++;
+        updateProgress();
         activeLoads--;
         drainQueue();
       });
@@ -396,6 +433,12 @@
     if (hits.length > 0) openLightbox(hits[0].object.userData.photo);
   }
 
+  function updateProgress() {
+    if (!lbProgress) return;
+    lbProgress.textContent = `${lbLoadedCount} / ${n}`;
+    if (lbLoadedCount >= n) setTimeout(() => { lbProgress.style.opacity = '0'; }, 1500);
+  }
+
   window.addEventListener('mousemove', e => {
     if (dragging) return;
     raycaster.setFromCamera(toNDC(e.clientX, e.clientY), camera);
@@ -409,13 +452,20 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  const lightbox = document.getElementById('lightbox');
-  const lbImg    = document.getElementById('lb-img');
-  const lbClose  = document.getElementById('lb-close');
+  const lightbox  = document.getElementById('lightbox');
+  const lbImg     = document.getElementById('lb-img');
+  const lbClose   = document.getElementById('lb-close');
+  const lbPrevBtn = document.getElementById('lb-prev');
+  const lbNextBtn = document.getElementById('lb-next');
+  const lbCounter = document.getElementById('lb-counter');
+  const lbCopy    = document.getElementById('lb-copy');
+  const lbProgress = document.getElementById('lb-progress');
 
   let lbScale = 1, lbTx = 0, lbTy = 0;
   let lbDragging = false, lbDidDrag = false, lbDragX = 0, lbDragY = 0;
   let lbPinching = false, lbPinchDist = 0, lbPinchScale = 1;
+  let lbCurrentIndex = -1;
+  let lbLoadedCount = 0;
 
   function lbApply() {
     lbImg.style.transform = `translate(${lbTx}px, ${lbTy}px) scale(${lbScale})`;
@@ -424,15 +474,47 @@
   function lbReset() { lbScale = 1; lbTx = 0; lbTy = 0; lbApply(); }
 
   function openLightbox(src) {
+    const idx = PHOTOS.indexOf(src);
+    lbCurrentIndex = idx;
     lbImg.src = src;
+    lbImg.alt = `Gallery photo ${idx + 1} of ${PHOTOS.length}`;
+    lbCounter.textContent = PHOTOS.length > 1 ? `${idx + 1} / ${PHOTOS.length}` : '';
+    lbPrevBtn.style.display = PHOTOS.length > 1 ? 'flex' : 'none';
+    lbNextBtn.style.display = PHOTOS.length > 1 ? 'flex' : 'none';
     lbReset();
     lightbox.classList.add('active');
+  }
+
+  function lbNavigate(delta) {
+    if (lbCurrentIndex < 0 || PHOTOS.length < 2) return;
+    lbCurrentIndex = (lbCurrentIndex + delta + PHOTOS.length) % PHOTOS.length;
+    openLightbox(PHOTOS[lbCurrentIndex]);
   }
 
   function closeLightbox() {
     lightbox.classList.remove('active');
     lbImg.src = '';
+    lbCurrentIndex = -1;
   }
+
+  lbPrevBtn.addEventListener('click', e => { e.stopPropagation(); lbNavigate(-1); });
+  lbNextBtn.addEventListener('click', e => { e.stopPropagation(); lbNavigate(1); });
+  lbPrevBtn.addEventListener('mouseover', () => lbPrevBtn.style.background = 'rgba(255,255,255,0.18)');
+  lbPrevBtn.addEventListener('mouseout',  () => lbPrevBtn.style.background = 'rgba(255,255,255,0.08)');
+  lbNextBtn.addEventListener('mouseover', () => lbNextBtn.style.background = 'rgba(255,255,255,0.18)');
+  lbNextBtn.addEventListener('mouseout',  () => lbNextBtn.style.background = 'rgba(255,255,255,0.08)');
+
+  lbCopy.addEventListener('click', e => {
+    e.stopPropagation();
+    if (lbCurrentIndex < 0) return;
+    const url = location.origin + PHOTOS[lbCurrentIndex];
+    navigator.clipboard.writeText(url).then(() => {
+      lbCopy.textContent = 'Copied!';
+      setTimeout(() => { lbCopy.textContent = 'Copy link'; }, 2000);
+    }).catch(() => {
+      lbCopy.textContent = 'Copy link';
+    });
+  });
 
   lbClose.addEventListener('click', closeLightbox);
   lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox(); });
@@ -498,7 +580,10 @@
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && lightbox.classList.contains('active')) closeLightbox();
+    if (!lightbox.classList.contains('active')) return;
+    if (e.key === 'Escape')      closeLightbox();
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); lbNavigate(-1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); lbNavigate(1); }
   });
 
   animate();

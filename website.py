@@ -421,10 +421,11 @@ def get_current_race_weekend() -> dict | None:
 
 def _cached_call(key: str, fn):
     entry = _FUNC_CACHE.get(key)
-    if entry and time.time() - entry[0] < _FUNC_CACHE_TTL:
+    if entry and entry[1] is not None and time.time() - entry[0] < _FUNC_CACHE_TTL:
         return entry[1]
     result = fn()
-    _FUNC_CACHE[key] = (time.time(), result)
+    if result is not None:
+        _FUNC_CACHE[key] = (time.time(), result)
     return result
 
 
@@ -498,6 +499,10 @@ def get_next_race() -> dict | None:
 # ----------------------------
 @app.route("/")
 def index():
+    if request.args.get("nocache") == "1" and _get_client_ip() in ("127.0.0.1", "::1"):
+        _cache.clear()
+        _FUNC_CACHE.clear()
+
     watch_party = load_watch_party()
 
     # Auto-detect the current/upcoming race weekend and fill in any fields that
@@ -567,6 +572,7 @@ def sitemap():
 def robots():
     txt = """User-agent: *
 Allow: /
+Disallow: /api/
 
 Sitemap: https://www.orlandof1.com/sitemap.xml
 """
@@ -576,6 +582,30 @@ Sitemap: https://www.orlandof1.com/sitemap.xml
 @app.route("/api/next-race")
 def api_next_race():
     return jsonify(get_next_race() or {})
+
+
+@app.route("/api/cache_stats")
+def api_cache_stats():
+    """Localhost-only: return website cache stats for the dashboard."""
+    if _get_client_ip() not in ("127.0.0.1", "::1"):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+    now_ts = time.time()
+    func_entries = []
+    for key, entry in _FUNC_CACHE.items():
+        fetched_at, data = entry
+        age_s = int(now_ts - fetched_at)
+        func_entries.append({"key": key, "age_s": age_s, "ttl_s": _FUNC_CACHE_TTL, "has_data": data is not None})
+    raw_entries = []
+    for key, entry in _cache.items():
+        fetched_at, data = entry
+        age_s = int(now_ts - fetched_at)
+        raw_entries.append({"key": str(key)[:80], "age_s": age_s, "ttl_s": _CACHE_TTL})
+    return jsonify({
+        "ok": True,
+        "func_cache": func_entries,
+        "raw_cache_count": len(raw_entries),
+        "raw_cache": raw_entries[:20],
+    })
 
 
 
