@@ -6,7 +6,12 @@
       "Australia"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Austria",
+      "Monaco",
+      "Azerbaijan"
+    ]
   },
   {
     "q": "In which country is Bahrain International Circuit located?",
@@ -15,7 +20,12 @@
       "Bahrain"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Singapore",
+      "Azerbaijan",
+      "Canada"
+    ]
   },
   {
     "q": "In which country is Baku City Circuit located?",
@@ -24,7 +34,12 @@
       "azerbaijan"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Singapore",
+      "Hungary",
+      "Austria"
+    ]
   },
   {
     "q": "In which country is Circuit De Barcelona-Catalunya located?",
@@ -33,7 +48,12 @@
       "spain"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Japan",
+      "Belgium",
+      "Usa"
+    ]
   },
   {
     "q": "In which country is Circuit De Spa-Francorchamps located?",
@@ -42,7 +62,12 @@
       "belgium"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Qatar",
+      "United Kingdom",
+      "Saudi Arabia"
+    ]
   },
   {
     "q": "In which country is Circuit Gilles Villeneuve located?",
@@ -51,7 +76,12 @@
       "canada"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Qatar",
+      "Netherlands",
+      "Mexico"
+    ]
   },
   {
     "q": "In which country is Circuit Of The Americas located?",
@@ -60,7 +90,12 @@
       "USA"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Brazil",
+      "United Kingdom",
+      "Hungary"
+    ]
   },
   {
     "q": "In which country is Las Vegas Strip Street Circuit located?",
@@ -69,7 +104,12 @@
       "USA"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Hungary",
+      "China",
+      "Italy"
+    ]
   },
   {
     "q": "In which country is Losail International Circuit located?",
@@ -78,7 +118,12 @@
       "qatar"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Belgium",
+      "Japan",
+      "Hungary"
+    ]
   },
   {
     "q": "In which country is Marina Bay Street Circuit located?",
@@ -87,7 +132,12 @@
       "singapore"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Mexico",
+      "Belgium",
+      "Azerbaijan"
+    ]
   },
   {
     "q": "In which country is Shanghai International Circuit located?",
@@ -96,7 +146,12 @@
       "China"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Japan",
+      "Brazil",
+      "Belgium"
+    ]
   },
   {
     "q": "In which country is Silverstone Circuit located?",
@@ -105,7 +160,12 @@
       "United Kingdom"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Spain",
+      "Saudi Arabia",
+      "Uae"
+    ]
   },
   {
     "q": "In which country is Suzuka Circuit located?",
@@ -114,7 +174,12 @@
       "Japan"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Spain",
+      "Italy",
+      "Qatar"
+    ]
   },
   {
     "q": "In which country is Yas Marina Circuit located?",
@@ -123,7 +188,12 @@
       "uae"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Azerbaijan",
+      "Usa",
+      "Netherlands"
+    ]
   },
   {
     "q": "What city/location hosts Albert Park Grand Prix Circuit?",
@@ -132,7 +202,12 @@
       "melbourne"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Baku",
+      "Monza",
+      "Montreal"
+    ]
   },
   {
     "q": "What city/location hosts Autodromo Enzo E Dino Ferrari?",
@@ -141,7 +216,12 @@
       "imola"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Silverstone",
+      "Spa",
+      "Spielberg"
+    ]
   },
   {
     "q": "What city/location hosts Autodromo Jose Carlos Pace?",
@@ -150,7 +230,12 @@
       "sao paulo"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Zandvoort",
+      "Monza",
+      "Suzuka"
+    ]
   },
   {
     "q": "What city/location hosts Autodromo Nazionale Monza?",
@@ -159,7 +244,12 @@
       "monza"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Austin",
+      "Jeddah",
+      "Suzuka"
+    ]
   },
   {
     "q": "What city/location hosts Baku City Circuit?",
@@ -168,7 +258,12 @@
       "baku"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Jeddah",
+      "Montreal",
+      "Las Vegas"
+    ]
   },
   {
     "q": "What city/location hosts Circuit De Barcelona-Catalunya?",
@@ -177,7 +272,12 @@
       "barcelona"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Sao Paulo",
+      "Suzuka",
+      "Zandvoort"
+    ]
   },
   {
     "q": "What city/location hosts Circuit De Spa-Francorchamps?",
@@ -186,7 +286,12 @@
       "spa"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Zandvoort",
+      "Montreal",
+      "Baku"
+    ]
   },
   {
     "q": "What city/location hosts Circuit Gilles Villeneuve?",
@@ -195,7 +300,12 @@
       "montreal"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Sao Paulo",
+      "Monza",
+      "Spielberg"
+    ]
   },
   {
     "q": "What city/location hosts Circuit Of The Americas?",
@@ -204,7 +314,12 @@
       "austin"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Jeddah",
+      "Singapore",
+      "Lusail"
+    ]
   },
   {
     "q": "What city/location hosts Circuit Zandvoort?",
@@ -213,7 +328,12 @@
       "zandvoort"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Budapest",
+      "Montreal",
+      "Monza"
+    ]
   },
   {
     "q": "What city/location hosts Hungaroring?",
@@ -222,7 +342,12 @@
       "budapest"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Imola",
+      "Suzuka",
+      "Shanghai"
+    ]
   },
   {
     "q": "What city/location hosts Jeddah Corniche Circuit?",
@@ -231,7 +356,12 @@
       "jeddah"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Spa",
+      "Las Vegas",
+      "Baku"
+    ]
   },
   {
     "q": "What city/location hosts Las Vegas Strip Street Circuit?",
@@ -240,7 +370,12 @@
       "las vegas"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Lusail",
+      "Miami",
+      "Spielberg"
+    ]
   },
   {
     "q": "What city/location hosts Losail International Circuit?",
@@ -249,7 +384,12 @@
       "lusail"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Miami",
+      "Suzuka",
+      "Imola"
+    ]
   },
   {
     "q": "What city/location hosts Miami International Autodrome?",
@@ -258,7 +398,12 @@
       "miami"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Jeddah",
+      "Las Vegas",
+      "Silverstone"
+    ]
   },
   {
     "q": "What city/location hosts Red Bull Ring?",
@@ -267,7 +412,12 @@
       "spielberg"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Zandvoort",
+      "Suzuka",
+      "Silverstone"
+    ]
   },
   {
     "q": "What city/location hosts Shanghai International Circuit?",
@@ -276,7 +426,12 @@
       "shanghai"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Barcelona",
+      "Singapore",
+      "Abu Dhabi"
+    ]
   },
   {
     "q": "What city/location hosts Silverstone Circuit?",
@@ -285,7 +440,12 @@
       "silverstone"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Budapest",
+      "Melbourne",
+      "Sao Paulo"
+    ]
   },
   {
     "q": "What city/location hosts Suzuka Circuit?",
@@ -294,7 +454,12 @@
       "suzuka"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Austin",
+      "Barcelona",
+      "Spa"
+    ]
   },
   {
     "q": "What city/location hosts Yas Marina Circuit?",
@@ -303,7 +468,12 @@
       "abu dhabi"
     ],
     "difficulty": "easy",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Spa",
+      "Las Vegas",
+      "Melbourne"
+    ]
   },
   {
     "q": "How many corners does Albert Park Grand Prix Circuit have?",
@@ -311,7 +481,12 @@
       "14"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does Autodromo Enzo E Dino Ferrari have?",
@@ -319,7 +494,12 @@
       "19"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does Autodromo Hermanos Rodriguez have?",
@@ -327,7 +507,12 @@
       "17"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "16",
+      "18",
+      "15"
+    ]
   },
   {
     "q": "How many corners does Autodromo Jose Carlos Pace have?",
@@ -335,7 +520,12 @@
       "15"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many corners does Bahrain International Circuit have?",
@@ -343,7 +533,12 @@
       "15"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many corners does Baku City Circuit have?",
@@ -351,7 +546,12 @@
       "20"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "19",
+      "18",
+      "17"
+    ]
   },
   {
     "q": "How many corners does Circuit De Barcelona-Catalunya have?",
@@ -359,7 +559,12 @@
       "14"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does Circuit De Monaco have?",
@@ -367,7 +572,12 @@
       "19"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does Circuit De Spa-Francorchamps have?",
@@ -375,7 +585,12 @@
       "19"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does Circuit Gilles Villeneuve have?",
@@ -383,7 +598,12 @@
       "14"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does Circuit Of The Americas have?",
@@ -391,7 +611,12 @@
       "20"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "19",
+      "18",
+      "17"
+    ]
   },
   {
     "q": "How many corners does Hungaroring have?",
@@ -399,7 +624,12 @@
       "14"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does Jeddah Corniche Circuit have?",
@@ -407,7 +637,12 @@
       "27"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "20",
+      "19",
+      "18"
+    ]
   },
   {
     "q": "How many corners does Las Vegas Strip Street Circuit have?",
@@ -415,7 +650,12 @@
       "17"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "16",
+      "18",
+      "15"
+    ]
   },
   {
     "q": "How many corners does Losail International Circuit have?",
@@ -423,7 +663,12 @@
       "16"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "17",
+      "14"
+    ]
   },
   {
     "q": "How many corners does Miami International Autodrome have?",
@@ -431,7 +676,12 @@
       "19"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does Shanghai International Circuit have?",
@@ -439,7 +689,12 @@
       "16"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "17",
+      "14"
+    ]
   },
   {
     "q": "How many corners does Silverstone Circuit have?",
@@ -447,7 +702,12 @@
       "18"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many corners does Suzuka Circuit have?",
@@ -455,7 +715,12 @@
       "18"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many corners does Yas Marina Circuit have?",
@@ -463,7 +728,12 @@
       "16"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "17",
+      "14"
+    ]
   },
   {
     "q": "How many laps does Albert Park Grand Prix Circuit have?",
@@ -471,7 +741,12 @@
       "58"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "56",
+      "62"
+    ]
   },
   {
     "q": "How many laps does Autodromo Enzo E Dino Ferrari have?",
@@ -479,7 +754,12 @@
       "63"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "62",
+      "66",
+      "58"
+    ]
   },
   {
     "q": "How many laps does Autodromo Hermanos Rodriguez have?",
@@ -487,7 +767,12 @@
       "71"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "70",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Autodromo Jose Carlos Pace have?",
@@ -495,7 +780,12 @@
       "71"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "70",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Autodromo Nazionale Monza have?",
@@ -503,7 +793,12 @@
       "53"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "52",
+      "51",
+      "50"
+    ]
   },
   {
     "q": "How many laps does Bahrain International Circuit have?",
@@ -511,7 +806,12 @@
       "57"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "56",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Baku City Circuit have?",
@@ -519,7 +819,12 @@
       "51"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "50",
+      "52",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Circuit De Barcelona-Catalunya have?",
@@ -527,7 +832,12 @@
       "66"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "63",
+      "62",
+      "70"
+    ]
   },
   {
     "q": "How many laps does Circuit De Spa-Francorchamps have?",
@@ -535,7 +845,12 @@
       "44"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "50",
+      "51",
+      "52"
+    ]
   },
   {
     "q": "How many laps does Circuit Gilles Villeneuve have?",
@@ -543,7 +858,12 @@
       "70"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "71",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Circuit Of The Americas have?",
@@ -551,7 +871,12 @@
       "56"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Circuit Zandvoort have?",
@@ -559,7 +884,12 @@
       "72"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "71",
+      "70",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Hungaroring have?",
@@ -567,7 +897,12 @@
       "70"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "71",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Jeddah Corniche Circuit have?",
@@ -575,7 +910,12 @@
       "50"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "51",
+      "52",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Las Vegas Strip Street Circuit have?",
@@ -583,7 +923,12 @@
       "50"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "51",
+      "52",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Losail International Circuit have?",
@@ -591,7 +936,12 @@
       "57"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "56",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Marina Bay Street Circuit have?",
@@ -599,7 +949,12 @@
       "62"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "63",
+      "58",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Miami International Autodrome have?",
@@ -607,7 +962,12 @@
       "57"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "56",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Red Bull Ring have?",
@@ -615,7 +975,12 @@
       "71"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "70",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does Shanghai International Circuit have?",
@@ -623,7 +988,12 @@
       "56"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does Suzuka Circuit have?",
@@ -631,7 +1001,12 @@
       "53"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "52",
+      "51",
+      "50"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'abu dhabi' refer to?",
@@ -640,7 +1015,12 @@
       "Yas Marina Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Albert Park Grand Prix Circuit",
+      "Circuit De Barcelona-Catalunya",
+      "Circuit De Spa-Francorchamps"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'austria' refer to?",
@@ -649,7 +1029,12 @@
       "Red Bull Ring"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Nazionale Monza",
+      "Circuit Of The Americas",
+      "Yas Marina Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'bahrain' refer to?",
@@ -658,7 +1043,12 @@
       "Bahrain International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Hermanos Rodriguez",
+      "Red Bull Ring",
+      "Autodromo Nazionale Monza"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'baku' refer to?",
@@ -667,7 +1057,12 @@
       "Baku City Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Losail International Circuit",
+      "Silverstone Circuit",
+      "Circuit De Barcelona-Catalunya"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'britain' refer to?",
@@ -676,7 +1071,12 @@
       "Silverstone Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Shanghai International Circuit",
+      "Circuit Of The Americas",
+      "Hungaroring"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'budapest' refer to?",
@@ -685,7 +1085,12 @@
       "Hungaroring"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Marina Bay Street Circuit",
+      "Bahrain International Circuit",
+      "Circuit Zandvoort"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'canada' refer to?",
@@ -694,7 +1099,12 @@
       "Circuit Gilles Villeneuve"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Spa-Francorchamps",
+      "Hungaroring",
+      "Silverstone Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'china' refer to?",
@@ -703,7 +1113,12 @@
       "Shanghai International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Barcelona-Catalunya",
+      "Marina Bay Street Circuit",
+      "Hungaroring"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'hungary' refer to?",
@@ -712,7 +1127,12 @@
       "Hungaroring"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit Gilles Villeneuve",
+      "Red Bull Ring",
+      "Las Vegas Strip Street Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'italy' refer to?",
@@ -721,7 +1141,12 @@
       "Autodromo Nazionale Monza"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit Zandvoort",
+      "Circuit De Spa-Francorchamps",
+      "Circuit Gilles Villeneuve"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'japan' refer to?",
@@ -730,7 +1155,12 @@
       "Suzuka Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Marina Bay Street Circuit",
+      "Circuit Gilles Villeneuve",
+      "Circuit De Spa-Francorchamps"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'jeddah' refer to?",
@@ -739,7 +1169,12 @@
       "Jeddah Corniche Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Nazionale Monza",
+      "Suzuka Circuit",
+      "Circuit De Spa-Francorchamps"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'losail' refer to?",
@@ -748,7 +1183,12 @@
       "Losail International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Nazionale Monza",
+      "Las Vegas Strip Street Circuit",
+      "Bahrain International Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'mexico city' refer to?",
@@ -757,7 +1197,12 @@
       "Autodromo Hermanos Rodriguez"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Spa-Francorchamps",
+      "Autodromo Enzo E Dino Ferrari",
+      "Autodromo Jose Carlos Pace"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'mexico' refer to?",
@@ -766,7 +1211,12 @@
       "Autodromo Hermanos Rodriguez"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Las Vegas Strip Street Circuit",
+      "Albert Park Grand Prix Circuit",
+      "Red Bull Ring"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'miami' refer to?",
@@ -775,7 +1225,12 @@
       "Miami International Autodrome"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Marina Bay Street Circuit",
+      "Jeddah Corniche Circuit",
+      "Circuit De Barcelona-Catalunya"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'monaco' refer to?",
@@ -784,7 +1239,12 @@
       "Circuit De Monaco"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Losail International Circuit",
+      "Baku City Circuit",
+      "Bahrain International Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'montreal' refer to?",
@@ -793,7 +1253,12 @@
       "Circuit Gilles Villeneuve"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Monaco",
+      "Circuit De Spa-Francorchamps",
+      "Albert Park Grand Prix Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'monza' refer to?",
@@ -802,7 +1267,12 @@
       "Autodromo Nazionale Monza"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Jeddah Corniche Circuit",
+      "Circuit De Monaco",
+      "Las Vegas Strip Street Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'netherlands' refer to?",
@@ -811,7 +1281,12 @@
       "Circuit Zandvoort"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Nazionale Monza",
+      "Hungaroring",
+      "Circuit De Barcelona-Catalunya"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'sakhir' refer to?",
@@ -820,7 +1295,12 @@
       "Bahrain International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Baku City Circuit",
+      "Red Bull Ring",
+      "Silverstone Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'saudi' refer to?",
@@ -829,7 +1309,12 @@
       "Jeddah Corniche Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Las Vegas Strip Street Circuit",
+      "Marina Bay Street Circuit",
+      "Autodromo Hermanos Rodriguez"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'shanghai' refer to?",
@@ -838,7 +1323,12 @@
       "Shanghai International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Monaco",
+      "Albert Park Grand Prix Circuit",
+      "Red Bull Ring"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'spa' refer to?",
@@ -847,7 +1337,12 @@
       "Circuit De Spa-Francorchamps"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Hungaroring",
+      "Circuit De Monaco",
+      "Baku City Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'spain' refer to?",
@@ -856,7 +1351,12 @@
       "Circuit De Barcelona-Catalunya"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Suzuka Circuit",
+      "Jeddah Corniche Circuit",
+      "Red Bull Ring"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'spielberg' refer to?",
@@ -865,7 +1365,12 @@
       "Red Bull Ring"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Suzuka Circuit",
+      "Hungaroring",
+      "Las Vegas Strip Street Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'suzuka' refer to?",
@@ -874,7 +1379,12 @@
       "Suzuka Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Jose Carlos Pace",
+      "Red Bull Ring",
+      "Hungaroring"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'yas marina' refer to?",
@@ -883,7 +1393,12 @@
       "Yas Marina Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Enzo E Dino Ferrari",
+      "Circuit Gilles Villeneuve",
+      "Silverstone Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit does the alias 'zandvoort' refer to?",
@@ -892,7 +1407,12 @@
       "Circuit Zandvoort"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Marina Bay Street Circuit",
+      "Miami International Autodrome",
+      "Circuit Gilles Villeneuve"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Abu Dhabi, UAE?",
@@ -901,7 +1421,12 @@
       "Yas Marina Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit Gilles Villeneuve",
+      "Albert Park Grand Prix Circuit",
+      "Circuit Of The Americas"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Budapest, Hungary?",
@@ -910,7 +1435,12 @@
       "Hungaroring"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit Zandvoort",
+      "Las Vegas Strip Street Circuit",
+      "Circuit Of The Americas"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Mexico City, Mexico?",
@@ -919,7 +1449,12 @@
       "Autodromo Hermanos Rodriguez"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Shanghai International Circuit",
+      "Circuit Of The Americas",
+      "Circuit De Spa-Francorchamps"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Miami, USA?",
@@ -928,7 +1463,12 @@
       "Miami International Autodrome"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Losail International Circuit",
+      "Autodromo Enzo E Dino Ferrari",
+      "Circuit Zandvoort"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Monte Carlo, Monaco?",
@@ -937,7 +1477,12 @@
       "Circuit De Monaco"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Jeddah Corniche Circuit",
+      "Shanghai International Circuit",
+      "Hungaroring"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Montreal, Canada?",
@@ -946,7 +1491,12 @@
       "Circuit Gilles Villeneuve"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Losail International Circuit",
+      "Shanghai International Circuit",
+      "Suzuka Circuit"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Monza, Italy?",
@@ -955,7 +1505,12 @@
       "Autodromo Nazionale Monza"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Barcelona-Catalunya",
+      "Autodromo Enzo E Dino Ferrari",
+      "Autodromo Hermanos Rodriguez"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Sakhir, Bahrain?",
@@ -964,7 +1519,12 @@
       "Bahrain International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit Gilles Villeneuve",
+      "Red Bull Ring",
+      "Losail International Circuit"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Shanghai, China?",
@@ -973,7 +1533,12 @@
       "Shanghai International Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit Zandvoort",
+      "Circuit De Spa-Francorchamps",
+      "Autodromo Hermanos Rodriguez"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Silverstone, United Kingdom?",
@@ -982,7 +1547,12 @@
       "Silverstone Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Autodromo Enzo E Dino Ferrari",
+      "Marina Bay Street Circuit",
+      "Circuit De Spa-Francorchamps"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Spa, Belgium?",
@@ -991,7 +1561,12 @@
       "Circuit De Spa-Francorchamps"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Jeddah Corniche Circuit",
+      "Red Bull Ring",
+      "Las Vegas Strip Street Circuit"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Spielberg, Austria?",
@@ -1000,7 +1575,12 @@
       "Red Bull Ring"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Barcelona-Catalunya",
+      "Albert Park Grand Prix Circuit",
+      "Las Vegas Strip Street Circuit"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Suzuka, Japan?",
@@ -1009,7 +1589,12 @@
       "Suzuka Circuit"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Shanghai International Circuit",
+      "Red Bull Ring",
+      "Bahrain International Circuit"
+    ]
   },
   {
     "q": "Which listed F1 circuit is in Zandvoort, Netherlands?",
@@ -1018,7 +1603,12 @@
       "Circuit Zandvoort"
     ],
     "difficulty": "medium",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Albert Park Grand Prix Circuit",
+      "Circuit Gilles Villeneuve",
+      "Autodromo Hermanos Rodriguez"
+    ]
   },
   {
     "q": "Which F1 circuit on the current calendar has the fewest corners?",
@@ -1027,7 +1617,12 @@
       "Red Bull Ring"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Monaco",
+      "Autodromo Hermanos Rodriguez",
+      "Yas Marina Circuit"
+    ]
   },
   {
     "q": "Which F1 circuit on the current calendar has the longest lap?",
@@ -1036,7 +1631,12 @@
       "Circuit De Spa-Francorchamps"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "Circuit De Monaco",
+      "Autodromo Enzo E Dino Ferrari",
+      "Autodromo Jose Carlos Pace"
+    ]
   },
   {
     "q": "How many laps does the Abu Dhabi Grand Prix have?",
@@ -1044,7 +1644,12 @@
       "58"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "56",
+      "62"
+    ]
   },
   {
     "q": "How many laps does the Austin Grand Prix have?",
@@ -1052,7 +1657,12 @@
       "56"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Baku Grand Prix have?",
@@ -1060,7 +1670,12 @@
       "51"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "50",
+      "52",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Barcelona Grand Prix have?",
@@ -1068,7 +1683,12 @@
       "66"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "63",
+      "62",
+      "70"
+    ]
   },
   {
     "q": "How many laps does the Budapest Grand Prix have?",
@@ -1076,7 +1696,12 @@
       "70"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "71",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does the Jeddah Grand Prix have?",
@@ -1084,7 +1709,12 @@
       "50"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "51",
+      "52",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Las Vegas Grand Prix have?",
@@ -1092,7 +1722,12 @@
       "50"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "51",
+      "52",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Lusail Grand Prix have?",
@@ -1100,7 +1735,12 @@
       "57"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "56",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Melbourne Grand Prix have?",
@@ -1108,7 +1748,12 @@
       "58"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "56",
+      "62"
+    ]
   },
   {
     "q": "How many laps does the Mexico City Grand Prix have?",
@@ -1116,7 +1761,12 @@
       "71"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "70",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does the Montreal Grand Prix have?",
@@ -1124,7 +1774,12 @@
       "70"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "71",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does the Monza Grand Prix have?",
@@ -1132,7 +1787,12 @@
       "53"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "52",
+      "51",
+      "50"
+    ]
   },
   {
     "q": "How many laps does the Sakhir Grand Prix have?",
@@ -1140,7 +1800,12 @@
       "57"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "56",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Sao Paulo Grand Prix have?",
@@ -1148,7 +1813,12 @@
       "71"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "70",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does the Shanghai Grand Prix have?",
@@ -1156,7 +1826,12 @@
       "56"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "57",
+      "58",
+      "53"
+    ]
   },
   {
     "q": "How many laps does the Silverstone Grand Prix have?",
@@ -1164,7 +1839,12 @@
       "52"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "51",
+      "53",
+      "50"
+    ]
   },
   {
     "q": "How many laps does the Singapore Grand Prix have?",
@@ -1172,7 +1852,12 @@
       "62"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "63",
+      "58",
+      "66"
+    ]
   },
   {
     "q": "How many laps does the Spa Grand Prix have?",
@@ -1180,7 +1865,12 @@
       "44"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "50",
+      "51",
+      "52"
+    ]
   },
   {
     "q": "How many laps does the Spielberg Grand Prix have?",
@@ -1188,7 +1878,12 @@
       "71"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "70",
+      "72",
+      "66"
+    ]
   },
   {
     "q": "How many laps does the Suzuka Grand Prix have?",
@@ -1196,7 +1891,12 @@
       "53"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "52",
+      "51",
+      "50"
+    ]
   },
   {
     "q": "How many laps does the Zandvoort Grand Prix have?",
@@ -1204,7 +1904,12 @@
       "72"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "71",
+      "70",
+      "66"
+    ]
   },
   {
     "q": "How many corners does the current Australia GP circuit have (Albert Park Grand Prix Circuit)?",
@@ -1212,7 +1917,12 @@
       "14"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does the current Austria GP circuit have (Red Bull Ring)?",
@@ -1220,7 +1930,12 @@
       "10"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "How many corners does the current Azerbaijan GP circuit have (Baku City Circuit)?",
@@ -1228,7 +1943,12 @@
       "20"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "19",
+      "18",
+      "17"
+    ]
   },
   {
     "q": "How many corners does the current Bahrain GP circuit have (Bahrain International Circuit)?",
@@ -1236,7 +1956,12 @@
       "15"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many corners does the current Brazil GP circuit have (Autodromo Jose Carlos Pace)?",
@@ -1244,7 +1969,12 @@
       "15"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many corners does the current Canada GP circuit have (Circuit Gilles Villeneuve)?",
@@ -1252,7 +1982,12 @@
       "14"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does the current China GP circuit have (Shanghai International Circuit)?",
@@ -1260,7 +1995,12 @@
       "16"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "17",
+      "14"
+    ]
   },
   {
     "q": "How many corners does the current Hungary GP circuit have (Hungaroring)?",
@@ -1268,7 +2008,12 @@
       "14"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does the current Italy GP circuit have (Autodromo Enzo E Dino Ferrari)?",
@@ -1276,7 +2021,12 @@
       "19"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does the current Italy GP circuit have (Autodromo Nazionale Monza)?",
@@ -1284,7 +2034,12 @@
       "11"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "10",
+      "14",
+      "15"
+    ]
   },
   {
     "q": "How many corners does the current Japan GP circuit have (Suzuka Circuit)?",
@@ -1292,7 +2047,12 @@
       "18"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many corners does the current Monaco GP circuit have (Circuit De Monaco)?",
@@ -1300,7 +2060,12 @@
       "19"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does the current Netherlands GP circuit have (Circuit Zandvoort)?",
@@ -1308,7 +2073,12 @@
       "14"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does the current Qatar GP circuit have (Losail International Circuit)?",
@@ -1316,7 +2086,12 @@
       "16"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "17",
+      "14"
+    ]
   },
   {
     "q": "How many corners does the current Saudi Arabia GP circuit have (Jeddah Corniche Circuit)?",
@@ -1324,7 +2099,12 @@
       "27"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "20",
+      "19",
+      "18"
+    ]
   },
   {
     "q": "How many corners does the current Singapore GP circuit have (Marina Bay Street Circuit)?",
@@ -1332,7 +2112,12 @@
       "19"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "How many corners does the current Spain GP circuit have (Circuit De Barcelona-Catalunya)?",
@@ -1340,7 +2125,12 @@
       "14"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "16",
+      "11"
+    ]
   },
   {
     "q": "How many corners does the current UAE GP circuit have (Yas Marina Circuit)?",
@@ -1348,7 +2138,12 @@
       "16"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "17",
+      "14"
+    ]
   },
   {
     "q": "How many corners does the current United Kingdom GP circuit have (Silverstone Circuit)?",
@@ -1356,7 +2151,12 @@
       "18"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many corners does the current USA GP circuit have (Circuit Of The Americas)?",
@@ -1364,7 +2164,12 @@
       "20"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "19",
+      "18",
+      "17"
+    ]
   },
   {
     "q": "How many corners does the current USA GP circuit have (Las Vegas Strip Street Circuit)?",
@@ -1372,7 +2177,12 @@
       "17"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "16",
+      "18",
+      "15"
+    ]
   },
   {
     "q": "How many corners does the current USA GP circuit have (Miami International Autodrome)?",
@@ -1380,7 +2190,12 @@
       "19"
     ],
     "difficulty": "hard",
-    "category": "circuits"
+    "category": "circuits",
+    "wrong_answers": [
+      "18",
+      "20",
+      "17"
+    ]
   },
   {
     "q": "In which country is Autodromo Enzo E Dino Ferrari located?",
@@ -1389,7 +2204,12 @@
       "Italy"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Qatar",
+      "Australia",
+      "Japan"
+    ]
   },
   {
     "q": "In which country is Autodromo Hermanos Rodriguez located?",
@@ -1398,7 +2218,12 @@
       "Mexico"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Canada",
+      "Uae",
+      "Australia"
+    ]
   },
   {
     "q": "In which country is Autodromo Jose Carlos Pace located?",
@@ -1407,7 +2232,12 @@
       "Brazil"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Spain",
+      "United Kingdom",
+      "Australia"
+    ]
   },
   {
     "q": "In which country is Hungaroring located?",
@@ -1416,7 +2246,12 @@
       "hungary"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Canada",
+      "Japan",
+      "United Kingdom"
+    ]
   },
   {
     "q": "In which country is Miami International Autodrome located?",
@@ -1425,7 +2260,12 @@
       "USA"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Bahrain",
+      "United Kingdom",
+      "Spain"
+    ]
   },
   {
     "q": "In which country is Red Bull Ring located?",
@@ -1434,7 +2274,12 @@
       "austria"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Usa",
+      "Japan",
+      "Australia"
+    ]
   },
   {
     "q": "What color are full wet tires marked with?",
@@ -1442,7 +2287,12 @@
       "blue"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "white",
+      "yellow",
+      "red"
+    ]
   },
   {
     "q": "What color are intermediate tires marked with?",
@@ -1450,7 +2300,12 @@
       "green"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "white",
+      "yellow",
+      "red"
+    ]
   },
   {
     "q": "What does 'pole position' mean?",
@@ -1478,7 +2333,12 @@
       "circuit boundary limits"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "Jeddah Corniche Circuit",
+      "Bahrain International Circuit",
+      "Circuit De Barcelona-Catalunya"
+    ]
   },
   {
     "q": "What finishing position is the lowest that normally scores points in a Grand Prix?",
@@ -1488,7 +2348,12 @@
       "p10"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "What fuel-related phrase often means reducing pace to finish?",
@@ -1566,7 +2431,12 @@
       "white"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "yellow",
+      "red",
+      "green"
+    ]
   },
   {
     "q": "Which dry tire color represents the medium compound?",
@@ -1574,7 +2444,12 @@
       "yellow"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "white",
+      "red",
+      "green"
+    ]
   },
   {
     "q": "Which dry tire color represents the soft compound?",
@@ -1582,7 +2457,12 @@
       "red"
     ],
     "difficulty": "easy",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "white",
+      "yellow",
+      "green"
+    ]
   },
   {
     "q": "What are marbles in racing slang?",
@@ -1610,7 +2490,12 @@
       "position on track"
     ],
     "category": "general",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "Circuit De Spa-Francorchamps",
+      "Autodromo Hermanos Rodriguez",
+      "Jeddah Corniche Circuit"
+    ]
   },
   {
     "q": "What does ERS stand for in F1?",
@@ -1618,7 +2503,12 @@
       "energy recovery system"
     ],
     "difficulty": "medium",
-    "category": "general"
+    "category": "general",
+    "wrong_answers": [
+      "drag reduction system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "What is a stewards' inquiry in F1?",
@@ -1682,7 +2572,12 @@
       "drag reduction system"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "energy recovery system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "Expand the F1 abbreviation SC.",
@@ -1690,7 +2585,12 @@
       "safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "virtual safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "Expand the F1 abbreviation VSC.",
@@ -1698,7 +2598,12 @@
       "virtual safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "How many points does an F1 race winner normally get (excluding fastest lap)?",
@@ -1706,7 +2611,12 @@
       "25"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "18",
+      "15",
+      "12"
+    ]
   },
   {
     "q": "How many points does P1 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -1714,7 +2624,12 @@
       "25"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "18",
+      "15",
+      "12"
+    ]
   },
   {
     "q": "How many points does P10 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -1722,7 +2637,12 @@
       "1"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "2",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "In F1 shorthand, what does DRS mean?",
@@ -1730,7 +2650,12 @@
       "drag reduction system"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "energy recovery system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "In F1 shorthand, what does SC mean?",
@@ -1738,7 +2663,12 @@
       "safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "virtual safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "In F1 shorthand, what does VSC mean?",
@@ -1746,7 +2676,12 @@
       "virtual safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "What does 'DNF' stand for in race results?",
@@ -1754,7 +2689,12 @@
       "did not finish"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "did not start",
+      "disqualified",
+      "did not classify"
+    ]
   },
   {
     "q": "What does 'DNS' stand for in race results?",
@@ -1762,7 +2702,12 @@
       "did not start"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "did not finish",
+      "disqualified",
+      "did not classify"
+    ]
   },
   {
     "q": "What does 'DSQ' stand for in race results?",
@@ -1771,7 +2716,12 @@
       "disqualification"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "did not finish",
+      "did not start",
+      "retired"
+    ]
   },
   {
     "q": "What does 'IN LAP' indicate on timing?",
@@ -1797,7 +2747,12 @@
       "personal best"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "session best",
+      "overall best",
+      "circuit record"
+    ]
   },
   {
     "q": "What does 'Q1' refer to in F1?",
@@ -1834,7 +2789,12 @@
       "first sector"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "sector 2",
+      "sector 3",
+      "out lap"
+    ]
   },
   {
     "q": "What does 'S2' refer to on timing screens?",
@@ -1843,7 +2803,12 @@
       "second sector"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "sector 1",
+      "sector 3",
+      "out lap"
+    ]
   },
   {
     "q": "What does 'S3' refer to on timing screens?",
@@ -1852,7 +2817,12 @@
       "third sector"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "sector 1",
+      "sector 2",
+      "out lap"
+    ]
   },
   {
     "q": "What does a green flag indicate after an incident zone?",
@@ -1900,7 +2870,12 @@
       "drag reduction system"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "energy recovery system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "What does DRS stand for?",
@@ -1908,7 +2883,12 @@
       "drag reduction system"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "energy recovery system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "What does FIA stand for in F1?",
@@ -1917,7 +2897,12 @@
       "fia"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "formula international association",
+      "f\u00e9d\u00e9ration internationale automobile",
+      "f\u00e9d\u00e9ration internationale de l'auto"
+    ]
   },
   {
     "q": "What does SC stand for in F1?",
@@ -1925,7 +2910,12 @@
       "safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "virtual safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "What does SC stand for in race control messages?",
@@ -1933,7 +2923,12 @@
       "safety car"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "virtual safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "What does VSC stand for in F1?",
@@ -1941,7 +2936,12 @@
       "virtual safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "What flag color indicates a race/session is stopped?",
@@ -1950,7 +2950,12 @@
       "red flag"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "white",
+      "yellow",
+      "green"
+    ]
   },
   {
     "q": "What is the meaning of DRS in Formula 1?",
@@ -1958,7 +2963,12 @@
       "drag reduction system"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "energy recovery system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "What is the meaning of SC in Formula 1?",
@@ -1966,7 +2976,12 @@
       "safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "virtual safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "What is the meaning of VSC in Formula 1?",
@@ -1974,7 +2989,12 @@
       "virtual safety car"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "safety car",
+      "drag reduction system",
+      "energy recovery system"
+    ]
   },
   {
     "q": "What is the race-ending flag called in F1?",
@@ -1983,7 +3003,12 @@
       "checkered flag"
     ],
     "difficulty": "easy",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "red flag",
+      "blue flag",
+      "yellow flag"
+    ]
   },
   {
     "q": "Which dry tyre compound is generally most durable but slower?",
@@ -1992,7 +3017,12 @@
       "hard tyre"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "medium",
+      "soft",
+      "intermediate"
+    ]
   },
   {
     "q": "Which dry tyre compound is generally quickest but degrades fastest?",
@@ -2001,7 +3031,12 @@
       "soft tyre"
     ],
     "category": "rules",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "hard",
+      "medium",
+      "intermediate"
+    ]
   },
   {
     "q": "Expand the F1 abbreviation ERS.",
@@ -2009,7 +3044,12 @@
       "energy recovery system"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "drag reduction system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 10th in a standard F1 race (excluding fastest lap)?",
@@ -2017,7 +3057,12 @@
       "1"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "2",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 1st in a standard F1 race (excluding fastest lap)?",
@@ -2025,7 +3070,12 @@
       "25"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "15",
+      "12"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 2nd in a standard F1 race (excluding fastest lap)?",
@@ -2033,7 +3083,12 @@
       "18"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 3rd in a standard F1 race (excluding fastest lap)?",
@@ -2041,7 +3096,12 @@
       "15"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 4th in a standard F1 race (excluding fastest lap)?",
@@ -2049,7 +3109,12 @@
       "12"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "10",
+      "15",
+      "8"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 5th in a standard F1 race (excluding fastest lap)?",
@@ -2057,7 +3122,12 @@
       "10"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 6th in a standard F1 race (excluding fastest lap)?",
@@ -2065,7 +3135,12 @@
       "8"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "10",
+      "6",
+      "12"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 7th in a standard F1 race (excluding fastest lap)?",
@@ -2073,7 +3148,12 @@
       "6"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "8",
+      "4",
+      "10"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 8th in a standard F1 race (excluding fastest lap)?",
@@ -2081,7 +3161,12 @@
       "4"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "6",
+      "2",
+      "1"
+    ]
   },
   {
     "q": "How many championship points are awarded for finishing 9th in a standard F1 race (excluding fastest lap)?",
@@ -2089,7 +3174,12 @@
       "2"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "1",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "How many points does P2 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2097,7 +3187,12 @@
       "18"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many points does P2 score in a standard Grand Prix?",
@@ -2105,7 +3200,12 @@
       "18"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "How many points does P3 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2113,7 +3213,12 @@
       "15"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many points does P3 score in a standard Grand Prix?",
@@ -2121,7 +3226,12 @@
       "15"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "How many points does P4 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2129,7 +3239,12 @@
       "12"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "10",
+      "15",
+      "8"
+    ]
   },
   {
     "q": "How many points does P4 score in a standard Grand Prix?",
@@ -2137,7 +3252,12 @@
       "12"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "10",
+      "15",
+      "8"
+    ]
   },
   {
     "q": "How many points does P5 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2145,7 +3265,12 @@
       "10"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "How many points does P5 score in a standard Grand Prix?",
@@ -2153,7 +3278,12 @@
       "10"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "How many points does P6 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2161,7 +3291,12 @@
       "8"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "10",
+      "6",
+      "12"
+    ]
   },
   {
     "q": "How many points does P6 score in a standard Grand Prix?",
@@ -2169,7 +3304,12 @@
       "8"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "10",
+      "6",
+      "12"
+    ]
   },
   {
     "q": "How many points does P7 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2177,7 +3317,12 @@
       "6"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "8",
+      "4",
+      "10"
+    ]
   },
   {
     "q": "How many points does P8 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2185,7 +3330,12 @@
       "4"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "6",
+      "2",
+      "1"
+    ]
   },
   {
     "q": "How many points does P9 score in a standard F1 Grand Prix (excluding fastest lap)?",
@@ -2193,7 +3343,12 @@
       "2"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "1",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "How many points does P9 score in a standard Grand Prix?",
@@ -2201,7 +3356,12 @@
       "2"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "1",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "How many points is fastest lap worth if conditions are met?",
@@ -2209,7 +3369,12 @@
       "1"
     ],
     "difficulty": "medium",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "2",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "How many points is the fastest-lap bonus worth when eligible?",
@@ -2217,7 +3382,12 @@
       "1"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "2",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "How many points is the fastest-lap bonus worth when eligible? (F1)",
@@ -2225,7 +3395,12 @@
       "1"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "2",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "If a driver finishes P1 and does NOT get fastest lap, how many points do they score?",
@@ -2233,7 +3408,12 @@
       "25"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "15",
+      "12"
+    ]
   },
   {
     "q": "If a driver finishes P10 and does NOT get fastest lap, how many points do they score?",
@@ -2241,7 +3421,12 @@
       "1"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "2",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "If a driver finishes P2 and does NOT get fastest lap, how many points do they score?",
@@ -2249,7 +3434,12 @@
       "18"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "15",
+      "12",
+      "25"
+    ]
   },
   {
     "q": "If a driver finishes P3 and does NOT get fastest lap, how many points do they score?",
@@ -2257,7 +3447,12 @@
       "15"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "12",
+      "10"
+    ]
   },
   {
     "q": "If a driver finishes P4 and does NOT get fastest lap, how many points do they score?",
@@ -2265,7 +3460,12 @@
       "12"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "10",
+      "15",
+      "8"
+    ]
   },
   {
     "q": "If a driver finishes P5 and does NOT get fastest lap, how many points do they score?",
@@ -2273,7 +3473,12 @@
       "10"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "If a driver finishes P6 and does NOT get fastest lap, how many points do they score?",
@@ -2281,7 +3486,12 @@
       "8"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "10",
+      "6",
+      "12"
+    ]
   },
   {
     "q": "If a driver finishes P7 and does NOT get fastest lap, how many points do they score?",
@@ -2289,7 +3499,12 @@
       "6"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "8",
+      "4",
+      "10"
+    ]
   },
   {
     "q": "If a driver finishes P8 and does NOT get fastest lap, how many points do they score?",
@@ -2297,7 +3512,12 @@
       "4"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "6",
+      "2",
+      "1"
+    ]
   },
   {
     "q": "If a driver finishes P9 and does NOT get fastest lap, how many points do they score?",
@@ -2305,7 +3525,12 @@
       "2"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "1",
+      "4",
+      "6"
+    ]
   },
   {
     "q": "In F1 shorthand, what does ERS mean?",
@@ -2313,7 +3538,12 @@
       "energy recovery system"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "drag reduction system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "What does a double yellow indicate compared with a single yellow?",
@@ -2350,7 +3580,12 @@
       "energy recovery system"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "drag reduction system",
+      "safety car",
+      "virtual safety car"
+    ]
   },
   {
     "q": "What is the normal points value for a Grand Prix win before any fastest-lap bonus is considered?",
@@ -2358,7 +3593,12 @@
       "25"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "15",
+      "12"
+    ]
   },
   {
     "q": "What is the normal points value for a Grand Prix win before any fastest-lap bonus is considered? (F1)",
@@ -2366,7 +3606,12 @@
       "25"
     ],
     "category": "rules",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "18",
+      "15",
+      "12"
+    ]
   },
   {
     "q": "What minimum finishing position must a driver achieve to be eligible for fastest-lap bonus points?",
@@ -2395,7 +3640,12 @@
       "disqualification"
     ],
     "difficulty": "hard",
-    "category": "rules"
+    "category": "rules",
+    "wrong_answers": [
+      "did not finish",
+      "did not start",
+      "retired"
+    ]
   },
   {
     "q": "What does a black-and-orange flag usually indicate?",
@@ -2741,7 +3991,12 @@
       "20"
     ],
     "difficulty": "easy",
-    "category": "weekend_format"
+    "category": "weekend_format",
+    "wrong_answers": [
+      "10",
+      "3",
+      "21"
+    ]
   },
   {
     "q": "How many practice sessions are usually held on a standard non-sprint weekend?",
@@ -2750,7 +4005,12 @@
       "three"
     ],
     "difficulty": "easy",
-    "category": "weekend_format"
+    "category": "weekend_format",
+    "wrong_answers": [
+      "10",
+      "20",
+      "4"
+    ]
   },
   {
     "q": "How many teams usually make up a full F1 grid?",
@@ -2758,7 +4018,12 @@
       "10"
     ],
     "difficulty": "easy",
-    "category": "weekend_format"
+    "category": "weekend_format",
+    "wrong_answers": [
+      "12",
+      "8",
+      "6"
+    ]
   },
   {
     "q": "In F1 shorthand, what does Q1 mean?",
@@ -2826,7 +4091,12 @@
       "q3"
     ],
     "category": "weekend_format",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "q1",
+      "q2",
+      "sprint shootout"
+    ]
   },
   {
     "q": "What is the first segment of a standard F1 qualifying session called?",
@@ -2834,7 +4104,12 @@
       "q1"
     ],
     "category": "weekend_format",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "q2",
+      "q3",
+      "sprint shootout"
+    ]
   },
   {
     "q": "What is the grid in F1?",
@@ -2875,7 +4150,12 @@
       "q2"
     ],
     "category": "weekend_format",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "q1",
+      "q3",
+      "sprint shootout"
+    ]
   },
   {
     "q": "What is the short race on a sprint weekend called?",
@@ -2884,7 +4164,12 @@
       "sprint race"
     ],
     "category": "weekend_format",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "qualifying",
+      "race",
+      "practice"
+    ]
   },
   {
     "q": "What session sets the grid for the Grand Prix on a normal weekend?",
@@ -2892,7 +4177,12 @@
       "qualifying"
     ],
     "difficulty": "easy",
-    "category": "weekend_format"
+    "category": "weekend_format",
+    "wrong_answers": [
+      "race",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "Which session usually sets the Grand Prix starting grid on a normal weekend?",
@@ -2900,7 +4190,12 @@
       "qualifying"
     ],
     "category": "weekend_format",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "wrong_answers": [
+      "race",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "What does 'OUT' often indicate in a qualifying classification context?",
@@ -2927,7 +4222,12 @@
       "after qualifying"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "race",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "When is the grid walk period?",
@@ -2944,7 +4244,12 @@
       "red"
     ],
     "difficulty": "medium",
-    "category": "weekend_format"
+    "category": "weekend_format",
+    "wrong_answers": [
+      "white",
+      "yellow",
+      "green"
+    ]
   },
   {
     "q": "What session can determine the sprint starting grid in modern sprint formats?",
@@ -2953,7 +4258,12 @@
       "sprint qualifying"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "q1",
+      "q2",
+      "q3"
+    ]
   },
   {
     "q": "What session commonly determines sprint grid on sprint weekends (modern format)?",
@@ -2963,7 +4273,12 @@
       "sprint qualifying"
     ],
     "difficulty": "medium",
-    "category": "weekend_format"
+    "category": "weekend_format",
+    "wrong_answers": [
+      "q1",
+      "q2",
+      "q3"
+    ]
   },
   {
     "q": "What session usually follows FP3 on a standard non-sprint weekend?",
@@ -2971,7 +4286,12 @@
       "qualifying"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "race",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "What session usually follows FP3 on a standard non-sprint weekend? (F1)",
@@ -2979,7 +4299,12 @@
       "qualifying"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "race",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "What session usually follows Qualifying on a normal weekend schedule?",
@@ -2988,7 +4313,12 @@
       "grand prix"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "qualifying",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "What session usually follows Qualifying on a normal weekend schedule? (F1)",
@@ -2997,7 +4327,12 @@
       "grand prix"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "qualifying",
+      "sprint",
+      "practice"
+    ]
   },
   {
     "q": "Which qualifying segment determines pole position shootout participants?",
@@ -3005,7 +4340,12 @@
       "q3"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "q1",
+      "q2",
+      "sprint shootout"
+    ]
   },
   {
     "q": "Which qualifying segment determines pole position shootout participants? (F1)",
@@ -3013,7 +4353,12 @@
       "q3"
     ],
     "category": "weekend_format",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "wrong_answers": [
+      "q1",
+      "q2",
+      "sprint shootout"
+    ]
   },
   {
     "q": "Which session comes first on a standard non-sprint F1 weekend among these common timed sessions: FP1, FP2, FP3, or Qualifying?",

@@ -2788,26 +2788,55 @@ async def quiz(ctx, difficulty: str = "", category: str = ""):
     points = _quiz_points_for_question(q)
     correct_display = (q.get("answers") or ["?"])[0]
 
-    # Build distractors: prefer same-category questions, fall back to any category
-    other_qs = [x for x in F1_QUIZ_QUESTIONS if x is not q]
-    same_cat = [x for x in other_qs if _quiz_category_for_question(x) == cat]
-    diff_cat = [x for x in other_qs if _quiz_category_for_question(x) != cat]
-    random.shuffle(same_cat)
-    random.shuffle(diff_cat)
-    candidate_qs = same_cat + diff_cat
-    distractors: List[str] = []
+    # Build distractors: mix curated wrong_answers bank with same-category real answers.
+    # Numbers only match numbers; word answers only match word answers.
     correct_key = _clean_text_key(correct_display)
-    for oq in candidate_qs:
-        if len(distractors) >= 3:
-            break
+    correct_is_numeric = correct_display.strip().lstrip("-").isdigit()
+
+    def _type_matches(candidate: str) -> bool:
+        return candidate.strip().lstrip("-").isdigit() == correct_is_numeric
+
+    curated = [str(w) for w in (q.get("wrong_answers") or [])
+               if _clean_text_key(str(w)) != correct_key and _type_matches(str(w))]
+    random.shuffle(curated)
+
+    same_cat_pool: List[str] = []
+    for oq in F1_QUIZ_QUESTIONS:
+        if oq is q:
+            continue
+        if _quiz_category_for_question(oq) != cat:
+            continue
         d = (oq.get("answers") or [None])[0]
-        if not d:
-            continue
-        if _clean_text_key(d) == correct_key:
-            continue
-        if any(_clean_text_key(d) == _clean_text_key(x) for x in distractors):
-            continue
-        distractors.append(str(d))
+        if d and _clean_text_key(d) != correct_key and _type_matches(str(d)):
+            same_cat_pool.append(str(d))
+    random.shuffle(same_cat_pool)
+
+    # Interleave: one from curated, one from same-cat, repeat — keeps variety
+    seen: set[str] = set()
+    merged: List[str] = []
+    for src in [curated, same_cat_pool]:
+        for item in src:
+            k = _clean_text_key(item)
+            if k not in seen:
+                seen.add(k)
+                merged.append(item)
+
+    # If still short, fall back across all categories (same type rule still applies)
+    if len(merged) < 3:
+        for oq in F1_QUIZ_QUESTIONS:
+            if oq is q:
+                continue
+            d = (oq.get("answers") or [None])[0]
+            if d and _type_matches(str(d)):
+                k = _clean_text_key(d)
+                if k != correct_key and k not in seen:
+                    seen.add(k)
+                    merged.append(str(d))
+            if len(merged) >= 6:
+                break
+
+    random.shuffle(merged)
+    distractors = merged[:3]
 
     options = [correct_display] + distractors
     random.shuffle(options)

@@ -3645,10 +3645,18 @@ def quiz_mgr():
             f'<option value="{d}" {"selected" if diff_val == d else ""}>{d.capitalize()}</option>'
             for d in ("easy", "medium", "hard")
         )
+        wrong_ans_raw = q.get("wrong_answers") or []
+        wrong_ans_str = _escape(", ".join(str(w) for w in wrong_ans_raw))
+        has_wrong = len(wrong_ans_raw) >= 3
+        wrong_badge = (
+            f'<span class="ml-1 text-[10px] text-emerald-400 border border-emerald-700 rounded px-1">✓ bank</span>'
+            if has_wrong else
+            f'<span class="ml-1 text-[10px] text-gray-600 border border-gray-700 rounded px-1">no bank</span>'
+        )
         rows += (
             f'<tr class="border-b border-[#1a1a1a] hover:bg-[#0d0d0d]" id="qrow_{idx}">'
             f'<td class="px-3 py-2"><input type="checkbox" class="q-select accent-blue-500 w-4 h-4 cursor-pointer" value="{idx}" /></td>'
-            f'<td class="px-3 py-2 text-sm text-gray-200">{_escape(q.get("q",""))}</td>'
+            f'<td class="px-3 py-2 text-sm text-gray-200">{_escape(q.get("q",""))}{wrong_badge}</td>'
             f'<td class="hidden md:table-cell px-3 py-2 text-xs text-gray-400">{_escape(ans[:80])}</td>'
             f'<td class="hidden sm:table-cell px-3 py-2 text-xs text-gray-500">{_escape(q.get("category",""))}</td>'
             f'<td class="hidden sm:table-cell px-3 py-2 text-xs text-gray-500">{_escape(q.get("difficulty",""))}</td>'
@@ -3665,8 +3673,16 @@ def quiz_mgr():
             f'<form method="post" action="/quiz_mgr/edit" class="grid grid-cols-1 gap-2">'
             f'{csrf}<input type="hidden" name="idx" value="{idx}" />'
             f'<textarea name="question" rows="2" class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 resize-none w-full">{_escape(q.get("q",""))}</textarea>'
-            f'<input name="answers" value="{_escape(ans)}" placeholder="Answers (comma-separated)"'
+            f'<div>'
+            f'<div class="text-[10px] text-gray-500 mb-1">Correct answers (comma-separated — first is the display value)</div>'
+            f'<input name="answers" value="{_escape(ans)}" placeholder="e.g. 25, twenty-five"'
             f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 w-full" />'
+            f'</div>'
+            f'<div>'
+            f'<div class="text-[10px] text-gray-500 mb-1">Wrong answer bank (comma-separated — mixed with same-category answers as distractors)</div>'
+            f'<input name="wrong_answers" value="{wrong_ans_str}" placeholder="e.g. 18, 15, 12"'
+            f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 w-full" />'
+            f'</div>'
             f'<div class="flex gap-2 flex-wrap">'
             f'<input name="category" value="{_escape(q.get("category",""))}" placeholder="Category"'
             f' class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600 flex-1 min-w-[120px]" />'
@@ -3734,8 +3750,16 @@ def quiz_mgr():
           <div class="grid grid-cols-1 gap-3">
             <textarea name="question" placeholder="Question text" rows="2" required
                       class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 resize-none w-full"></textarea>
-            <input name="answers" placeholder="Answers (comma-separated)" required
-                   class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 w-full" />
+            <div>
+              <div class="text-[10px] text-gray-500 mb-1">Correct answers (comma-separated — first is the display value)</div>
+              <input name="answers" placeholder="e.g. 25, twenty-five" required
+                     class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 w-full" />
+            </div>
+            <div>
+              <div class="text-[10px] text-gray-500 mb-1">Wrong answer bank (comma-separated — mixed with same-category answers as distractors)</div>
+              <input name="wrong_answers" placeholder="e.g. 18, 15, 12"
+                     class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 w-full" />
+            </div>
             <div class="flex gap-2 flex-wrap">
               <input name="category" placeholder="Category (e.g. circuits)"
                      class="bg-[#0a0a0a] border border-[#2a2a2a] text-gray-200 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-gray-500 flex-1 min-w-[120px]" />
@@ -3882,12 +3906,16 @@ def quiz_mgr():
 def quiz_mgr_add():
     question = (request.form.get("question") or "").strip()
     raw_answers = (request.form.get("answers") or "").strip()
+    raw_wrong = (request.form.get("wrong_answers") or "").strip()
     category = (request.form.get("category") or "").strip()
     difficulty = (request.form.get("difficulty") or "easy").strip()
     if question and raw_answers:
         answers = [a.strip() for a in raw_answers.split(",") if a.strip()]
+        entry: dict = {"q": question, "answers": answers, "category": category, "difficulty": difficulty}
+        if raw_wrong:
+            entry["wrong_answers"] = [a.strip() for a in raw_wrong.split(",") if a.strip()]
         qs = _load_quiz()
-        qs.append({"q": question, "answers": answers, "category": category, "difficulty": difficulty})
+        qs.append(entry)
         _save_quiz(qs)
         _audit_log("quiz_add", f"q={question[:60]!r}")
     return redirect(url_for("quiz_mgr"))
@@ -3900,13 +3928,17 @@ def quiz_mgr_edit():
         idx = int(request.form.get("idx", -1))
         question = (request.form.get("question") or "").strip()
         raw_answers = (request.form.get("answers") or "").strip()
+        raw_wrong = (request.form.get("wrong_answers") or "").strip()
         category = (request.form.get("category") or "").strip()
         difficulty = (request.form.get("difficulty") or "easy").strip()
         if question and raw_answers:
             answers = [a.strip() for a in raw_answers.split(",") if a.strip()]
+            entry: dict = {"q": question, "answers": answers, "category": category, "difficulty": difficulty}
+            if raw_wrong:
+                entry["wrong_answers"] = [a.strip() for a in raw_wrong.split(",") if a.strip()]
             qs = _load_quiz()
             if 0 <= idx < len(qs):
-                qs[idx] = {"q": question, "answers": answers, "category": category, "difficulty": difficulty}
+                qs[idx] = entry
                 _save_quiz(qs)
                 _audit_log("quiz_edit", f"idx={idx} q={question[:60]!r}")
     except Exception:
