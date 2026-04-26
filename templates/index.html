@@ -242,9 +242,12 @@
          class="sheen-card block bg-zinc-900 hover:bg-zinc-800 border border-white/10 rounded-2xl p-8 transition-colors">
         <div class="flex items-center justify-between gap-2 mb-4">
           <span class="text-white/50 text-xs font-semibold uppercase tracking-widest">🏁 Watch Party</span>
-          {% if next_race and next_race.date_iso %}
+          {% if watch_party.get('datetime_utc') %}
           <span id="wp-race-badge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-f1red/10 border border-f1red/30 text-f1red tabular-nums"
-                data-race-target="{{ next_race.date_iso }}">…</span>
+                data-race-target="{{ watch_party.datetime_utc }}Z" data-label="Watch party in">…</span>
+          {% elif next_race and next_race.date_iso %}
+          <span id="wp-race-badge" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-f1red/10 border border-f1red/30 text-f1red tabular-nums"
+                data-race-target="{{ next_race.date_iso }}" data-label="Race in">…</span>
           {% endif %}
         </div>
         <h2 class="text-2xl font-bold mb-2">{{ watch_party.get('title', 'Watch Party') }}</h2>
@@ -612,17 +615,19 @@
       const badge = document.getElementById('wp-race-badge');
       if (!badge) return;
       const raceTarget = new Date(badge.dataset.raceTarget);
+      const label = badge.dataset.label || 'Race in';
+      const inProgressLabel = label.replace(' in', ' in progress');
       function updateBadge() {
         const diff = raceTarget - Date.now();
         if (diff <= -3 * 3600000) { badge.style.display = 'none'; return; }
-        if (diff <= 0) { badge.textContent = 'Race in progress'; return; }
+        if (diff <= 0) { badge.textContent = inProgressLabel; return; }
         const d = Math.floor(diff / 86400000);
         const h = Math.floor((diff % 86400000) / 3600000);
         const m = Math.floor((diff % 3600000) / 60000);
         badge.textContent = d > 0
-          ? `Race in ${d}d ${h}h`
-          : h > 0 ? `Race in ${h}h ${String(m).padStart(2,'0')}m`
-          : `Race in ${m}m`;
+          ? `${label} ${d}d ${h}h`
+          : h > 0 ? `${label} ${h}h ${String(m).padStart(2,'0')}m`
+          : `${label} ${m}m`;
       }
       updateBadge();
       setInterval(updateBadge, 30000);
