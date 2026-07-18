@@ -218,7 +218,10 @@ def _rate_limited() -> bool:
     now = time.time()
     arr = LOGIN_ATTEMPTS.get(ip, [])
     arr = [t for t in arr if now - t < WINDOW_SECONDS]
-    LOGIN_ATTEMPTS[ip] = arr
+    if arr:
+        LOGIN_ATTEMPTS[ip] = arr
+    else:
+        LOGIN_ATTEMPTS.pop(ip, None)
     return len(arr) >= MAX_ATTEMPTS
 
 def _record_attempt():
@@ -1460,6 +1463,10 @@ def logs():
         """
     )
     return _render(body)
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
 
 @app.route("/status")
 @login_required

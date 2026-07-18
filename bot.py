@@ -1409,7 +1409,7 @@ async def _delayed_prediction_autoscore(
         else:
             _racelog(guild.id, f"[Predict] Autoscore: unknown session kind {session_kind}")
     except Exception as e:
-        logging.error(f"[Predict] Delayed autoscore failed for guild {guild.id}: {e}")
+        logging.error(f"[Predict] Delayed autoscore failed for guild {guild.id}: {e}", exc_info=True)
 
 def _normalize_driver_pick(s: str) -> str:
     s = " ".join((s or "").replace("|", " ").split())
@@ -5750,13 +5750,13 @@ async def race_supervisor_loop():
                                 f"Race-live stop: session={session_type or latest_type or 'unknown'} session_key={session_key}",
                             )
                     except Exception as e:
-                        logging.error(f"[RaceLive] Guild {guild.id} supervisor step failed: {e}")
+                        logging.error(f"[RaceLive] Guild {guild.id} supervisor step failed: {e}", exc_info=True)
 
                 await asyncio.sleep(60 if should_follow else idle_s)
 
             except Exception as e:
                 _loop_error("race_supervisor")
-                logging.error(f"[RaceLive] Supervisor error: {e}")
+                logging.error(f"[RaceLive] Supervisor error: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
 @bot.hybrid_command(name="racelivekill", aliases=["race_live_kill"])
@@ -7118,6 +7118,8 @@ async def of1_dashboard_kill_race_live(guild_id: int) -> tuple:
     RACE_LIVE_LAST_EVENT_TS.pop(gid, None)
     RACE_LIVE_THREADS.pop(gid, None)
     RACE_LIVE_SESSION_KEYS.pop(gid, None)
+    RACE_LIVE_DRIVER_MAPS.pop(gid, None)
+    RACE_CONTROL_FEED.pop(gid, None)
     return True, "Race live killed and hold set"
 
 

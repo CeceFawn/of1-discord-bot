@@ -499,7 +499,7 @@ def get_next_race() -> dict | None:
 # ----------------------------
 @app.route("/")
 def index():
-    if request.args.get("nocache") == "1" and _get_client_ip() in ("127.0.0.1", "::1"):
+    if request.args.get("nocache") == "1" and _site_client_ip() in ("127.0.0.1", "::1"):
         _cache.clear()
         _FUNC_CACHE.clear()
 
@@ -589,7 +589,7 @@ def api_next_race():
 @app.route("/api/cache_stats")
 def api_cache_stats():
     """Localhost-only: return website cache stats for the dashboard."""
-    if _get_client_ip() not in ("127.0.0.1", "::1"):
+    if _site_client_ip() not in ("127.0.0.1", "::1"):
         return jsonify({"ok": False, "error": "forbidden"}), 403
     now_ts = time.time()
     func_entries = []
