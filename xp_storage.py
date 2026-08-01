@@ -88,7 +88,9 @@ def load_xp_state(path: Optional[str] = None) -> Dict[str, Any]:
         return {"guilds": {}}
 
 
-def save_xp_state(state: Dict[str, Any], path: Optional[str] = None) -> None:
+def save_xp_state(state: Dict[str, Any], path: Optional[str] = None) -> bool:
+    """Returns True on success, False on failure (caller should not assume
+    the write happened just because this returned)."""
     path = path or get_xp_state_path()
     state = _ensure_root_shape(state)
 
@@ -101,6 +103,7 @@ def save_xp_state(state: Dict[str, Any], path: Optional[str] = None) -> None:
 
         # Atomic replace on most OSes
         os.replace(tmp_path, path)
+        return True
 
     except Exception as e:
         logging.error(f"[XP] Failed to save xp state to {path}: {e}")
@@ -110,6 +113,7 @@ def save_xp_state(state: Dict[str, Any], path: Optional[str] = None) -> None:
                 os.remove(tmp_path)
         except Exception:
             pass
+        return False
 
 
 # ----------------------------

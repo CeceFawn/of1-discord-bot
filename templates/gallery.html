@@ -160,9 +160,9 @@
   <img id="lb-img" src="" alt="Gallery photo" />
 </div>
 
-<script src="/static/three.min.js"></script>
-<script>
-(function () {
+<script src="/static/three.min.js" defer></script>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('DOMContentLoaded', function () {
   if (typeof THREE === 'undefined') {
     document.body.innerHTML = '<div style="color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Inter,sans-serif">Failed to load 3D library. Check your connection.</div>';
     return;
@@ -587,7 +587,7 @@
   });
 
   animate();
-})();
+});
 </script>
 
 {% else %}

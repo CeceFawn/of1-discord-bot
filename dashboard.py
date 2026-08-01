@@ -20,6 +20,7 @@ import requests
 import queue
 from dotenv import load_dotenv
 from flask import Flask, request, redirect, url_for, render_template_string, session, abort, jsonify, Response, stream_with_context
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
@@ -38,6 +39,12 @@ from runtime_store import get_runtime_status, list_alerts, init_runtime_db
 
 app = Flask(__name__)
 
+# Trust exactly one reverse-proxy hop (nginx/Caddy on the same host) for
+# X-Forwarded-For. Without this, request.headers["X-Forwarded-For"] is a
+# client-supplied header an attacker can set directly to spoof the IP used
+# by DASHBOARD_ALLOWED_IPS and the login rate limiter below.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
 # ----------------------------
 # Optional bot reference
 # ----------------------------
@@ -46,6 +53,25 @@ bot_reference = None
 def set_bot_reference(bot):
     global bot_reference
     bot_reference = bot
+
+def _call_bot_coro(coro_factory, timeout: float = 10.0):
+    """
+    Dispatch a coroutine onto the bot's event loop from this Flask thread and
+    block for its (ok, message) result. State-mutating bridge calls (XP,
+    quiz, predictions) must go through this rather than being awaited/called
+    directly from Flask's thread, so the actual mutation always happens on
+    the bot's single event loop thread instead of racing with it.
+
+    coro_factory is a zero-arg callable returning the coroutine (e.g.
+    `lambda: bot_reference.of1_xp_adjust(...)`) rather than an already-built
+    coroutine, so we don't construct (and leak) one before confirming the
+    bot loop is actually running.
+    """
+    bot_loop = bot_reference.loop if bot_reference else None
+    if not bot_loop or not bot_loop.is_running():
+        return False, "Bot not connected"
+    fut = asyncio.run_coroutine_threadsafe(coro_factory(), bot_loop)
+    return fut.result(timeout=timeout)
 
 DASHBOARD_STARTED_AT = time.time()
 
@@ -202,11 +228,13 @@ ALLOWED_IPS = [x.strip() for x in (os.getenv("DASHBOARD_ALLOWED_IPS") or "").spl
 LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 MAX_ATTEMPTS = 8
 WINDOW_SECONDS = 10 * 60  # 10 minutes
+_LOGIN_ATTEMPTS_LAST_SWEEP = 0.0
 
 def _client_ip() -> str:
-    # X-Forwarded-For is set by nginx/Caddy; take only the first (original client) IP.
-    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    return forwarded or request.remote_addr or "unknown"
+    # ProxyFix (configured above) has already resolved this from
+    # X-Forwarded-For based on a single trusted proxy hop, so it can't be
+    # spoofed by a client-supplied header.
+    return request.remote_addr or "unknown"
 
 def _ip_allowed() -> bool:
     if not ALLOWED_IPS:
@@ -222,6 +250,14 @@ def _rate_limited() -> bool:
         LOGIN_ATTEMPTS[ip] = arr
     else:
         LOGIN_ATTEMPTS.pop(ip, None)
+
+    global _LOGIN_ATTEMPTS_LAST_SWEEP
+    if now - _LOGIN_ATTEMPTS_LAST_SWEEP > WINDOW_SECONDS:
+        stale = [k for k, v in LOGIN_ATTEMPTS.items() if not v or now - v[-1] >= WINDOW_SECONDS]
+        for k in stale:
+            LOGIN_ATTEMPTS.pop(k, None)
+        _LOGIN_ATTEMPTS_LAST_SWEEP = now
+
     return len(arr) >= MAX_ATTEMPTS
 
 def _record_attempt():
@@ -2269,13 +2305,15 @@ def wp_upload_flyer():
     f = request.files.get("file")
     if not f or not f.filename:
         return jsonify({"ok": False, "error": "No file provided"}), 400
-    if not f.filename.lower().endswith(".png"):
-        return jsonify({"ok": False, "error": "Only PNG files are allowed"}), 400
+    ok, result = _read_and_validate_image(f, {".png"})
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
     dest = os.path.join(_STATIC_DIR, f"schedule_{key}.png")
     try:
         os.makedirs(_STATIC_DIR, exist_ok=True)
         tmp = dest + ".tmp"
-        f.save(tmp)
+        with open(tmp, "wb") as out:
+            out.write(result)
         os.replace(tmp, dest)
         return jsonify({"ok": True})
     except Exception as e:
@@ -2532,6 +2570,10 @@ def discord_events():
 
       <script>
       (function(){{
+        window.deEscHtml = function(s) {{
+          return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }};
+
         // Set default date to today
         const d = new Date();
         const pad = n => String(n).padStart(2,'0');
@@ -2656,7 +2698,7 @@ def discord_events():
             const r = await fetch('/discord_events/list', {{credentials:'same-origin'}});
             const data = await r.json();
             if (!data.ok) {{
-              list.innerHTML = `<div style="color:#f88;font-size:13px;">Error: ${{data.error}}</div>`;
+              list.innerHTML = `<div style="color:#f88;font-size:13px;">Error: ${{deEscHtml(data.error)}}</div>`;
               return;
             }}
             if (!data.events.length) {{
@@ -2671,9 +2713,9 @@ def discord_events():
               const statusColor = ev.status === 2 ? '#6f6' : ev.status >= 3 ? '#555' : '#aaa';
               return `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;background:#1a1a1a;border:1px solid #333;border-radius:10px;">
                 <div style="min-width:0;">
-                  <div style="font-size:13px;font-weight:600;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${{ev.name}}</div>
+                  <div style="font-size:13px;font-weight:600;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${{deEscHtml(ev.name)}}</div>
                   <div style="font-size:12px;color:#888;margin-top:3px;">${{fmt(start)}}${{end?' → '+fmt(end):''}}</div>
-                  ${{ev.location ? `<div style="font-size:11px;color:#555;margin-top:2px;">${{ev.location}}</div>` : ''}}
+                  ${{ev.location ? `<div style="font-size:11px;color:#555;margin-top:2px;">${{deEscHtml(ev.location)}}</div>` : ''}}
                   <div style="font-size:11px;color:${{statusColor}};margin-top:3px;">${{statusLabel}}</div>
                 </div>
                 ${{ev.status <= 2 ? `<button onclick="deCancel('${{ev.id}}',this)"
@@ -3482,6 +3524,44 @@ def gallery_mgr():
     return _render(body)
 
 
+_MAX_UPLOAD_BYTES = 15 * 1024 * 1024   # 15 MB
+_MAX_IMAGE_PIXELS = 40_000_000         # ~40 MP cap guards against decompression-bomb-style images
+
+
+def _read_and_validate_image(file_storage, allowed_exts: set) -> tuple:
+    """
+    Reads an uploaded file fully into memory and validates that it's an
+    actual well-formed image (not just a file with an image extension),
+    within sane byte-size and pixel-count limits. Returns (True, raw_bytes)
+    on success or (False, error_message) on failure; the caller writes the
+    bytes to disk itself so nothing unvalidated ever touches the filesystem.
+    """
+    import io
+    from PIL import Image, UnidentifiedImageError
+
+    ext = os.path.splitext(file_storage.filename or "")[1].lower()
+    if ext not in allowed_exts:
+        return False, "Unsupported file extension"
+
+    data = file_storage.read(_MAX_UPLOAD_BYTES + 1)
+    if not data:
+        return False, "Empty file"
+    if len(data) > _MAX_UPLOAD_BYTES:
+        return False, f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            img.verify()
+        with Image.open(io.BytesIO(data)) as img:
+            w, h = img.size
+            if w * h > _MAX_IMAGE_PIXELS:
+                return False, "Image dimensions too large"
+    except (UnidentifiedImageError, OSError, ValueError):
+        return False, "File is not a valid image"
+
+    return True, data
+
+
 def _compress_gallery_image(path: str, max_width: int = 1920, quality: int = 82) -> None:
     """Compress/resize a gallery image in-place using Pillow."""
     try:
@@ -3523,12 +3603,13 @@ def gallery_mgr_upload():
     for f in files:
         if not f or not f.filename:
             continue
-        ext = os.path.splitext(f.filename)[1].lower()
-        if ext not in _GALLERY_ALLOWED_EXT:
+        ok, result = _read_and_validate_image(f, _GALLERY_ALLOWED_EXT)
+        if not ok:
             continue
         safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in f.filename)
         dest = os.path.join(GALLERY_DIR, safe)
-        f.save(dest)
+        with open(dest, "wb") as out:
+            out.write(result)
         _compress_gallery_image(dest)
         saved += 1
     _audit_log("gallery_upload", f"count={saved}")
@@ -3570,7 +3651,7 @@ def _save_quiz(questions: list) -> None:
         json.dump(questions, f, indent=2, ensure_ascii=False)
     os.replace(tmp, F1_QUIZ_PATH)
     if bot_reference and hasattr(bot_reference, "of1_quiz_save"):
-        bot_reference.of1_quiz_save(questions)
+        _call_bot_coro(lambda: bot_reference.of1_quiz_save(questions))
 
 
 @app.route("/quiz_mgr")
@@ -4293,7 +4374,7 @@ def xp_mgr_adjust():
         return jsonify({"ok": False, "message": "guild_id, user_id, and non-zero delta required"})
 
     if bot_reference and hasattr(bot_reference, "of1_xp_adjust"):
-        ok, msg = bot_reference.of1_xp_adjust(int(gid), int(uid), delta)
+        ok, msg = _call_bot_coro(lambda: bot_reference.of1_xp_adjust(int(gid), int(uid), delta))
     else:
         return jsonify({"ok": False, "message": "Bot not connected"})
 
@@ -4881,7 +4962,7 @@ def predictions_set_result():
         value = raw_value
 
     if bot_reference and hasattr(bot_reference, "of1_pred_set_result"):
-        ok, msg = bot_reference.of1_pred_set_result(round_key, category, value)
+        ok, msg = _call_bot_coro(lambda: bot_reference.of1_pred_set_result(round_key, category, value))
     else:
         # Fallback: write directly to state file
         try:

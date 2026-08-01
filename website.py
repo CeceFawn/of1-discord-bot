@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import threading
 import time
 import requests
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from flask import Flask, render_template, jsonify, Response, request, abort
+from flask import Flask, render_template, jsonify, Response, request, abort, g
 from dotenv import load_dotenv
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -16,16 +18,31 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 app = Flask(__name__)
 
-# Simple per-IP rate limiter: max 60 requests per 60 seconds
+# Trust exactly one reverse-proxy hop (nginx/Caddy on the same host) for
+# X-Forwarded-For / X-Forwarded-Proto. This makes Werkzeug parse the header
+# itself and pick the IP the proxy actually appended, rather than trusting
+# whatever a client puts first in a client-supplied header (spoofable).
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+# Simple per-IP rate limiter: max 120 requests per 60 seconds
 _SITE_RATE: dict[str, list[float]] = {}
 _SITE_RATE_LOCK = threading.Lock()
+_SITE_RATE_LAST_SWEEP = 0.0
 
 def _site_client_ip() -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    return forwarded or request.remote_addr or "unknown"
+    # ProxyFix has already resolved this to the real client IP based on the
+    # trusted proxy hop above; a client cannot override it via headers.
+    return request.remote_addr or "unknown"
+
+@app.before_request
+def _site_set_csp_nonce():
+    g.csp_nonce = secrets.token_urlsafe(16)
 
 @app.before_request
 def _site_rate_limit():
+    if request.path.startswith("/static/"):
+        return
+    global _SITE_RATE_LAST_SWEEP
     ip = _site_client_ip()
     now = time.time()
     with _SITE_RATE_LOCK:
@@ -35,15 +52,28 @@ def _site_rate_limit():
         hits.append(now)
         _SITE_RATE[ip] = hits
 
+        # Periodically drop IPs that haven't made a request recently so this
+        # dict can't grow without bound (e.g. many distinct/rotating IPs).
+        if now - _SITE_RATE_LAST_SWEEP > 300:
+            stale = [k for k, v in _SITE_RATE.items() if not v or now - v[-1] >= 60]
+            for k in stale:
+                _SITE_RATE.pop(k, None)
+            _SITE_RATE_LAST_SWEEP = now
+
+@app.context_processor
+def _inject_csp_nonce():
+    return {"csp_nonce": g.get("csp_nonce", "")}
+
 @app.after_request
 def _site_security_headers(response):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    nonce = g.get("csp_nonce", "")
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.tailwindcss.com https://fonts.googleapis.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data:; "
@@ -649,4 +679,4 @@ def server_error(e):
 if __name__ == "__main__":
     port = int(os.getenv("WEBSITE_PORT", "5001"))
     debug = os.getenv("WEBSITE_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)

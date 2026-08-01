@@ -31,7 +31,7 @@
   <meta name="theme-color" content="#e8002d" />
 
   <!-- JSON-LD structured data -->
-  <script type="application/ld+json">
+  <script type="application/ld+json" nonce="{{ csp_nonce }}">
   {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -52,7 +52,7 @@
   }
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
     tailwind.config = {
       theme: {
         extend: {
@@ -402,7 +402,7 @@
     </button>
   </div>
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     (function() {
       const lb    = document.getElementById('lightbox');
       const lbImg = document.getElementById('lightbox-img');
@@ -545,7 +545,7 @@
   </script>
 
   <!-- ── PARTY MODE ───────────────────────────────────────────── -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     (function() {
       const trigger   = document.getElementById('party-trigger');
       const navLogo   = document.getElementById('of1-logo');
@@ -574,7 +574,7 @@
   </script>
 
   <!-- ── COUNTDOWN SCRIPTS ─────────────────────────────────────── -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     const navEl = document.getElementById('nav-countdown');
     if (navEl) {
       const navTarget = new Date(navEl.dataset.target);
@@ -610,7 +610,7 @@
   </script>
 
   <!-- ── WATCH PARTY RACE BADGE COUNTDOWN ─────────────────────── -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     (function () {
       const badge = document.getElementById('wp-race-badge');
       if (!badge) return;
@@ -635,7 +635,7 @@
   </script>
 
   <!-- ── LOCAL DATE REFORMAT ───────────────────────────────────── -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     document.querySelectorAll('[data-localdate]').forEach(function(el) {
       try {
         el.textContent = new Date(el.dataset.localdate).toLocaleDateString(
@@ -662,7 +662,7 @@
   </script>
 
   <!-- ── MOBILE NAV HAMBURGER ──────────────────────────────────── -->
-  <script>
+  <script nonce="{{ csp_nonce }}">
     (function () {
       const toggle = document.getElementById('nav-toggle');
       const menu   = document.getElementById('nav-mobile-menu');

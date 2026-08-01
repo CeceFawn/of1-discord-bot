@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import copy
 import time
 import logging
 from logging.handlers import RotatingFileHandler
@@ -286,6 +287,7 @@ XP_DIRTY: bool = False
 import collections as _collections
 _CMD_LOG: _collections.deque = _collections.deque(maxlen=300)
 XP_SAVE_LOCK = asyncio.Lock()
+QUIZ_SAVE_LOCK = asyncio.Lock()
 XP_FLUSH_TASK: Optional[asyncio.Task] = None
 
 PERIODIC_ROLE_RECOVERY_TASK: Optional[asyncio.Task] = None
@@ -333,9 +335,21 @@ async def xp_flush_loop():
                 continue
             async with XP_SAVE_LOCK:
                 if XP_DIRTY:
-                    await asyncio.to_thread(save_xp_state, XP_STATE)
-                    XP_DIRTY = False
-                    consecutive_failures = 0
+                    # Snapshot on the event loop thread (atomic w.r.t. other
+                    # coroutines) so the background thread below never
+                    # iterates the live dict while another coroutine mutates
+                    # it — that was corrupting saves / raising mid-iteration
+                    # errors when a dashboard or command mutation landed
+                    # during json.dump.
+                    snapshot = copy.deepcopy(XP_STATE)
+                    ok = await asyncio.to_thread(save_xp_state, snapshot)
+                    if ok:
+                        XP_DIRTY = False
+                        consecutive_failures = 0
+                    else:
+                        # Leave XP_DIRTY set so the next tick retries instead
+                        # of silently losing the pending changes.
+                        raise RuntimeError("save_xp_state reported failure")
         except Exception as e:
             _loop_error("xp_flush")
             logging.error(f"[XP] Flush loop error: {e}")
@@ -716,7 +730,7 @@ def _save_state_quiet() -> None:
 
 ALERT_RATE_LIMIT: Dict[str, float] = {}
 
-def _record_alert(
+async def _record_alert(
     kind: str,
     message: str,
     guild_id: Optional[int] = None,
@@ -737,7 +751,10 @@ def _record_alert(
             for k, v in list(ALERT_RATE_LIMIT.items()):
                 if float(v) < cutoff:
                     ALERT_RATE_LIMIT.pop(k, None)
-        insert_alert(
+        # insert_alert() is blocking sqlite3 I/O; on_command_error fires on
+        # every failed command, so keep it off the event loop thread.
+        await asyncio.to_thread(
+            insert_alert,
             ts=datetime.now(timezone.utc).isoformat(),
             kind=str(kind or "info"),
             message=str(message or "").strip()[:500],
@@ -2144,8 +2161,9 @@ async def setbg(ctx, name: str = None):
         return await ctx.send(
             f"❌ `{name}` isn't available. Choose from: {', '.join(f'`{k}`' for k in available)}"
         )
-    set_user_card_prefs(XP_STATE, ctx.guild.id, ctx.author.id, bg_url=name)
-    _xp_mark_dirty()
+    async with XP_SAVE_LOCK:
+        set_user_card_prefs(XP_STATE, ctx.guild.id, ctx.author.id, bg_url=name)
+        _xp_mark_dirty()
     await ctx.send(f"✅ Background set to **{name}**. Use `!rank` to see your updated card.")
 
 @bot.command(name="cardbgs", aliases=["backgrounds", "rankbgs"])
@@ -2193,8 +2211,9 @@ async def xpset(ctx, member: discord.Member, xp: int):
         return await ctx.send("❌ This must be used in a server.")
     xp = max(0, int(xp))
     lvl = xp_level_from_total(xp)
-    set_user_xp_level(XP_STATE, ctx.guild.id, member.id, xp=xp, level=lvl)
-    _xp_mark_dirty()
+    async with XP_SAVE_LOCK:
+        set_user_xp_level(XP_STATE, ctx.guild.id, member.id, xp=xp, level=lvl)
+        _xp_mark_dirty()
     await ctx.send(f"✅ Set {member.display_name} to {xp} XP (L{lvl}).")
 
 @bot.hybrid_command(name="xpreset")
@@ -2203,12 +2222,13 @@ async def xpreset(ctx, member: discord.Member):
     """Admin: reset a user's XP."""
     if ctx.guild is None:
         return await ctx.send("❌ This must be used in a server.")
-    rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
-    rec["xp"] = 0
-    rec["level"] = 0
-    rec["last_msg_ts"] = 0
-    rec["messages"] = 0
-    _xp_mark_dirty()
+    async with XP_SAVE_LOCK:
+        rec = get_user_record(XP_STATE, ctx.guild.id, member.id)
+        rec["xp"] = 0
+        rec["level"] = 0
+        rec["last_msg_ts"] = 0
+        rec["messages"] = 0
+        _xp_mark_dirty()
     await ctx.send(f"✅ Reset XP for {member.display_name}.")
 
 @bot.hybrid_command(name="xpaudit")
@@ -4398,7 +4418,11 @@ async def periodic_reaction_role_check():
                             if user.bot:
                                 continue
                             try:
-                                member = await guild.fetch_member(user.id)
+                                # Members intent is enabled, so the cache is
+                                # usually populated — avoid a per-user API
+                                # call (and rate-limit risk on large panels)
+                                # unless the member truly isn't cached.
+                                member = guild.get_member(user.id) or await guild.fetch_member(user.id)
                                 if member and role not in member.roles:
                                     if role_name in color_role_names():
                                         roles_to_remove = [
@@ -4484,7 +4508,7 @@ async def on_command_error(ctx, error):
 
     if isinstance(error, commands.CommandNotFound):
         logging.warning(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
-        _record_alert("command_not_found", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=False)
+        await _record_alert("command_not_found", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=False)
         return
 
     if isinstance(error, commands.CommandOnCooldown):
@@ -4498,11 +4522,11 @@ async def on_command_error(ctx, error):
 
     if isinstance(error, commands.CheckFailure):
         logging.warning(f"[CmdError] check failure {cmd_name} by user={uid} guild={gid}: {err_text}")
-        _record_alert("permission_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=True)
+        await _record_alert("permission_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=True)
         return
 
     logging.error(f"[CmdError] {cmd_name} by user={uid} guild={gid}: {err_text}")
-    _record_alert("command_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=True)
+    await _record_alert("command_error", f"{cmd_name} -> {err_text}", guild_id=gid, user_id=uid, persist=True)
 
 # ============================================================
 # Race Live (OpenF1) + Kill Switch + Debug Tail (NO underscores)
@@ -7131,18 +7155,21 @@ async def of1_dashboard_start_race_live(guild_id: int) -> tuple:
 
 @bot.listen("on_command")
 async def _cmd_log_listener(ctx):
-    _log_ctx_command(ctx)
+    await _log_ctx_command(ctx)
 
 @bot.after_invoke
 async def _after_invoke_log(ctx):
     # Catches hybrid commands invoked as slash commands (on_command doesn't fire for those)
     if getattr(ctx, 'interaction', None):
-        _log_ctx_command(ctx)
+        await _log_ctx_command(ctx)
 
-def _log_ctx_command(ctx) -> None:
+async def _log_ctx_command(ctx) -> None:
     try:
         from runtime_store import insert_cmd_log
-        insert_cmd_log(
+        # insert_cmd_log() is blocking sqlite3 I/O and this fires on every
+        # single command invocation, so keep it off the event loop thread.
+        await asyncio.to_thread(
+            insert_cmd_log,
             ts=datetime.now(timezone.utc).isoformat(),
             user=str(ctx.author),
             user_id=str(ctx.author.id),
@@ -7217,14 +7244,18 @@ def of1_xp_snapshot() -> dict:
     return copy.deepcopy(XP_STATE)
 
 
-def of1_xp_adjust(guild_id: int, user_id: int, delta: int) -> tuple:
+async def of1_xp_adjust(guild_id: int, user_id: int, delta: int) -> tuple:
+    """Called from dashboard.py via run_coroutine_threadsafe so the XP_STATE
+    mutation always happens on the bot's event loop thread, same as every
+    other XP mutation (see XP_SAVE_LOCK usage in on_message/xpset/xpreset)."""
     try:
         from xp_storage import get_user_record
-        u = get_user_record(XP_STATE, int(guild_id), int(user_id))
-        old_xp = int(u.get("xp", 0) or 0)
-        new_xp = max(0, old_xp + int(delta))
-        u["xp"] = new_xp
-        _xp_mark_dirty()
+        async with XP_SAVE_LOCK:
+            u = get_user_record(XP_STATE, int(guild_id), int(user_id))
+            old_xp = int(u.get("xp", 0) or 0)
+            new_xp = max(0, old_xp + int(delta))
+            u["xp"] = new_xp
+            _xp_mark_dirty()
         return True, f"XP adjusted: {old_xp} → {new_xp} (Δ{delta:+d})"
     except Exception as e:
         return False, str(e)
@@ -7235,15 +7266,19 @@ def of1_quiz_snapshot() -> list:
     return copy.deepcopy(F1_QUIZ_QUESTIONS)
 
 
-def of1_quiz_save(questions: list) -> tuple:
+async def of1_quiz_save(questions: list) -> tuple:
+    """Called from dashboard.py via run_coroutine_threadsafe so this doesn't
+    race with quiz-taking code on the bot's event loop thread reading/
+    iterating F1_QUIZ_QUESTIONS (see quiz gameplay code that iterates it)."""
     global F1_QUIZ_QUESTIONS
     try:
         clean = [q for q in questions if isinstance(q, dict) and q.get("q")]
-        tmp = F1_QUIZ_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(clean, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, F1_QUIZ_FILE)
-        F1_QUIZ_QUESTIONS = clean
+        async with QUIZ_SAVE_LOCK:
+            tmp = F1_QUIZ_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(clean, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, F1_QUIZ_FILE)
+            F1_QUIZ_QUESTIONS = clean
         return True, f"Saved {len(clean)} questions"
     except Exception as e:
         return False, str(e)
@@ -7256,8 +7291,10 @@ def of1_pred_snapshot() -> dict:
     return copy.deepcopy({"rounds": root.get("rounds", {}), "totals": root.get("totals", {})})
 
 
-def of1_pred_set_result(round_key: str, category: str, value) -> tuple:
-    """Set an actual result for a prediction round. value may be a str or list."""
+async def of1_pred_set_result(round_key: str, category: str, value) -> tuple:
+    """Set an actual result for a prediction round. value may be a str or list.
+    Called from dashboard.py via run_coroutine_threadsafe so this mutation of
+    shared state happens on the bot's event loop thread, not Flask's thread."""
     try:
         rnd = _pred_round_obj(round_key)
         actual = rnd.setdefault("actual", {})
